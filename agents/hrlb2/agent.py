@@ -3,8 +3,23 @@ from typing import Any
 
 
 class FootsiesAgent(FootsiesAgentBase):
+    def __init__(self):
+        self.current_observation = None
+
     def act(self, obs) -> Any:
-        pass
+        self.current_observation = obs
+
 
     def update(self, obs, reward: float):
-        pass
+        next_observation = obs
+        ...
+
+    def learn_model(self, play_data: "Iterable[tuple[Any, Any, Any, float]]"):
+        """Learn the environment model by observing human play data (sequence of state, action, next state and reward tuples)"""
+        for obs, action, next_obs, reward in play_data:
+            if self.is_primitive(action):
+                ...
+
+
+    def is_primitive(self, action) -> bool:
+        raise NotImplementedError
