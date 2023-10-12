@@ -1,5 +1,5 @@
 from agents.base import FootsiesAgentBase
-from typing import Any
+from typing import Any, Iterable
 
 
 class FootsiesAgent(FootsiesAgentBase):
