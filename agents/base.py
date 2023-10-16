@@ -9,6 +9,6 @@ class FootsiesAgentBase(ABC):
         pass
 
     @abstractmethod
-    def update(self, obs, reward: float):
+    def update(self, next_obs, reward: float):
         """After acting in the environment, process the perceived observation and reward"""
         pass

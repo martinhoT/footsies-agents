@@ -6,6 +6,12 @@ from agents.base import FootsiesAgentBase
 from tqdm import tqdm
 from itertools import count
 
+"""
+Practical considerations:
+
+- Special attacks require holding an attack input without interruption for 1 whole second (60 frames).
+  Therefore, the policy should ideally be able to consider a history at least 60 frames long.
+"""
 
 def main(agent: FootsiesAgentBase, game_path: str, n_episodes: int = None):
     env = FootsiesEnv(game_path=game_path, frame_delay=20)
@@ -49,11 +55,17 @@ if __name__ == "__main__":
         default=None,
         help="number of episodes" + default_str,
     )
+    parser.add_argument("-m", "--model-kwargs", action="extend", nargs="+", type="str", help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as floating-point numbers")
 
     args = parser.parse_args()
 
+    if len(args.model_kwargs) % 2 != 0:
+        raise ValueError("the values passed to '--model-kwargs' should be a list of key-value pairs")
+    
+    model_kwargs = {k: float(v) for k, v in zip(args.model_kwargs[0::2], args.model_kwargs[1::2])}
+
     agent_module_str = ".".join(("agents", args.agent, "agent"))
     agent_module = importlib.import_module(agent_module_str)
-    agent = agent_module.FootsiesAgent()
+    agent = agent_module.FootsiesAgent(model_kwargs)
 
     main(agent, args.game_path, args.episodes)
