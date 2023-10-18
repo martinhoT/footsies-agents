@@ -3,17 +3,18 @@ from typing import Any, Iterator
 import numpy as np
 import torch
 from torch import nn
+from torch.utils.tensorboard import SummaryWriter
 from gymnasium.spaces import Space
 from gymnasium.spaces.utils import flatten_space
 from collections import namedtuple, deque
 
 
 class QNetwork(nn.Module):
-    def __init__(self, input_size: int):
+    def __init__(self, input_size: int, output_size: int):
         super().__init__()
         self.flatten = nn.Flatten()
         self.layers = nn.Sequential(
-            nn.Linear(input_size, 16), nn.Tanh(), nn.Linear(16, 3)
+            nn.Linear(input_size, 16), nn.Tanh(), nn.Linear(16, output_size)
         )
 
     def forward(self, x):
@@ -55,6 +56,7 @@ class FootsiesAgent(FootsiesAgentBase):
         min_epsilon: float = 0.05,
         target_update_rate: float = 0.01,
         device: torch.device = "cpu",
+        **kwargs,
     ):
         self.update_frequency = update_frequency
         self.epsilon = epsilon
@@ -63,26 +65,45 @@ class FootsiesAgent(FootsiesAgentBase):
         self.target_update_rate = target_update_rate
         self.learning_rate = learning_rate
         self.action_space = action_space
+        self.device = device
 
-        # The networks are technically not Q-networks, since they don't define Q-values for action combinations
         flattened_observation_size = flatten_space(observation_space).shape[0]
-        self.policy_network = QNetwork(flattened_observation_size).to(device)
-        self.target_network = QNetwork(flattened_observation_size).to(device)
+        flattened_action_size = flatten_space(action_space).shape[0]
+        self.policy_network = QNetwork(
+            flattened_observation_size, flattened_action_size
+        ).to(device)
+        self.target_network = QNetwork(
+            flattened_observation_size, flattened_action_size
+        ).to(device)
         self.replay_memory = ReplayMemory(replay_memory_capacity)
 
-        self.optimizer = torch.optim.RMSprop(
+        self.optimizer = torch.optim.SGD(
             self.policy_network.parameters(), lr=learning_rate
         )
-        self.loss_function = lambda output, target, reward: min(
-            1, max(-1, reward + discount_factor * target - output)
+        # self.optimizer = torch.optim.RMSprop(
+        #     self.policy_network.parameters(), lr=learning_rate
+        # )
+        self.loss_function = lambda output, target, reward: (
+            reward + discount_factor * target - output
+        ).clip(
+            -1, 1
         )  # clipped
 
         self.current_iteration = 0
         self.current_observation = None
         self.current_action = None
 
+        self.summary_writer = SummaryWriter()
+        self.cummulative_reward = 0
+        self.current_step = 0
+
     def act(self, obs) -> Any:
-        self.current_iteration = obs
+        if not isinstance(obs, torch.Tensor):
+            obs = (
+                torch.tensor(obs, dtype=torch.float32).to(self.device).reshape((1, -1))
+            )
+
+        self.current_observation = obs
         action = self.policy(obs)
         self.current_action = action
         return action
@@ -95,9 +116,17 @@ class FootsiesAgent(FootsiesAgentBase):
         # Greedy
         with torch.no_grad():  # don't calculate gradients
             logits = self.policy_network(obs)
-        return nn.Tanh()(logits) > 0.0
+        # return nn.Tanh()(logits) > 0.0
+        return logits.argmax(dim=1).item()
 
     def update(self, next_obs, reward: float):
+        if not isinstance(next_obs, torch.Tensor):
+            next_obs = (
+                torch.tensor(next_obs, dtype=torch.float32)
+                .to(self.device)
+                .reshape((1, -1))
+            )
+
         transition = Transition(
             self.current_observation, self.current_action, next_obs, reward
         )
@@ -107,6 +136,7 @@ class FootsiesAgent(FootsiesAgentBase):
         if self.current_iteration == self.update_frequency - 1:
             self.optimizer.zero_grad()  # prevent double-counting
 
+            # TODO: instead of `for` cycle use vectorized operations
             for (
                 t_obs,
                 t_action,
@@ -118,29 +148,39 @@ class FootsiesAgent(FootsiesAgentBase):
 
                 # Because actions are combinations of the final network output, we need to this a bit differently.
                 # Due to this, the greedy action selection is defined differently
-                output = output_logits[t_action].sum()
-                target = target_logits[
-                    target_logits > 0.0
-                ].sum()  # since it's a combination of actions
+                # output = output_logits[t_action].sum()
+                # target = target_logits[
+                #     target_logits > 0.0
+                # ].sum()  # since it's a combination of actions
+                output = output_logits[:, t_action]
+                target, _ = target_logits.max(dim=1)
 
                 loss = self.loss_function(output, target, t_reward)
                 loss.backward()
 
+                # Kills performance
+                # self.summary_writer.add_graph(self.policy_network, t_obs)
+                # self.summary_writer.add_graph(self.target_network, t_next_obs)
+
             self.optimizer.step()
 
-            self.target_network.load_state_dict(
-                {
-                    k: v_policy * self.target_update_rate
-                    + v_target * (1 - self.target_update_rate)
-                    for k, v_policy, _, v_target in zip(
-                        self.target_network.state_dict(),
-                        self.policy_network.state_dict(),
-                    )
-                }
-            )
+            new_target_state_dict = self.target_network.state_dict()
+            for k, v_policy in self.policy_network.state_dict().items():
+                new_target_state_dict[
+                    k
+                ] = v_policy * self.target_update_rate + new_target_state_dict[k] * (
+                    1 - self.target_update_rate
+                )
+            self.target_network.load_state_dict(new_target_state_dict)
 
             self.epsilon = self.epsilon + self.epsilon_decay_rate * (
                 self.min_epsilon - self.epsilon
             )
 
         self.current_iteration = (self.current_iteration + 1) % self.update_frequency
+
+        self.cummulative_reward += reward
+        self.current_step += 1
+        self.summary_writer.add_scalar(
+            "Reward", self.cummulative_reward, self.current_step
+        )
