@@ -59,34 +59,71 @@ if __name__ == "__main__":
         help="number of episodes" + default_str,
     )
     parser.add_argument(
-        "-m",
-        "--model-kwargs",
+        "-mF",
+        "--model-F-kwargs",
         action="extend",
         nargs="+",
         type=str,
         help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as floating-point numbers",
     )
+    parser.add_argument(
+        "-mS",
+        "--model-S-kwargs",
+        action="extend",
+        nargs="+",
+        type=str,
+        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as strings",
+    )
+    parser.add_argument(
+        "-mB",
+        "--model-B-kwargs",
+        action="extend",
+        nargs="+",
+        type=str,
+        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as booleans",
+    )
 
     args = parser.parse_args()
 
-    if args.model_kwargs is not None:
-        if len(args.model_kwargs) % 2 != 0:
+    model_kwargs = {}
+    if args.model_F_kwargs is not None:
+        if len(args.model_F_kwargs) % 2 != 0:
             raise ValueError(
-                "the values passed to '--model-kwargs' should be a list of key-value pairs"
+                "the values passed to '--model-F-kwargs' should be a list of key-value pairs"
             )
 
-        model_kwargs = {
+        model_kwargs.update({
             k: float(v)
-            for k, v in zip(args.model_kwargs[0::2], args.model_kwargs[1::2])
-        }
+            for k, v in zip(args.model_F_kwargs[0::2], args.model_F_kwargs[1::2])
+        })
+    
+    if args.model_S_kwargs is not None:
+        if len(args.model_S_kwargs) % 2 != 0:
+            raise ValueError(
+                "the values passed to '--model-S-kwargs' should be a list of key-value pairs"
+            )
 
-    else:
-        model_kwargs = {}
-
+        model_kwargs.update(dict(zip(args.model_kwargs[0::2], args.model_kwargs[1::2])))
+    
+    if args.model_B_kwargs is not None:
+        if len(args.model_B_kwargs) % 2 != 0:
+            raise ValueError(
+                "the values passed to '--model-B-kwargs' should be a list of key-value pairs"
+            )
+        
+        for k, v in zip(args.model_B_kwargs[0::2], args.model_B_kwargs[1::2]):
+            v_lower = v.lower()
+            if v_lower == "true":
+                model_kwargs[k] = True
+            elif v_lower == "false":
+                model_kwargs[k] = False
+            else:
+                raise ValueError(f"the value passed to key '{k}' on the '--model-B-kwargs' kwarg list is not a boolean ('{v}' is not 'true' or 'false')")
+        
     env = FootsiesActionCombinationsDiscretized(
         FlattenObservation(
             FootsiesMoveFrameNormalized(
-                FootsiesEnv(game_path=args.game_path, frame_delay=20)
+                FootsiesEnv(game_path=args.game_path, frame_delay=0)
             )
         )
     )
