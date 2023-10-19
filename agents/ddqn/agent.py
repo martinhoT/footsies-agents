@@ -47,24 +47,26 @@ class FootsiesAgent(FootsiesAgentBase):
         self,
         observation_space: Space,
         action_space: Space,
-        replay_memory_capacity: int = 100,
-        update_frequency: int = 30,
+        replay_memory_capacity: int = 10000,
         learning_rate: float = 0.1,
         discount_factor: float = 0.9,
         epsilon: float = 0.9,
         epsilon_decay_rate: float = 0.001,
         min_epsilon: float = 0.05,
+        update_frequency: int = 300,
         target_update_rate: float = 0.01,
+        log_run: bool = True,
         device: torch.device = "cpu",
         **kwargs,
     ):
-        self.update_frequency = update_frequency
+        self.action_space = action_space
+        self.learning_rate = learning_rate
         self.epsilon = epsilon
         self.epsilon_decay_rate = epsilon_decay_rate
         self.min_epsilon = min_epsilon
+        self.update_frequency = update_frequency
         self.target_update_rate = target_update_rate
-        self.learning_rate = learning_rate
-        self.action_space = action_space
+        self.log_run = log_run
         self.device = device
 
         flattened_observation_size = flatten_space(observation_space).shape[0]
@@ -93,7 +95,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_observation = None
         self.current_action = None
 
-        self.summary_writer = SummaryWriter()
+        self.summary_writer = SummaryWriter() if self.log_run else None
         self.cummulative_reward = 0
         self.current_step = 0
 
@@ -119,7 +121,7 @@ class FootsiesAgent(FootsiesAgentBase):
         # return nn.Tanh()(logits) > 0.0
         return logits.argmax(dim=1).item()
 
-    def update(self, next_obs, reward: float):
+    def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
         if not isinstance(next_obs, torch.Tensor):
             next_obs = (
                 torch.tensor(next_obs, dtype=torch.float32)
@@ -181,6 +183,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.cummulative_reward += reward
         self.current_step += 1
-        self.summary_writer.add_scalar(
-            "Reward", self.cummulative_reward, self.current_step
-        )
+        if self.log_run:
+            self.summary_writer.add_scalar(
+                "Reward", self.cummulative_reward, self.current_step
+            )

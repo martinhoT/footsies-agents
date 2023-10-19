@@ -30,7 +30,7 @@ def main(agent: FootsiesAgentBase, env: Env, n_episodes: int = None):
             while not (terminated or truncated):
                 action = agent.act(obs)
                 obs, reward, terminated, truncated, info = env.step(action)
-                agent.update(obs, reward)
+                agent.update(obs, reward, terminated, truncated)
 
     except KeyboardInterrupt:
         print("Training manually interrupted")
