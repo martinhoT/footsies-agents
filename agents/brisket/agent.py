@@ -1,3 +1,4 @@
+from itertools import cycle
 from agents.base import FootsiesAgentBase
 from typing import Any, Iterator, Tuple
 import numpy as np
@@ -43,7 +44,7 @@ class FootsiesAgent(FootsiesAgentBase):
         learning_rate: float = 0.00001,
         discount_factor: float = 0.95,
         epsilon: float = 0.95,
-        epsilon_decay_rate: float = 0.02,
+        epsilon_decay_rate: float = 0.001,
         min_epsilon: float = 0.05,
         log_run: bool = True,
         device: torch.device = "cpu",
@@ -136,9 +137,14 @@ class FootsiesAgent(FootsiesAgentBase):
             loss.backward()
             self.optimizer.step()
 
+            for i, (layer, weight_layer) in enumerate(zip(self.q_network.parameters(), cycle((True, False)))):
+                self.summary_writer.add_histogram(f"layer_{i}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
+            self.summary_writer.add_scalar("Exploration rate", self.epsilon, self.current_step)
+
             self.trainX = torch.tensor([], device=self.device, requires_grad=False)
             self.trainY = torch.tensor([], device=self.device, requires_grad=False)
 
+            # Linear epsilon decay
             self.epsilon = max(self.min_epsilon, self.epsilon - self.epsilon_decay_rate)
 
         self.cummulative_reward += reward
