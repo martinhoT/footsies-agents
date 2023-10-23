@@ -1,12 +1,12 @@
+import os
 from agents.base import FootsiesAgentBase
-from typing import Any, Iterator, Tuple
+from typing import Any, Tuple
 import numpy as np
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from gymnasium.spaces import Space
 from gymnasium.spaces.utils import flatten_space
-from collections import namedtuple, deque
 
 
 class LiteralQNetwork(nn.Module):
@@ -153,6 +153,14 @@ class FootsiesAgent(FootsiesAgentBase):
                 self.current_step
             )
 
+    def load(self, folder_path: str):
+        model_path = os.path.join(folder_path, "model_weights.pth")
+        self.q_network.load_state_dict(torch.load(model_path))
+
+    def save(self, folder_path: str):
+        model_path = os.path.join(folder_path, "model_weights.pth")
+        torch.save(self.q_network.state_dict(), model_path)
+        
 
 """
 1 -1 -1 1 = 0       (1/2)

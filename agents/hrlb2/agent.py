@@ -23,3 +23,9 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def is_primitive(self, action) -> bool:
         raise NotImplementedError
+
+    def load(self, folder_path: str):
+        ...
+
+    def save(self, folder_path: str):
+        ...

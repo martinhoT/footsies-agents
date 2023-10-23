@@ -18,3 +18,9 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def update(self, obs, reward: float):
         pass
+
+    def load(self, folder_path: str):
+        ...
+        
+    def save(self, folder_path: str):
+        ...
