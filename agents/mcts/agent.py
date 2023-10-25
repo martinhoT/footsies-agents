@@ -23,3 +23,8 @@ class FootsiesAgent(FootsiesAgentBase):
     def rollout(self, obs) -> float:
         """Perform the simulation step of MCTS"""
         
+    def load(self, folder_path: str):
+        ...
+        
+    def save(self, folder_path: str):
+        ...

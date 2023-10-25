@@ -1,3 +1,4 @@
+import os
 from agents.base import FootsiesAgentBase
 from typing import Any, Iterator
 import numpy as np
@@ -192,3 +193,11 @@ class FootsiesAgent(FootsiesAgentBase):
                 (self.current_step + self.cummulative_reward) / (2 * self.current_step),
                 self.current_step
             )
+
+    def load(self, folder_path: str):
+        model_path = os.path.join(folder_path, "model_weights.pth")
+        self.q_network.load_state_dict(torch.load(model_path))
+
+    def save(self, folder_path: str):
+        model_path = os.path.join(folder_path, "model_weights.pth")
+        torch.save(self.q_network.state_dict(), model_path)

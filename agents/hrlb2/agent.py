@@ -52,3 +52,9 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def act_on_subtask(self, obs, subtask: int):
         raise NotImplementedError
+    
+    def load(self, folder_path: str):
+        ...
+
+    def save(self, folder_path: str):
+        ...
