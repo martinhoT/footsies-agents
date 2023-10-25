@@ -1,3 +1,4 @@
+from itertools import cycle
 import os
 from agents.base import FootsiesAgentBase
 from typing import Any, Iterator
@@ -99,6 +100,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.summary_writer = SummaryWriter() if self.log_run else None
         self.cummulative_reward = 0
         self.current_step = 0
+        self.histogram_write_frequency = 100000
 
     def act(self, obs) -> Any:
         if not isinstance(obs, torch.Tensor):
@@ -161,10 +163,6 @@ class FootsiesAgent(FootsiesAgentBase):
                 loss = self.loss_function(output, target, t_reward)
                 loss.backward()
 
-                # Kills performance
-                # self.summary_writer.add_graph(self.policy_network, t_obs)
-                # self.summary_writer.add_graph(self.target_network, t_next_obs)
-
             self.optimizer.step()
 
             new_target_state_dict = self.target_network.state_dict()
@@ -180,6 +178,9 @@ class FootsiesAgent(FootsiesAgentBase):
                 self.min_epsilon - self.epsilon
             )
 
+            if self.log_run:
+                self.summary_writer.add_scalar("Exploration rate", self.epsilon, self.current_step)
+
         self.current_iteration = (self.current_iteration + 1) % self.update_frequency
 
         self.cummulative_reward += reward
@@ -194,10 +195,20 @@ class FootsiesAgent(FootsiesAgentBase):
                 self.current_step
             )
 
+            if self.current_step % self.histogram_write_frequency == 0:
+                for i, (layer, weight_layer) in enumerate(zip(self.policy_network.parameters(), cycle((True, False)))):
+                    self.summary_writer.add_histogram(f"layer_{i}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
+                for i, (layer, weight_layer) in enumerate(zip(self.target_network.parameters(), cycle((True, False)))):
+                    self.summary_writer.add_histogram(f"layer_{i}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
+
     def load(self, folder_path: str):
-        model_path = os.path.join(folder_path, "model_weights.pth")
-        self.q_network.load_state_dict(torch.load(model_path))
+        policy_path = os.path.join(folder_path, "model_weights_policy.pth")
+        self.policy_network.load_state_dict(torch.load(policy_path))
+        target_path = os.path.join(folder_path, "model_weights_target.pth")
+        self.target_network.load_state_dict(torch.load(target_path))
 
     def save(self, folder_path: str):
-        model_path = os.path.join(folder_path, "model_weights.pth")
-        torch.save(self.q_network.state_dict(), model_path)
+        policy_path = os.path.join(folder_path, "model_weights_policy.pth")
+        torch.save(self.policy_network.state_dict(), policy_path)
+        target_path = os.path.join(folder_path, "model_weights_target.pth")
+        torch.save(self.target_network.state_dict(), target_path)

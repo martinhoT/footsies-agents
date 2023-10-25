@@ -45,7 +45,7 @@ def main(
 
 
 if __name__ == "__main__":
-    available_agents = [file.name for file in os.scandir("agents") if file.is_dir()]
+    available_agents = [file.name for file in os.scandir("agents") if file.is_dir() and file.name != "__pycache__"]
     available_agents_str = ", ".join(available_agents)
 
     parser = argparse.ArgumentParser(
