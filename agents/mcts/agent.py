@@ -3,8 +3,9 @@ from typing import Any
 from time import monotonic
 
 
+# TODO: requires a model of the environment
 class FootsiesAgent(FootsiesAgentBase):
-    def __init__(self, fps: int=60):
+    def __init__(self, tree_policy = None, rollout_policy = None, fps: int = 60):
         self.decision_time_window = 1 / fps
         # If we are missing frames, then increase this value which will shorten the decision time window
         self.decision_time_window_penalty = 0
@@ -18,3 +19,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def update(self, obs, reward: float):
         pass
+
+    def rollout(self, obs) -> float:
+        """Perform the simulation step of MCTS"""
+        

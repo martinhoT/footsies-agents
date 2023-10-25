@@ -190,4 +190,5 @@ class FootsiesAgent(FootsiesAgentBase):
             self.summary_writer.add_scalar(
                 "Win rate",
                 (self.current_step + self.cummulative_reward) / (2 * self.current_step),
+                self.current_step
             )
