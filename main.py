@@ -45,7 +45,11 @@ def main(
 
 
 if __name__ == "__main__":
-    available_agents = [file.name for file in os.scandir("agents") if file.is_dir() and file.name != "__pycache__"]
+    available_agents = [
+        file.name
+        for file in os.scandir("agents")
+        if file.is_dir() and file.name != "__pycache__"
+    ]
     available_agents_str = ", ".join(available_agents)
 
     parser = argparse.ArgumentParser(
@@ -71,6 +75,12 @@ if __name__ == "__main__":
         "--no-load",
         action="store_true",
         help="if passed, the model won't be loaded from disk before training",
+    )
+    parser.add_argument(
+        "--model-name",
+        type=str,
+        help="the name of the model for saving and loading",
+        default=None,
     )
     parser.add_argument(
         "-mF",
@@ -141,7 +151,10 @@ if __name__ == "__main__":
     env = FootsiesActionCombinationsDiscretized(
         FlattenObservation(
             FootsiesMoveFrameNormalized(
-                FootsiesEnv(game_path=args.game_path, frame_delay=0)
+                FootsiesEnv(
+                    game_path=args.game_path,
+                    frame_delay=0
+                )
             )
         )
     )
@@ -154,9 +167,15 @@ if __name__ == "__main__":
         **model_kwargs,
     )
 
+    agent_name = (
+        args.model_name
+        if args.model_name is not None
+        else f"{args.agent}" + "_".join([f"{k}:{v}" for k, v in model_kwargs.items()])
+    )
+
     agent_folder_path = os.path.join(
         "saved",
-        f"{args.agent}" + "_".join([f"{k}:{v}" for k, v in model_kwargs.items()]),
+        agent_name,
     )
 
     save = not args.no_save

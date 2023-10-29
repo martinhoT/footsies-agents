@@ -80,6 +80,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.summary_writer = SummaryWriter() if self.log_run else None
         self.cummulative_reward = 0
         self.current_step = 0
+        self.current_episode = 0
 
     def act(self, obs) -> Any:
         if not isinstance(obs, torch.Tensor):
@@ -139,7 +140,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
             if self.log_run:
                 for i, (layer, weight_layer) in enumerate(zip(self.q_network.parameters(), cycle((True, False)))):
-                    self.summary_writer.add_histogram(f"layer_{i}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
+                    self.summary_writer.add_histogram(f"layer_{i // 2}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
                 self.summary_writer.add_scalar("Exploration rate", self.epsilon, self.current_step)
 
             self.trainX = torch.tensor([], device=self.device, requires_grad=False)
@@ -150,13 +151,15 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.cummulative_reward += reward
         self.current_step += 1
+        if terminated:
+            self.current_episode += 1
         if self.log_run:
             self.summary_writer.add_scalar(
                 "Reward", self.cummulative_reward, self.current_step
             )
             self.summary_writer.add_scalar(
                 "Win rate",
-                (self.current_step + self.cummulative_reward) / (2 * self.current_step),
+                (self.current_episode + self.cummulative_reward) / (2 * self.current_episode) if self.current_episode >= 1 else 0.5,
                 self.current_step
             )
 
@@ -174,7 +177,7 @@ class FootsiesAgent(FootsiesAgentBase):
 1 -1 -1 = -1        (1/3)
 1 -1 1 = 1          (2/3)
 
-number of ones + number of -1s = self.current_step
+number of ones + number of -1s = self.current_episode
 number of ones - number of -1s = self.cummulative_reward
 
 o + m = c

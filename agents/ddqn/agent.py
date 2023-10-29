@@ -197,9 +197,9 @@ class FootsiesAgent(FootsiesAgentBase):
 
             if self.current_step % self.histogram_write_frequency == 0:
                 for i, (layer, weight_layer) in enumerate(zip(self.policy_network.parameters(), cycle((True, False)))):
-                    self.summary_writer.add_histogram(f"layer_{i}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
+                    self.summary_writer.add_histogram(f"layer_{i // 2}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
                 for i, (layer, weight_layer) in enumerate(zip(self.target_network.parameters(), cycle((True, False)))):
-                    self.summary_writer.add_histogram(f"layer_{i}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
+                    self.summary_writer.add_histogram(f"layer_{i // 2}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
 
     def load(self, folder_path: str):
         policy_path = os.path.join(folder_path, "model_weights_policy.pth")
