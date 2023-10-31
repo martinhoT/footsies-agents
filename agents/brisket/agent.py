@@ -44,7 +44,7 @@ class FootsiesAgent(FootsiesAgentBase):
         learning_rate: float = 0.00001,
         discount_factor: float = 0.95,
         epsilon: float = 0.95,
-        epsilon_decay_rate: float = 0.001,
+        epsilon_decay_rate: float = 0.0001,
         min_epsilon: float = 0.05,
         log_run: bool = True,
         device: torch.device = "cpu",
