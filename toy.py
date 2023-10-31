@@ -1,22 +1,11 @@
 import argparse
 import os
 import importlib
+import gymnasium as gym
 from gymnasium import Env
-from gymnasium.wrappers.flatten_observation import FlattenObservation
-from footsies_gym.envs.footsies import FootsiesEnv
-from footsies_gym.envs.exceptions import FootsiesGameClosedError
-from footsies_gym.wrappers.move_frame_norm import FootsiesMoveFrameNormalized
-from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from agents.base import FootsiesAgentBase
 from tqdm import tqdm
 from itertools import count
-
-"""
-Practical considerations:
-
-- Special attacks require holding an attack input without interruption for 1 whole second (60 frames).
-  Therefore, the policy should ideally be able to consider a history at least 60 frames long.
-"""
 
 
 def main(
@@ -40,9 +29,6 @@ def main(
     except KeyboardInterrupt:
         print("Training manually interrupted")
 
-    except FootsiesGameClosedError:
-        print("Game closed manually, quitting training")
-
 
 if __name__ == "__main__":
     available_agents = [
@@ -61,7 +47,7 @@ if __name__ == "__main__":
         help=f"agent implementation to use (available: {available_agents_str})",
     )
     parser.add_argument(
-        "game_path", type=str, help="location of the FOOTSIES executable"
+        "environment", type=str, help="toy environment to test"
     )
     parser.add_argument(
         "-e", "--episodes", type=int, default=None, help="number of episodes"
@@ -148,16 +134,7 @@ if __name__ == "__main__":
                     f"the value passed to key '{k}' on the '--model-B-kwargs' kwarg list is not a boolean ('{v}' is not 'true' or 'false')"
                 )
 
-    env = FootsiesActionCombinationsDiscretized(
-        FlattenObservation(
-            FootsiesMoveFrameNormalized(
-                FootsiesEnv(
-                    game_path=args.game_path,
-                    frame_delay=0
-                )
-            )
-        )
-    )
+    env = gym.make(args.environment)
 
     agent_module_str = ".".join(("agents", args.agent, "agent"))
     agent_module = importlib.import_module(agent_module_str)
@@ -174,7 +151,7 @@ if __name__ == "__main__":
     )
 
     agent_folder_path = os.path.join(
-        "saved_main",
+        "saved_toy",
         agent_name,
     )
 

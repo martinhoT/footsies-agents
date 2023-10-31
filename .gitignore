@@ -5,3 +5,5 @@ runs
 .vscode
 saved
 /test*
+/runs_*
+/saved_*
