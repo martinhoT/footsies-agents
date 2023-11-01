@@ -18,10 +18,12 @@ class QNetwork(nn.Module):
     def __init__(self, n_actions: int):
         self.layers = nn.Sequential(
             nn.Conv2d(4, 16, kernel_size=(8, 8), stride=4, padding="valid"), # expects input of size (N, C, W, H). N is the number of batches, and here C is 1 (grayscale so 1 channel)
+            # layer of size (84 - 8 + 2 * 0) / 4 + 1 = 20 (x 20 x 16)
             nn.ReLU(),
             nn.Conv2d(16, 32, kernel_size=(4, 4), stride=2, padding="valid"),
+            # layer of size (20 - 4 + 2 * 0) / 2 + 1 = 9 (x 9 x 32)
             nn.ReLU(),
-            nn.Linear(..., 256),
+            nn.Linear(9 * 9 * 32, 256),
             nn.Linear(256, n_actions),
         )
 
@@ -132,9 +134,15 @@ class FootsiesAgent(FootsiesAgentBase):
 
         stacks = torch.tensor([transition.obs for transition in batch])
         target = torch.tensor([transition.reward if transition.terminated else (transition.reward + self.discount_factor * torch.max(self.q_network(transition.next_obs)))])
+        # NOTE: why do we use the transition actions? can't we use greedy?
+        # No, because we want to evaluate the actions actually performed, not focus only on the greedy ones
+        # Or else exploration wouldn't allow updates of other actions other than the maximal ones
+        performed_actions = torch.tensor([transition.action for transition in batch])
+
+        predicted = torch.take_along_dim(self.q_network(stacks), performed_actions, dim=1)
 
         self.optimizer.zero_grad()
-        loss = self.loss_function(self.q_network(stacks), target)
+        loss = self.loss_function(predicted, target)
         loss.backward()
         self.optimizer.step()
 
