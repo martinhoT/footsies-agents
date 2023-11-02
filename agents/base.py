@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any
+from gymnasium import Env
 
 
 class FootsiesAgentBase(ABC):
@@ -10,6 +11,10 @@ class FootsiesAgentBase(ABC):
     @abstractmethod
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
         """After acting in the environment, process the perceived observation and reward"""
+
+    def preprocess(self, env: Env):
+        """Do some preprocessing on the environment before training on it"""
+        pass
 
     @abstractmethod
     def load(self, folder_path: str):

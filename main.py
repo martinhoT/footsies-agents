@@ -192,6 +192,7 @@ if __name__ == "__main__":
     elif load:
         print("Can't load agent, there was no agent saved!")
 
+    agent.preprocess(env)
     main(agent, env, args.episodes)
 
     if save:

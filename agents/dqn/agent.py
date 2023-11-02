@@ -3,6 +3,7 @@ import random
 from typing import Iterator, List
 
 import cv2 as cv
+from gymnasium import Env
 import numpy as np
 import torch
 import os
@@ -49,14 +50,15 @@ class ReplayMemory:
 
 
 # As implemented in: https://www.cs.toronto.edu/~vmnih/docs/dqn.pdf
+# TODO: compare with https://github.com/DLR-RM/stable-baselines3/blob/master/stable_baselines3/dqn/dqn.py
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(self,
                  observation_space: Space,
                  action_space: Space,
-                 replay_memory_capacity: int,
+                 replay_memory_capacity: int = 1_000_000,
                  replay_memory_batch_size: int = 32,
-                 discount_factor: float = ...,
-                 learning_rate: float = ...,
+                 discount_factor: float = 0.95,
+                 learning_rate: float = 2.5e-4,
                  epsilon: float = 1.0,
                  epsilon_end: float = 0.1,
                  epsilon_decay_factor: float = (1.0 - 0.1) / 1_000_000):
@@ -153,7 +155,10 @@ class FootsiesAgent(FootsiesAgentBase):
         if terminated or truncated:
             self.history.clear()
 
-    def collect_test_states(self, env, test_set_size: int):
+    def preprocess(self, env: Env):
+        self.collect_test_states(env)
+
+    def collect_test_states(self, env, test_set_size: int = 1_000):
         state, _ = env.reset()
 
         self.history.append(state)
