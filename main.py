@@ -1,6 +1,7 @@
 import argparse
 import os
 import importlib
+import gymnasium as gym
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
@@ -19,11 +20,85 @@ Practical considerations:
 """
 
 
+def import_agent(agent_name: str, env: Env, parameters: dict) -> FootsiesAgentBase:
+    agent_module_str = ".".join(("agents", agent_name, "agent"))
+    agent_module = importlib.import_module(agent_module_str)
+    return agent_module.FootsiesAgent(
+        observation_space=env.observation_space,
+        action_space=env.action_space,
+        **parameters,
+    )
+
+
+def load_agent_model(agent: FootsiesAgentBase, model_name: str, folder: str = "saved"):
+    agent_folder_path = os.path.join(folder, model_name)
+
+    if os.path.exists(agent_folder_path):
+        if not os.path.isdir(agent_folder_path):
+            raise OSError(f"the existing file {agent_folder_path} is not a folder!")
+
+        agent.load(agent_folder_path)
+        print("Agent loaded")
+
+    else:
+        print("Can't load agent, there was no agent saved!")
+
+
+def save_agent_model(agent: FootsiesAgentBase, model_name: str, folder: str = "saved"):
+    agent_folder_path = os.path.join(folder, model_name)
+
+    if not os.path.exists(agent_folder_path):
+        os.makedirs(agent_folder_path)
+
+    agent.save(agent_folder_path)
+    print("Agent saved")
+
+
+def extract_kwargs(f_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
+    kwargs = {}
+    if f_kwargs is not None:
+        if len(f_kwargs) % 2 != 0:
+            raise ValueError(
+                "the values passed to '--[...]-F-kwargs' should be a list of key-value pairs"
+            )
+
+        kwargs.update({k: float(v) for k, v in zip(f_kwargs[0::2], f_kwargs[1::2])})
+
+    if s_kwargs is not None:
+        if len(s_kwargs) % 2 != 0:
+            raise ValueError(
+                "the values passed to '--[...]-S-kwargs' should be a list of key-value pairs"
+            )
+
+        kwargs.update(dict(zip(s_kwargs[0::2], s_kwargs[1::2])))
+
+    if b_kwargs is not None:
+        if len(b_kwargs) % 2 != 0:
+            raise ValueError(
+                "the values passed to '--[...]-B-kwargs' should be a list of key-value pairs"
+            )
+
+        for k, v in zip(b_kwargs[0::2], b_kwargs[1::2]):
+            v_lower = v.lower()
+            if v_lower == "true":
+                kwargs[k] = True
+            elif v_lower == "false":
+                kwargs[k] = False
+            else:
+                raise ValueError(
+                    f"the value passed to key '{k}' on the '--[...]-B-kwargs' kwarg list is not a boolean ('{v}' is not 'true' or 'false')"
+                )
+
+    return kwargs
+
+
 def main(
     agent: FootsiesAgentBase,
     env: Env,
     n_episodes: int = None,
 ):
+    agent.preprocess(env)
+
     training_iterator = count() if n_episodes is None else range(n_episodes)
 
     try:
@@ -61,11 +136,53 @@ if __name__ == "__main__":
         help=f"agent implementation to use (available: {available_agents_str})",
     )
     parser.add_argument(
-        "game_path", type=str, help="location of the FOOTSIES executable"
+        "-e",
+        "--env",
+        type=str,
+        default="FOOTSIES",
+        help="Gymnasium environment to use. The special value 'FOOTSIES' instantiates the FOOTSIES environment",
     )
     parser.add_argument(
-        "-e", "--episodes", type=int, default=None, help="number of episodes"
+        "-eF",
+        "--env-F-kwargs",
+        action="extend",
+        nargs="+",
+        type=str,
+        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as floating-point numbers",
     )
+    parser.add_argument(
+        "-eS",
+        "--env-S-kwargs",
+        action="extend",
+        nargs="+",
+        type=str,
+        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as strings",
+    )
+    parser.add_argument(
+        "-eB",
+        "--env-B-kwargs",
+        action="extend",
+        nargs="+",
+        type=str,
+        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as booleans",
+    )
+    parser.add_argument(
+        "--footsies-path",
+        type=str,
+        default=None,
+        help="location of the FOOTSIES executable. Only required if using the FOOTSIES environment",
+    )
+    parser.add_argument(
+        "--footsies-wrapper-mfn",
+        action="store_true",
+        help="use the Move Frames Normalized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
+    )
+    parser.add_argument(
+        "--footsies-wrapper-acd",
+        action="store_true",
+        help="use the Action Combinations Discretized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
+    )
+    parser.add_argument("--episodes", type=int, default=None, help="number of episodes")
     parser.add_argument(
         "--no-save",
         action="store_true",
@@ -109,95 +226,43 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    model_kwargs = {}
-    if args.model_F_kwargs is not None:
-        if len(args.model_F_kwargs) % 2 != 0:
+    env_kwargs = extract_kwargs(args.env_F_kwargs, args.env_S_kwargs, args.env_B_kwargs)
+    model_kwargs = extract_kwargs(
+        args.model_F_kwargs, args.model_S_kwargs, args.model_B_kwargs
+    )
+
+    if args.env == "FOOTSIES":
+        if args.footsies_path is None:
             raise ValueError(
-                "the values passed to '--model-F-kwargs' should be a list of key-value pairs"
+                "the path to the FOOTSIES executable should be specified with '--footsies-path' when using the FOOTSIES environment"
             )
 
-        model_kwargs.update(
-            {
-                k: float(v)
-                for k, v in zip(args.model_F_kwargs[0::2], args.model_F_kwargs[1::2])
-            }
+        env = FootsiesEnv(
+            game_path=args.footsies_path,
+            frame_delay=0,
+            **env_kwargs,
         )
 
-    if args.model_S_kwargs is not None:
-        if len(args.model_S_kwargs) % 2 != 0:
-            raise ValueError(
-                "the values passed to '--model-S-kwargs' should be a list of key-value pairs"
-            )
+        if args.footsies_wrapper_mfn:
+            env = FootsiesMoveFrameNormalized(env)
 
-        model_kwargs.update(dict(zip(args.model_kwargs[0::2], args.model_kwargs[1::2])))
+        env = FlattenObservation(env)
 
-    if args.model_B_kwargs is not None:
-        if len(args.model_B_kwargs) % 2 != 0:
-            raise ValueError(
-                "the values passed to '--model-B-kwargs' should be a list of key-value pairs"
-            )
+        if args.footsies_wrapper_acd:
+            env = FootsiesActionCombinationsDiscretized(env)
 
-        for k, v in zip(args.model_B_kwargs[0::2], args.model_B_kwargs[1::2]):
-            v_lower = v.lower()
-            if v_lower == "true":
-                model_kwargs[k] = True
-            elif v_lower == "false":
-                model_kwargs[k] = False
-            else:
-                raise ValueError(
-                    f"the value passed to key '{k}' on the '--model-B-kwargs' kwarg list is not a boolean ('{v}' is not 'true' or 'false')"
-                )
+    else:
+        env = gym.make(args.env)
 
-    env = FootsiesActionCombinationsDiscretized(
-        FlattenObservation(
-            FootsiesMoveFrameNormalized(
-                FootsiesEnv(
-                    game_path=args.game_path,
-                    frame_delay=0
-                )
-            )
-        )
-    )
-
-    agent_module_str = ".".join(("agents", args.agent, "agent"))
-    agent_module = importlib.import_module(agent_module_str)
-    agent = agent_module.FootsiesAgent(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
-        **model_kwargs,
-    )
-
-    agent_name = (
-        args.model_name
-        if args.model_name is not None
-        else f"{args.agent}" + "_".join([f"{k}:{v}" for k, v in model_kwargs.items()])
-    )
-
-    agent_folder_path = os.path.join(
-        "saved_main",
-        agent_name,
-    )
+    agent = import_agent(args.agent, env, model_kwargs)
 
     save = not args.no_save
     load = not args.no_load
 
-    if os.path.exists(agent_folder_path):
-        if not os.path.isdir(agent_folder_path):
-            raise OSError(f"the existing file {agent_folder_path} is not a folder!")
+    if load:
+        load_agent_model(agent, args.model_name, folder="saved_main")
 
-        if load:
-            agent.load(agent_folder_path)
-            print("Agent loaded")
-
-    elif load:
-        print("Can't load agent, there was no agent saved!")
-
-    agent.preprocess(env)
     main(agent, env, args.episodes)
 
     if save:
-        if not os.path.exists(agent_folder_path):
-            os.makedirs(agent_folder_path)
-
-        agent.save(agent_folder_path)
-        print("Agent saved")
+        save_agent_model(agent, args.model_name, folder="saved_main")
