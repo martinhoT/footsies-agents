@@ -4,6 +4,7 @@ import numpy as np
 
 
 # TODO: check https://github.com/mlanden/RMAXQ for alternate implementation
+# TODO: other HRL implementations: https://github.com/Kirili4ik/HRL-taxi and https://github.com/aijunbai/taxi
 # TODO: the model (transition and reward functions) can be simplified if we assume it to be deterministic
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(self):

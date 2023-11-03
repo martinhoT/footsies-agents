@@ -6,7 +6,7 @@ from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.envs.exceptions import FootsiesGameClosedError
-from footsies_gym.wrappers.move_frame_norm import FootsiesMoveFrameNormalized
+from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from agents.base import FootsiesAgentBase
 from tqdm import tqdm
@@ -92,7 +92,7 @@ def extract_kwargs(f_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
     return kwargs
 
 
-def main(
+def train(
     agent: FootsiesAgentBase,
     env: Env,
     n_episodes: int = None,
@@ -173,9 +173,9 @@ if __name__ == "__main__":
         help="location of the FOOTSIES executable. Only required if using the FOOTSIES environment",
     )
     parser.add_argument(
-        "--footsies-wrapper-mfn",
+        "--footsies-wrapper-norm",
         action="store_true",
-        help="use the Move Frames Normalized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
+        help="use the Normalized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
     )
     parser.add_argument(
         "--footsies-wrapper-acd",
@@ -239,12 +239,12 @@ if __name__ == "__main__":
 
         env = FootsiesEnv(
             game_path=args.footsies_path,
-            frame_delay=0,
+            frame_delay=0, # frame delay of 0 by default
             **env_kwargs,
         )
 
-        if args.footsies_wrapper_mfn:
-            env = FootsiesMoveFrameNormalized(env)
+        if args.footsies_wrapper_norm:
+            env = FootsiesNormalized(env)
 
         env = FlattenObservation(env)
 
@@ -255,14 +255,15 @@ if __name__ == "__main__":
         env = gym.make(args.env)
 
     agent = import_agent(args.agent, env, model_kwargs)
+    model_name = args.agent if args.model_name is None else args.model_name
 
     save = not args.no_save
     load = not args.no_load
 
     if load:
-        load_agent_model(agent, args.model_name, folder="saved_main")
+        load_agent_model(agent, model_name)
 
-    main(agent, env, args.episodes)
+    train(agent, env, args.episodes)
 
     if save:
-        save_agent_model(agent, args.model_name, folder="saved_main")
+        save_agent_model(agent, model_name)

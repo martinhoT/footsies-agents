@@ -151,7 +151,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.cummulative_reward += reward
         self.current_step += 1
-        if terminated:
+        if terminated or truncated:
             self.current_episode += 1
         if self.log_run:
             self.summary_writer.add_scalar(
