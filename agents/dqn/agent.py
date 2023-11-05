@@ -172,6 +172,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
             if terminated or truncated:
                 self.history.clear()
+                env.reset()
         
         self.test_stacks = np.array(test_stacks)
         self.history.clear() # don't influence training

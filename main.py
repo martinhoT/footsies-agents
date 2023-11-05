@@ -11,6 +11,9 @@ from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDis
 from agents.base import FootsiesAgentBase
 from tqdm import tqdm
 from itertools import count
+from typing import List, Any
+
+from agents.logger import TrainingLoggerWrapper
 
 """
 Practical considerations:
@@ -28,6 +31,12 @@ def import_agent(agent_name: str, env: Env, parameters: dict) -> FootsiesAgentBa
         action_space=env.action_space,
         **parameters,
     )
+
+
+def import_loggables(agent_name: str, agent: FootsiesAgentBase) -> List[Any]:
+    loggables_module_str = ".".join(("agents", agent_name, "loggables"))
+    loggables_module = importlib.import_module(loggables_module_str)
+    return loggables_module.get_loggables(agent)
 
 
 def load_agent_model(agent: FootsiesAgentBase, model_name: str, folder: str = "saved"):
@@ -223,6 +232,7 @@ if __name__ == "__main__":
         type=str,
         help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as booleans",
     )
+    parser.add_argument("--no-log", action="store_true", help="if passed, the model won't be logged")
 
     args = parser.parse_args()
 
@@ -262,6 +272,17 @@ if __name__ == "__main__":
 
     if load:
         load_agent_model(agent, model_name)
+
+    if not args.no_log:
+        loggables = import_loggables(args.agent, agent)
+
+        agent = TrainingLoggerWrapper(
+            agent,
+            20,
+            cummulative_reward=True,
+            win_rate=True,
+            **loggables,
+        )
 
     train(agent, env, args.episodes)
 

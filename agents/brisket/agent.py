@@ -1,11 +1,11 @@
-from itertools import cycle
 import os
+
+from gymnasium import Env
 from agents.base import FootsiesAgentBase
-from typing import Any, Tuple
+from typing import Any, List, Tuple
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.tensorboard import SummaryWriter
 from gymnasium.spaces import Space
 from gymnasium.spaces.utils import flatten_space
 
@@ -46,7 +46,6 @@ class FootsiesAgent(FootsiesAgentBase):
         epsilon: float = 0.95,
         epsilon_decay_rate: float = 0.0001,
         min_epsilon: float = 0.05,
-        log_run: bool = True,
         device: torch.device = "cpu",
         **kwargs,
     ):
@@ -57,7 +56,6 @@ class FootsiesAgent(FootsiesAgentBase):
         self.epsilon = epsilon
         self.epsilon_decay_rate = epsilon_decay_rate
         self.min_epsilon = min_epsilon
-        self.log_run = log_run
         self.device = device
 
         self.observations_length = flatten_space(observation_space).shape[0]
@@ -77,10 +75,8 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_observation = None
         self.current_action = None
 
-        self.summary_writer = SummaryWriter() if self.log_run else None
-        self.cummulative_reward = 0
-        self.current_step = 0
-        self.current_episode = 0
+        # For evaluation
+        self._test_states = None
 
     def act(self, obs) -> Any:
         if not isinstance(obs, torch.Tensor):
@@ -138,30 +134,21 @@ class FootsiesAgent(FootsiesAgentBase):
             loss.backward()
             self.optimizer.step()
 
-            if self.log_run:
-                for i, (layer, weight_layer) in enumerate(zip(self.q_network.parameters(), cycle((True, False)))):
-                    self.summary_writer.add_histogram(f"layer_{i // 2}_{'weights' if weight_layer else 'biases'}", layer, self.current_step)
-                self.summary_writer.add_scalar("Exploration rate", self.epsilon, self.current_step)
-
             self.trainX = torch.tensor([], device=self.device, requires_grad=False)
             self.trainY = torch.tensor([], device=self.device, requires_grad=False)
 
             # Linear epsilon decay
             self.epsilon = max(self.min_epsilon, self.epsilon - self.epsilon_decay_rate)
 
-        self.cummulative_reward += reward
-        self.current_step += 1
-        if terminated or truncated:
-            self.current_episode += 1
-        if self.log_run:
-            self.summary_writer.add_scalar(
-                "Reward", self.cummulative_reward, self.current_step
-            )
-            self.summary_writer.add_scalar(
-                "Win rate",
-                (self.current_episode + self.cummulative_reward) / (2 * self.current_episode) if self.current_episode >= 1 else 0.5,
-                self.current_step
-            )
+    def evaluate_q_network(self, test_states: List[Tuple[Any, Any]]):
+        if self._test_states is None:
+            merged_state_action_pairs = [np.hstack([state.reshape((1, -1)), self.action_oh(action)]) for state, action in test_states]
+            test_states = torch.tensor(np.array(merged_state_action_pairs), dtype=torch.float32)
+            self._test_states = test_states
+
+        # Average maximum Q-values for each state (makes sense to max since we use a greedy policy)
+        with torch.no_grad():
+            return torch.mean(torch.max(self.q_network(self._test_states)))
 
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")
