@@ -51,7 +51,9 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.log_frequency = log_frequency
         self.cummulative_reward = cummulative_reward
         self.win_rate = win_rate
-        self.network_histograms = [] if network_histograms is None else network_histograms
+        self.network_histograms = (
+            [] if network_histograms is None else network_histograms
+        )
         self.custom_evaluators = [] if custom_evaluators is None else custom_evaluators
         self.custom_evaluators_over_test_states = (
             []
@@ -97,14 +99,18 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                 )
 
             for network in self.network_histograms:
-                for layer_name, layer in enumerate(network.named_parameters()):
-                    self.summary_writer.add_histogram(layer_name, layer, self.current_step)
+                for layer_name, layer in network.named_parameters():
+                    self.summary_writer.add_histogram(
+                        layer_name, layer, self.current_step
+                    )
 
             for tag, evaluator in self.custom_evaluators:
                 self.summary_writer.add_scalar(tag, evaluator(), self.current_step)
 
             for tag, evaluator in self.custom_evaluators_over_test_states:
-                self.summary_writer.add_scalar(tag, evaluator(self.test_states), self.current_step)
+                self.summary_writer.add_scalar(
+                    tag, evaluator(self.test_states), self.current_step
+                )
 
     def preprocess(self, env: Env):
         self.agent.preprocess(env)
@@ -119,9 +125,9 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
                 if terminated or truncated:
                     env.reset()
-            
+
             self.test_states.append((state, None))
-            
+
             if isinstance(env.unwrapped, FootsiesEnv):
                 env.unwrapped.hard_reset()
             else:

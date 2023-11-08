@@ -13,6 +13,8 @@ from gymnasium.spaces import Space
 from gymnasium.spaces.utils import flatten_space
 from torch.utils.tensorboard import SummaryWriter
 
+# NOTE: not actually being tested, this is just an implementation based on the original DQN paper.
+#       A similar algorithm which uses Q-learning with a Q-network and is being tested is Brisket.
 
 # Convolutional
 class QNetwork(nn.Module):

@@ -106,7 +106,9 @@ def train(
     env: Env,
     n_episodes: int = None,
 ):
+    print("Preprocessing...", end=" ", flush=True)
     agent.preprocess(env)
+    print("done!")
 
     training_iterator = count() if n_episodes is None else range(n_episodes)
 
@@ -232,7 +234,9 @@ if __name__ == "__main__":
         type=str,
         help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as booleans",
     )
-    parser.add_argument("--no-log", action="store_true", help="if passed, the model won't be logged")
+    parser.add_argument(
+        "--no-log", action="store_true", help="if passed, the model won't be logged"
+    )
 
     args = parser.parse_args()
 
@@ -249,7 +253,7 @@ if __name__ == "__main__":
 
         env = FootsiesEnv(
             game_path=args.footsies_path,
-            frame_delay=0, # frame delay of 0 by default
+            frame_delay=0,  # frame delay of 0 by default
             **env_kwargs,
         )
 
@@ -278,7 +282,7 @@ if __name__ == "__main__":
 
         agent = TrainingLoggerWrapper(
             agent,
-            20,
+            120,
             cummulative_reward=True,
             win_rate=True,
             **loggables,
