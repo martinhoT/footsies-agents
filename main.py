@@ -282,9 +282,10 @@ if __name__ == "__main__":
 
         agent = TrainingLoggerWrapper(
             agent,
-            120,
+            5000,
             cummulative_reward=True,
             win_rate=True,
+            test_states_number=5000,
             **loggables,
         )
 

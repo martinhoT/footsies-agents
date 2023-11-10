@@ -6,6 +6,8 @@ def get_loggables(agent: FootsiesAgent):
         "network_histograms": [agent.q_network],
         "custom_evaluators": [("Epsilon", lambda: agent.epsilon)],
         "custom_evaluators_over_test_states": [
-            ("Average Q-value", agent.evaluate_q_network)
+            ("Average Q-value", agent.evaluate_average_q_value),
+            ("Average action entropy", agent.evaluate_average_action_entropy),
+            ("Uncertainty", agent.evaluate_average_uncertainty),
         ],
     }

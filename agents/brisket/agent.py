@@ -36,6 +36,35 @@ class LiteralQNetwork(nn.Module):
             )
         )
 
+        self._shallow = shallow
+        self._has_dropout = False
+
+    @property
+    def has_dropout(self):
+        return self._has_dropout
+
+    @has_dropout.setter
+    def has_dropout(self, value: bool):
+        p = 0.5
+        if self._has_dropout != value:
+            if value:
+                if self._shallow:
+                    self.layers.insert(3, nn.Dropout(p=p))
+                else:
+                    self.layers.insert(3, nn.dropout(p=p))
+                    self.layers.insert(5, nn.dropout(p=p))
+                    self.layers.insert(7, nn.dropout(p=p))
+
+            else:
+                if self._shallow:
+                    self.layers.pop(3)
+                else:
+                    self.layers.pop(3)
+                    self.layers.pop(5)
+                    self.layers.pop(7)
+
+        self._has_dropout = value
+
     def forward(self, x):
         x = self.flatten(x)
         logits = self.layers(x)
@@ -91,10 +120,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self._test_states = None
 
     def act(self, obs) -> Any:
-        if not isinstance(obs, torch.Tensor):
-            obs = (
-                torch.tensor(obs, dtype=torch.float32).to(self.device).reshape((1, -1))
-            )
+        obs = self._obs_to_torch(obs)
 
         self.current_observation = obs
         action, _ = self.policy(obs)
@@ -104,36 +130,42 @@ class FootsiesAgent(FootsiesAgentBase):
     def policy(self, obs) -> Tuple[int, float]:
         if np.random.random() < self.epsilon:
             random_action = self.action_space.sample()
-            random_action_oh = self.action_oh(random_action)
+            random_action_oh = self._action_onehot(random_action)
             return random_action, self.q_value(obs, random_action_oh)
 
-        q_values = [
-            self.q_value(obs, self.action_oh(action))
+        q_values = self.q_values(obs)
+        return np.argmax(q_values), np.max(q_values)
+
+    def q_values(self, obs) -> List[float]:
+        return [
+            self.q_value(obs, self._action_onehot(action))
             for action in range(self.actions_length)
         ]
-        return np.argmax(q_values), np.max(q_values)
 
     def q_value(self, obs, action_oh) -> float:
         with torch.no_grad():
             return self.q_network(torch.cat((obs, action_oh), dim=1)).item()
 
-    def action_oh(self, action: int):
-        action_one_hot = np.zeros((1, self.actions_length))
-        action_one_hot[0, action] = 1
+    def _action_onehot(self, action: int):
+        action_onehot = np.zeros((1, self.actions_length))
+        action_onehot[0, action] = 1
         return torch.tensor(
-            action_one_hot, dtype=torch.float32, device=self.device, requires_grad=False
+            action_onehot, dtype=torch.float32, device=self.device, requires_grad=False
         )
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
-        if not isinstance(next_obs, torch.Tensor):
-            next_obs = (
-                torch.tensor(next_obs, dtype=torch.float32)
-                .to(self.device)
-                .reshape((1, -1))
+    def _obs_to_torch(self, obs):
+        if not isinstance(obs, torch.Tensor):
+            return (
+                torch.tensor(obs, dtype=torch.float32).to(self.device).reshape((1, -1))
             )
+        
+        return obs
+
+    def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
+        next_obs = self._obs_to_torch(next_obs)
 
         # Get one-hot encoded action
-        action_one_hot = self.action_oh(self.current_action)
+        action_one_hot = self._action_onehot(self.current_action)
 
         current_q_value = self.q_value(self.current_observation, action_one_hot)
         _, next_q_value = self.policy(next_obs)
@@ -172,10 +204,10 @@ class FootsiesAgent(FootsiesAgentBase):
             # Linear epsilon decay
             self.epsilon = max(self.min_epsilon, self.epsilon - self.epsilon_decay_rate)
 
-    def evaluate_q_network(self, test_states: List[Tuple[Any, Any]]):
+    def _initialize_test_states(self, test_states: List[Tuple[Any, Any]]):
         if self._test_states is None:
             merged_state_action_pairs = [
-                np.hstack([state.reshape((1, -1)), self.action_oh(action)])
+                np.hstack([state.reshape((1, -1)), self._action_onehot(action)])
                 for state, action in test_states
             ]
             test_states = torch.tensor(
@@ -183,9 +215,44 @@ class FootsiesAgent(FootsiesAgentBase):
             )
             self._test_states = test_states
 
+    def evaluate_average_q_value(self, test_states: List[Tuple[Any, Any]]) -> float:
+        self._initialize_test_states(test_states)
+
         # Average maximum Q-values for each state (makes sense to max since we use a greedy policy)
         with torch.no_grad():
             return torch.mean(torch.max(self.q_network(self._test_states)))
+
+    def evaluate_average_action_entropy(self, test_states: List[Tuple[Any, Any]]) -> float:
+        # Average entropy of the action probability distribution obtained by softmax
+        entropy = 0
+        entropy_n = 0
+        with torch.no_grad():
+            for state, _ in test_states:
+                state = self._obs_to_torch(state)
+                q_values = self.q_values(state)
+                exponentiated = np.exp(q_values)
+                softmaxed = exponentiated / exponentiated.sum()
+                entropy += np.sum(np.log2(softmaxed) * softmaxed)
+                entropy_n += 1
+        
+        return entropy / entropy_n
+
+    # Based on: https://link.springer.com/article/10.1007/s11432-021-3347-8
+    def evaluate_average_uncertainty(self, test_states: List[Tuple[Any, Any]], forward_passes: int = 30) -> float:
+        self._initialize_test_states(test_states)
+
+        # Average uncertainty, which is the standard deviation of the Q-values after N forward passes with dropouts
+        q_values = np.zeros((self._test_states.shape[0], forward_passes))
+        with torch.no_grad():
+            has_dropout = self.q_network.has_dropout
+            self.q_network.has_dropout = True
+
+            for i in range(forward_passes):
+                q_values[:, i] = self.q_network(self._test_states).squeeze()
+
+            self.q_network.has_dropout = has_dropout
+        
+        return np.mean(q_values.std(axis=1))
 
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")
