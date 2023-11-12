@@ -104,8 +104,13 @@ class FootsiesAgent(FootsiesAgentBase):
             self.observations_length, self.actions_length, shallow=shallow, shallow_size=shallow_size
         )
 
-        self.optimizer = torch.optim.Adam(
-            self.q_network.parameters(), lr=self.learning_rate
+        # self.optimizer = torch.optim.Adam(
+        #     self.q_network.parameters(), lr=self.learning_rate
+        # )
+        self.optimizer = torch.optim.SGD(
+            params=self.q_network.parameters(),
+            lr=self.learning_rate,
+            maximize=False,
         )
         self.loss_function = nn.MSELoss()
 
@@ -168,14 +173,17 @@ class FootsiesAgent(FootsiesAgentBase):
         # Get one-hot encoded action
         action_one_hot = self._action_onehot(self.current_action)
 
-        current_q_value = self.q_value(self.current_observation, action_one_hot)
-        _, next_q_value = self.policy(next_obs)
-        target = current_q_value + self.alpha * (
-            reward + self.discount_factor * next_q_value - current_q_value
-        )
+        if terminated:
+            target = reward
+        else:
+            current_q_value = self.q_value(self.current_observation, action_one_hot)
+            _, next_q_value = self.policy(next_obs)
+            target = current_q_value + self.alpha * (
+                reward + self.discount_factor * next_q_value - current_q_value
+            )
 
         self.trainX = torch.cat(
-            (self.trainX, torch.cat((next_obs, action_one_hot), dim=1)), dim=0
+            (self.trainX, torch.cat((self.current_observation, action_one_hot), dim=1)), dim=0
         )
         self.trainY = torch.cat(
             (
@@ -195,7 +203,8 @@ class FootsiesAgent(FootsiesAgentBase):
             self.optimizer.zero_grad()
 
             self.trainY = self.trainY.reshape((-1, 1))
-            loss = self.loss_function(self.q_network(self.trainX), self.trainY)
+            output = self.q_network(self.trainX)
+            loss = self.loss_function(output, self.trainY)
             loss.backward()
             self.optimizer.step()
 

@@ -8,6 +8,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.envs.exceptions import FootsiesGameClosedError
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
+from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
 from agents.base import FootsiesAgentBase
 from tqdm import tqdm
 from itertools import count
@@ -204,6 +205,11 @@ if __name__ == "__main__":
         action="store_true",
         help="use the Action Combinations Discretized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
     )
+    parser.add_argument(
+        "--footsies-wrapper-fs",
+        action="store_true",
+        help="use the Frame Skipped wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment"
+    )
     parser.add_argument("--episodes", type=int, default=None, help="number of episodes")
     parser.add_argument(
         "--no-save",
@@ -278,6 +284,9 @@ if __name__ == "__main__":
 
         if args.footsies_wrapper_norm:
             env = FootsiesNormalized(env)
+
+        if args.footsies_wrapper_fs:
+            env = FootsiesFrameSkipped(env)
 
         env = FlattenObservation(env)
 
