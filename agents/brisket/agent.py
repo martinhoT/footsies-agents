@@ -233,7 +233,7 @@ class FootsiesAgent(FootsiesAgentBase):
                 q_values = self.q_values(state)
                 exponentiated = np.exp(q_values)
                 softmaxed = exponentiated / exponentiated.sum()
-                entropy += np.sum(np.log2(softmaxed) * softmaxed)
+                entropy += -np.sum(np.log2(softmaxed) * softmaxed)
                 entropy_n += 1
         
         return entropy / entropy_n
