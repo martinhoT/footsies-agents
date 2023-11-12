@@ -63,15 +63,23 @@ def save_agent_model(agent: FootsiesAgentBase, model_name: str, folder: str = "s
     print("Agent saved")
 
 
-def extract_kwargs(f_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
+def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
     kwargs = {}
-    if f_kwargs is not None:
-        if len(f_kwargs) % 2 != 0:
+    if n_kwargs is not None:
+        if len(n_kwargs) % 2 != 0:
             raise ValueError(
                 "the values passed to '--[...]-F-kwargs' should be a list of key-value pairs"
             )
 
-        kwargs.update({k: float(v) for k, v in zip(f_kwargs[0::2], f_kwargs[1::2])})
+        def convert_to_int_or_float(number):
+            try:
+                res = int(number)
+            except ValueError:
+                res = float(number)
+            
+            return res
+
+        kwargs.update({k: convert_to_int_or_float(v) for k, v in zip(n_kwargs[0::2], n_kwargs[1::2])})
 
     if s_kwargs is not None:
         if len(s_kwargs) % 2 != 0:
@@ -128,6 +136,9 @@ def train(
 
     except FootsiesGameClosedError:
         print("Game closed manually, quitting training")
+    
+    except Exception as e:
+        print(f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training")
 
 
 if __name__ == "__main__":
@@ -154,12 +165,12 @@ if __name__ == "__main__":
         help="Gymnasium environment to use. The special value 'FOOTSIES' instantiates the FOOTSIES environment",
     )
     parser.add_argument(
-        "-eF",
-        "--env-F-kwargs",
+        "-eN",
+        "--env-N-kwargs",
         action="extend",
         nargs="+",
         type=str,
-        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as floating-point numbers",
+        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as numbers",
     )
     parser.add_argument(
         "-eS",
@@ -211,12 +222,12 @@ if __name__ == "__main__":
         default=None,
     )
     parser.add_argument(
-        "-mF",
-        "--model-F-kwargs",
+        "-mN",
+        "--model-N-kwargs",
         action="extend",
         nargs="+",
         type=str,
-        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as floating-point numbers",
+        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as numbers",
     )
     parser.add_argument(
         "-mS",
@@ -237,12 +248,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-log", action="store_true", help="if passed, the model won't be logged"
     )
+    parser.add_argument(
+        "--log-frequency", type=int, default=5000, help="number of time steps between each log"
+    )
+    parser.add_argument(
+        "--log-test-states-number", type=int, default=5000, help="number of test states to use when evaluating some metrics for logging"
+    )
 
     args = parser.parse_args()
 
-    env_kwargs = extract_kwargs(args.env_F_kwargs, args.env_S_kwargs, args.env_B_kwargs)
+    env_kwargs = extract_kwargs(args.env_N_kwargs, args.env_S_kwargs, args.env_B_kwargs)
     model_kwargs = extract_kwargs(
-        args.model_F_kwargs, args.model_S_kwargs, args.model_B_kwargs
+        args.model_N_kwargs, args.model_S_kwargs, args.model_B_kwargs
     )
 
     if args.env == "FOOTSIES":
@@ -251,9 +268,11 @@ if __name__ == "__main__":
                 "the path to the FOOTSIES executable should be specified with '--footsies-path' when using the FOOTSIES environment"
             )
 
+        # Set arguments so that training is easier by default
         env = FootsiesEnv(
             game_path=args.footsies_path,
             frame_delay=0,  # frame delay of 0 by default
+            dense_reward=True,  # dense reward enabled by default
             **env_kwargs,
         )
 
@@ -266,7 +285,7 @@ if __name__ == "__main__":
             env = FootsiesActionCombinationsDiscretized(env)
 
     else:
-        env = gym.make(args.env)
+        env = gym.make(args.env, **env_kwargs)
 
     agent = import_agent(args.agent, env, model_kwargs)
     model_name = args.agent if args.model_name is None else args.model_name
@@ -282,10 +301,10 @@ if __name__ == "__main__":
 
         agent = TrainingLoggerWrapper(
             agent,
-            5000,
+            log_frequency=args.log_frequency,
             cummulative_reward=True,
             win_rate=True,
-            test_states_number=5000,
+            test_states_number=args.log_test_states_number,
             **loggables,
         )
 

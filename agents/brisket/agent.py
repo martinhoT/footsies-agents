@@ -13,7 +13,7 @@ from gymnasium.spaces.utils import flatten_space
 class LiteralQNetwork(nn.Module):
     """This network predicts the Q-value of a state-action pair. Since the reward is either -1 or 1, the final activation layer is Tanh()"""
 
-    def __init__(self, n_observations: int, n_actions: int, shallow: bool = True):
+    def __init__(self, n_observations: int, n_actions: int, shallow: bool = True, shallow_size: int = 32):
         super().__init__()
         self.flatten = nn.Flatten()
         self.layers = (
@@ -29,9 +29,9 @@ class LiteralQNetwork(nn.Module):
             )
             if not shallow
             else nn.Sequential(
-                nn.Linear(n_observations + n_actions, 32),
+                nn.Linear(n_observations + n_actions, shallow_size),
                 nn.ReLU(),
-                nn.Linear(32, 1),
+                nn.Linear(shallow_size, 1),
                 nn.Tanh(),
             )
         )
@@ -85,6 +85,7 @@ class FootsiesAgent(FootsiesAgentBase):
         epsilon_decay_rate: float = 0.0001,
         min_epsilon: float = 0.05,
         shallow: bool = True,
+        shallow_size: int = 32,
         device: torch.device = "cpu",
         **kwargs,
     ):
@@ -100,7 +101,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.observations_length = flatten_space(observation_space).shape[0]
         self.actions_length = flatten_space(action_space).shape[0]
         self.q_network = LiteralQNetwork(
-            self.observations_length, self.actions_length, shallow=shallow
+            self.observations_length, self.actions_length, shallow=shallow, shallow_size=shallow_size
         )
 
         self.optimizer = torch.optim.Adam(
@@ -261,28 +262,3 @@ class FootsiesAgent(FootsiesAgentBase):
     def save(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")
         torch.save(self.q_network.state_dict(), model_path)
-
-
-"""
-1 -1 -1 1 = 0       (1/2)
-1 -1 -1 = -1        (1/3)
-1 -1 1 = 1          (2/3)
-
-number of ones + number of -1s = self.current_episode
-number of ones - number of -1s = self.cummulative_reward
-
-o + m = c
-o - m = r
-
-o = c - m
-c - m - m = r
-
-o = c - m
--2m = r - c
-
-o = c - (c - r) / 2
-m = (c - r) / 2
-
-o = (c + r) / 2
-m = (c - r) / 2
-"""
