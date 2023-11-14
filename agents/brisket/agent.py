@@ -13,7 +13,14 @@ from gymnasium.spaces.utils import flatten_space
 class LiteralQNetwork(nn.Module):
     """This network predicts the Q-value of a state-action pair. Since the reward is either -1 or 1, the final activation layer is Tanh()"""
 
-    def __init__(self, n_observations: int, n_actions: int, shallow: bool = True, shallow_size: int = 32):
+    def __init__(
+        self,
+        n_observations: int,
+        n_actions: int,
+        shallow: bool = True,
+        shallow_size: int = 32,
+        custom_final_layer: nn.Module = None,
+    ):
         super().__init__()
         self.flatten = nn.Flatten()
         self.layers = (
@@ -25,14 +32,14 @@ class LiteralQNetwork(nn.Module):
                 nn.Linear(64, 32),
                 nn.ReLU(),
                 nn.Linear(32, 1),
-                nn.Tanh(),
+                nn.Tanh() if custom_final_layer is None else custom_final_layer,
             )
             if not shallow
             else nn.Sequential(
                 nn.Linear(n_observations + n_actions, shallow_size),
                 nn.ReLU(),
                 nn.Linear(shallow_size, 1),
-                nn.Tanh(),
+                nn.Tanh() if custom_final_layer is None else custom_final_layer,
             )
         )
 
@@ -86,6 +93,8 @@ class FootsiesAgent(FootsiesAgentBase):
         min_epsilon: float = 0.05,
         shallow: bool = True,
         shallow_size: int = 32,
+        q_value_min: float = -1,
+        q_value_max: float = 1,
         device: torch.device = "cpu",
         **kwargs,
     ):
@@ -101,7 +110,15 @@ class FootsiesAgent(FootsiesAgentBase):
         self.observations_length = flatten_space(observation_space).shape[0]
         self.actions_length = flatten_space(action_space).shape[0]
         self.q_network = LiteralQNetwork(
-            self.observations_length, self.actions_length, shallow=shallow, shallow_size=shallow_size
+            self.observations_length,
+            self.actions_length,
+            shallow=shallow,
+            shallow_size=shallow_size,
+            # In FOOTSIES and FightingICE, it makes sense to have tanh as the final activation layer due to these environments' reward function
+            # In other environments however, other activation functions may be more appropriate. We consider a ReLU by default for now (works for CartPole)
+            custom_final_layer=nn.Tanh()
+            if q_value_min == -1 and q_value_max == 1
+            else nn.ReLU(),
         )
 
         # self.optimizer = torch.optim.Adam(
@@ -124,6 +141,8 @@ class FootsiesAgent(FootsiesAgentBase):
 
         # For evaluation
         self._test_states = None
+        self._cummulative_loss = 0
+        self._cummulative_loss_n = 0
 
     def act(self, obs) -> Any:
         obs = self._obs_to_torch(obs)
@@ -164,7 +183,7 @@ class FootsiesAgent(FootsiesAgentBase):
             return (
                 torch.tensor(obs, dtype=torch.float32).to(self.device).reshape((1, -1))
             )
-        
+
         return obs
 
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
@@ -183,8 +202,10 @@ class FootsiesAgent(FootsiesAgentBase):
             )
 
         self.trainX = torch.cat(
-            (self.trainX, torch.cat((self.current_observation, action_one_hot), dim=1)), dim=0
+            (self.trainX, torch.cat((self.current_observation, action_one_hot), dim=1)),
+            dim=0,
         )
+        # NOTE: this could be computed completely at the end based on trainX
         self.trainY = torch.cat(
             (
                 self.trainY,
@@ -214,6 +235,10 @@ class FootsiesAgent(FootsiesAgentBase):
             # Linear epsilon decay
             self.epsilon = max(self.min_epsilon, self.epsilon - self.epsilon_decay_rate)
 
+            # Accumulate loss as a metric
+            self._cummulative_loss += loss.item()
+            self._cummulative_loss_n += 1
+
     def _initialize_test_states(self, test_states: List[Tuple[Any, Any]]):
         if self._test_states is None:
             merged_state_action_pairs = [
@@ -232,7 +257,9 @@ class FootsiesAgent(FootsiesAgentBase):
         with torch.no_grad():
             return torch.mean(torch.max(self.q_network(self._test_states)))
 
-    def evaluate_average_action_entropy(self, test_states: List[Tuple[Any, Any]]) -> float:
+    def evaluate_average_action_entropy(
+        self, test_states: List[Tuple[Any, Any]]
+    ) -> float:
         # Average entropy of the action probability distribution obtained by softmax
         entropy = 0
         entropy_n = 0
@@ -244,11 +271,13 @@ class FootsiesAgent(FootsiesAgentBase):
                 softmaxed = exponentiated / exponentiated.sum()
                 entropy += -np.sum(np.log2(softmaxed) * softmaxed)
                 entropy_n += 1
-        
+
         return entropy / entropy_n
 
     # Based on: https://link.springer.com/article/10.1007/s11432-021-3347-8
-    def evaluate_average_uncertainty(self, test_states: List[Tuple[Any, Any]], forward_passes: int = 30) -> float:
+    def evaluate_average_uncertainty(
+        self, test_states: List[Tuple[Any, Any]], forward_passes: int = 30
+    ) -> float:
         self._initialize_test_states(test_states)
 
         # Average uncertainty, which is the standard deviation of the Q-values after N forward passes with dropouts
@@ -261,8 +290,14 @@ class FootsiesAgent(FootsiesAgentBase):
                 q_values[:, i] = self.q_network(self._test_states).squeeze()
 
             self.q_network.has_dropout = has_dropout
-        
+
         return np.mean(q_values.std(axis=1))
+
+    def evaluate_average_loss_and_clear(self) -> float:
+        res = (self._cummulative_loss / self._cummulative_loss_n) if self._cummulative_loss_n != 0 else 0
+        self._cummulative_loss = 0
+        self._cummulative_loss_n = 0
+        return res
 
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")

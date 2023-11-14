@@ -86,11 +86,11 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         if self.current_step % self.log_frequency == 0:
             if self.cummulative_reward:
                 self.summary_writer.add_scalar(
-                    "Cummulative reward", self.cummulative_reward, self.current_step
+                    "Performance/Cummulative reward", self.cummulative_reward, self.current_step
                 )
             if self.win_rate:
                 self.summary_writer.add_scalar(
-                    "Win rate",
+                    "Performance/Win rate",
                     (self.current_episode + self.cummulative_reward)
                     / (2 * self.current_episode)
                     if self.current_episode >= 1
