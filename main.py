@@ -269,6 +269,7 @@ if __name__ == "__main__":
     )
 
     if args.env == "FOOTSIES":
+        print("Initializing FOOTSIES")
         if args.footsies_path is None:
             raise ValueError(
                 "the path to the FOOTSIES executable should be specified with '--footsies-path' when using the FOOTSIES environment"
@@ -283,18 +284,31 @@ if __name__ == "__main__":
         )
 
         if args.footsies_wrapper_norm:
+            print(" Adding FootsiesNormalized wrapper")
             env = FootsiesNormalized(env)
 
         if args.footsies_wrapper_fs:
+            print(" Adding FootsiesFrameSkipped wrapper")
             env = FootsiesFrameSkipped(env)
 
         env = FlattenObservation(env)
 
         if args.footsies_wrapper_acd:
+            print(" Adding FootsiesActionCombinationsDiscretized wrapper")
             env = FootsiesActionCombinationsDiscretized(env)
 
     else:
+        print(f"Initializing environment {args.env}")
         env = gym.make(args.env, **env_kwargs)
+    
+    print(" Environment arguments:")
+    for k, v in env_kwargs.items():
+        print(f"  {k}: {v} ({type(v).__name__})")
+
+    print(f"Importing agent '{args.agent}'")
+    print(f" Agent arguments:")
+    for k, v in model_kwargs.items():
+        print(f"  {k}: {v} ({type(v).__name__})")
 
     agent = import_agent(args.agent, env, model_kwargs)
     model_name = args.agent if args.model_name is None else args.model_name
@@ -306,6 +320,7 @@ if __name__ == "__main__":
         load_agent_model(agent, model_name)
 
     if not args.no_log:
+        print("Logging enabled")
         loggables = import_loggables(args.agent, agent)
 
         agent = TrainingLoggerWrapper(
