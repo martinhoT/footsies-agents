@@ -1,12 +1,14 @@
 import os
 
 from agents.base import FootsiesAgentBase
-from typing import Any, List, Tuple
+from typing import Any, Callable, List, Tuple
 import numpy as np
 import torch
 from torch import nn
 from gymnasium.spaces import Space
 from gymnasium.spaces.utils import flatten_space
+from gymnasium import Env
+from copy import deepcopy
 
 
 class LiteralQNetwork(nn.Module):
@@ -304,3 +306,19 @@ class FootsiesAgent(FootsiesAgentBase):
     def save(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")
         torch.save(self.q_network.state_dict(), model_path)
+
+    def _extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+        q_network = deepcopy(self.q_network)
+        q_network.requires_grad_(False)
+        
+        def internal_policy(obs):
+            obs = self._obs_to_torch(obs)
+            
+            q_values = [
+                q_network(torch.cat((obs, self._action_onehot(action)), dim=1)).item()
+                for action in range(self.actions_length)
+            ]
+            
+            return np.argmax(q_values)
+        
+        return super()._extract_policy(env, internal_policy)

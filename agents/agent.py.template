@@ -17,3 +17,6 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def save(self, folder_path: str):
         ...
+
+    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+        ...

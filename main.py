@@ -2,8 +2,10 @@ import argparse
 import os
 import importlib
 import gymnasium as gym
+import random
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
+from gymnasium.wrappers.time_limit import TimeLimit
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.envs.exceptions import FootsiesGameClosedError
 from footsies_gym.wrappers.normalization import FootsiesNormalized
@@ -13,6 +15,7 @@ from agents.base import FootsiesAgentBase
 from tqdm import tqdm
 from itertools import count
 from typing import List, Any
+from collections import deque
 
 from agents.logger import TrainingLoggerWrapper
 
@@ -77,10 +80,15 @@ def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
                 res = int(number)
             except ValueError:
                 res = float(number)
-            
+
             return res
 
-        kwargs.update({k: convert_to_int_or_float(v) for k, v in zip(n_kwargs[0::2], n_kwargs[1::2])})
+        kwargs.update(
+            {
+                k: convert_to_int_or_float(v)
+                for k, v in zip(n_kwargs[0::2], n_kwargs[1::2])
+            }
+        )
 
     if s_kwargs is not None:
         if len(s_kwargs) % 2 != 0:
@@ -110,16 +118,25 @@ def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
     return kwargs
 
 
+# Self-play only works if env if FootsiesEnv
 def train(
     agent: FootsiesAgentBase,
     env: Env,
     n_episodes: int = None,
+    self_play: bool = False,
+    self_play_snapshot_frequency: int = 1000,
+    self_play_max_snapshots: int = 100,
 ):
     print("Preprocessing...", end=" ", flush=True)
     agent.preprocess(env)
     print("done!")
 
     training_iterator = count() if n_episodes is None else range(n_episodes)
+
+    # Only used for self-play
+    opponent_pool = deque([], maxlen=self_play_max_snapshots)
+    if self_play:
+        opponent_pool.append(env.opponent)
 
     try:
         for episode in tqdm(training_iterator):
@@ -132,15 +149,27 @@ def train(
                 obs, reward, terminated, truncated, info = env.step(action)
                 agent.update(obs, reward, terminated, truncated)
 
+            # Set a new opponent from the opponent pool
+            if self_play:
+                # Perform a snapshot of the agent at the current
+                if episode % self_play_snapshot_frequency == 0:
+                    opponent_pool.append(agent.extract_policy(env))
+
+                new_opponent = random.sample(opponent_pool, 1)[0]
+                env.unwrapped.set_opponent(new_opponent)
+
     except KeyboardInterrupt:
         print("Training manually interrupted")
 
     except FootsiesGameClosedError:
         print("Game closed manually, quitting training")
-    
+
     except Exception as e:
-        print(f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training")
+        print(
+            f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training"
+        )
         from traceback import print_exception
+
         print_exception(e)
 
 
@@ -210,7 +239,37 @@ if __name__ == "__main__":
     parser.add_argument(
         "--footsies-wrapper-fs",
         action="store_true",
-        help="use the Frame Skipped wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment"
+        help="use the Frame Skipped wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
+    )
+    parser.add_argument(
+        "--footsies-self-play",
+        action="store_true",
+        help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper",
+    )
+    parser.add_argument(
+        "--footsies-self-play-snapshot-freq",
+        type=int,
+        default=1000,
+        help="the frequency with which to take snapshots of the current agent for the opponent pool, in number of episodes",
+    )
+    parser.add_argument(
+        "--footsies-self-play-max-snapshots",
+        type=int,
+        default=100,
+        help="maximum number of snapshots to hold at once in the opponent pool",
+    )
+    parser.add_argument(
+        "--footsies-self-play-port",
+        type=int,
+        default=11001,
+        help="port to be used for the opponent socket",
+    )
+    parser.add_argument(
+        "--wrapper-time-limit",
+        type=int,
+        default=99
+        * 60,  # NOTE: not actually sure if it's 60, for FOOTSIES it may be 50
+        help="add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES",
     )
     parser.add_argument("--episodes", type=int, default=None, help="number of episodes")
     parser.add_argument(
@@ -257,13 +316,22 @@ if __name__ == "__main__":
         "--no-log", action="store_true", help="if passed, the model won't be logged"
     )
     parser.add_argument(
-        "--log-frequency", type=int, default=5000, help="number of time steps between each log"
+        "--log-frequency",
+        type=int,
+        default=5000,
+        help="number of time steps between each log",
     )
     parser.add_argument(
-        "--log-test-states-number", type=int, default=5000, help="number of test states to use when evaluating some metrics for logging"
+        "--log-test-states-number",
+        type=int,
+        default=5000,
+        help="number of test states to use when evaluating some metrics for logging",
     )
     parser.add_argument(
-        "--log-dir", type=str, default=None, help="directory to which Tensorboard logs will be written"
+        "--log-dir",
+        type=str,
+        default=None,
+        help="directory to which Tensorboard logs will be written",
     )
 
     args = parser.parse_args()
@@ -272,6 +340,13 @@ if __name__ == "__main__":
     model_kwargs = extract_kwargs(
         args.model_N_kwargs, args.model_S_kwargs, args.model_B_kwargs
     )
+
+    will_footsies_self_play = args.footsies_self_play and args.env == "FOOTSIES"
+
+    if will_footsies_self_play:
+        # Set dummy opponent for now, and set later with a copy of the instanced agent
+        env_kwargs["opponent"] = lambda o: (False, False, False)
+        env_kwargs["opponent_port"] = args.footsies_self_play_port
 
     if args.env == "FOOTSIES":
         print("Initializing FOOTSIES")
@@ -296,6 +371,9 @@ if __name__ == "__main__":
             print(" Adding FootsiesFrameSkipped wrapper")
             env = FootsiesFrameSkipped(env)
 
+        if args.wrapper_time_limit > 0:
+            env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
+
         env = FlattenObservation(env)
 
         if args.footsies_wrapper_acd:
@@ -305,7 +383,7 @@ if __name__ == "__main__":
     else:
         print(f"Initializing environment {args.env}")
         env = gym.make(args.env, **env_kwargs)
-    
+
     print(" Environment arguments:")
     for k, v in env_kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
@@ -324,6 +402,11 @@ if __name__ == "__main__":
     if load:
         load_agent_model(agent, model_name)
 
+    # Set a good default agent
+    if will_footsies_self_play:
+        footsies_env: FootsiesEnv = env.unwrapped
+        footsies_env.set_opponent(agent.extract_policy(env))
+
     if not args.no_log:
         print("Logging enabled")
         loggables = import_loggables(args.agent, agent)
@@ -338,7 +421,14 @@ if __name__ == "__main__":
             **loggables,
         )
 
-    train(agent, env, args.episodes)
+    train(
+        agent,
+        env,
+        args.episodes,
+        will_footsies_self_play,
+        args.footsies_self_play_snapshot_freq,
+        args.footsies_self_play_max_snapshots,
+    )
 
     if save:
         save_agent_model(agent, model_name)
