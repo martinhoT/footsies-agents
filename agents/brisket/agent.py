@@ -1,6 +1,5 @@
 import os
 
-from gymnasium import Env
 from agents.base import FootsiesAgentBase
 from typing import Any, List, Tuple
 import numpy as np
@@ -25,11 +24,9 @@ class LiteralQNetwork(nn.Module):
         self.flatten = nn.Flatten()
         self.layers = (
             nn.Sequential(
-                nn.Linear(n_observations + n_actions, 128),
+                nn.Linear(n_observations + n_actions, 32),
                 nn.ReLU(),
-                nn.Linear(128, 64),
-                nn.ReLU(),
-                nn.Linear(64, 32),
+                nn.Linear(32, 32),
                 nn.ReLU(),
                 nn.Linear(32, 1),
                 nn.Tanh() if custom_final_layer is None else custom_final_layer,
@@ -56,19 +53,17 @@ class LiteralQNetwork(nn.Module):
         if self._has_dropout != value:
             if value:
                 if self._shallow:
-                    self.layers.insert(3, nn.Dropout(p=p))
+                    self.layers.insert(2, nn.Dropout(p=p))
                 else:
-                    self.layers.insert(3, nn.dropout(p=p))
-                    self.layers.insert(5, nn.dropout(p=p))
-                    self.layers.insert(7, nn.dropout(p=p))
+                    self.layers.insert(2, nn.Dropout(p=p))
+                    self.layers.insert(4, nn.Dropout(p=p))
 
             else:
                 if self._shallow:
-                    self.layers.pop(3)
+                    self.layers.pop(2)
                 else:
-                    self.layers.pop(3)
-                    self.layers.pop(5)
-                    self.layers.pop(7)
+                    self.layers.pop(2)
+                    self.layers.pop(4)
 
         self._has_dropout = value
 
@@ -98,6 +93,9 @@ class FootsiesAgent(FootsiesAgentBase):
         device: torch.device = "cpu",
         **kwargs,
     ):
+        if len(kwargs) > 0:
+            print(f"WARN: unknown keyword arguments for '{self.__class__.__name__}' ({kwargs})")
+
         self.action_space = action_space
         self.alpha = alpha
         self.learning_rate = learning_rate

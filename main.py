@@ -140,6 +140,8 @@ def train(
     
     except Exception as e:
         print(f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training")
+        from traceback import print_exception
+        print_exception(e)
 
 
 if __name__ == "__main__":
@@ -260,6 +262,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--log-test-states-number", type=int, default=5000, help="number of test states to use when evaluating some metrics for logging"
     )
+    parser.add_argument(
+        "--log-dir", type=str, default=None, help="directory to which Tensorboard logs will be written"
+    )
 
     args = parser.parse_args()
 
@@ -326,6 +331,7 @@ if __name__ == "__main__":
         agent = TrainingLoggerWrapper(
             agent,
             log_frequency=args.log_frequency,
+            log_dir=args.log_dir,
             cummulative_reward=True,
             win_rate=True,
             test_states_number=args.log_test_states_number,

@@ -12,6 +12,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self,
         agent: FootsiesAgentBase,
         log_frequency: int,
+        log_dir: str = None,
         cummulative_reward: bool = False,
         win_rate: bool = False,
         network_histograms: List[nn.Module] = None,
@@ -20,7 +21,6 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             Tuple[str, Callable[[List[Tuple[Any, Any]]], float]]
         ] = None,
         test_states_number: int = 10_000,
-        log_dir: str = None,
     ):
         """
         A wrapper on FOOTSIES agents which logs the specified training metrics.
@@ -31,6 +31,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             the agent that will be wrapped
         log_frequency: int
             how frequent, in terms of time steps, should logs be written
+        log_dir: str
+            to which directory will logs be written
 
         cummulative_reward: bool
             the total accumulated reward since training started

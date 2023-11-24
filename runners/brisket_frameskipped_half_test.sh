@@ -1,0 +1,2 @@
+#!/bin/sh
+python3 main.py brisket --footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 --footsies-wrapper-norm --footsies-wrapper-acd --footsies-wrapper-fs --model-name brisket_frameskipped_half -mN epsilon_decay_rate 0.00005 shallow_size 16 --no-save --no-log -mN epsilon 0 min_epsilon 0 -eS render_mode human -eB fast_forward false vs_player true "$@"
