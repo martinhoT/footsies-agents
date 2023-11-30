@@ -127,7 +127,12 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                 self.test_states.append((state, action))
                 state, _, terminated, truncated, _ = env.step(action)
 
+                print(f"{len(self.test_states):3}/{self.test_states_number:3}", end="\r")
+
                 if terminated or truncated:
+                    # NOTE: necessary so that the FOOTSIES environment can restart on outside truncation
+                    if truncated:
+                        env.unwrapped.hard_reset()
                     env.reset()
 
             self.test_states.append((state, None))

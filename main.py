@@ -162,6 +162,10 @@ def train(
 
                 new_opponent = random.sample(opponent_pool, 1)[0]
                 env.unwrapped.set_opponent(new_opponent)
+            
+            # NOTE: necessary so that the FOOTSIES environment can restart on outside truncation
+            if truncated and isinstance(env.unwrapped, FootsiesEnv):
+                env.unwrapped.hard_reset()
 
     except KeyboardInterrupt:
         print("Training manually interrupted")
@@ -277,6 +281,7 @@ if __name__ == "__main__":
         help="add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES",
     )
     parser.add_argument("--episodes", type=int, default=None, help="number of episodes")
+    parser.add_argument("--penalize-truncation", type=float, default=None, help="how much to penalize the agent in case the environment is truncated, useful when a time limit is defined for instance. No penalization by default")
     parser.add_argument(
         "--no-save",
         action="store_true",
@@ -433,6 +438,7 @@ if __name__ == "__main__":
         will_footsies_self_play,
         args.footsies_self_play_snapshot_freq,
         args.footsies_self_play_max_snapshots,
+        args.penalize_truncation,
     )
 
     if save:
