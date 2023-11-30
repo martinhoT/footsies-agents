@@ -88,7 +88,9 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         if self.current_step % self.log_frequency == 0:
             if self.cummulative_reward:
                 self.summary_writer.add_scalar(
-                    "Performance/Cummulative reward", self.cummulative_reward, self.current_step
+                    "Performance/Cummulative reward",
+                    self.cummulative_reward,
+                    self.current_step,
                 )
             if self.win_rate:
                 self.summary_writer.add_scalar(
@@ -140,3 +142,6 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
     def save(self, folder_path: str):
         self.agent.save(folder_path)
+
+    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+        return self.agent.extract_policy(env)

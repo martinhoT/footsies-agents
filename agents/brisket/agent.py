@@ -85,9 +85,10 @@ class FootsiesAgent(FootsiesAgentBase):
         alpha: float = 0.5,
         learning_rate: float = 0.00001,
         discount_factor: float = 0.95,
-        epsilon: float = 0.95,
-        epsilon_decay_rate: float = 0.0001,
-        min_epsilon: float = 0.05,
+        epsilon: float = 1.0,
+        epsilon_decay_rate: float = 0.001,  # after 1000 games, the agent goes from 1 epsilon to 0
+        min_epsilon: float = 0.0,
+        min_epsilon_stay: float = 100,  # for how many episodes should the agent stay at the min_epsilon before exploring again
         shallow: bool = True,
         shallow_size: int = 32,
         q_value_min: float = -1,
@@ -96,7 +97,9 @@ class FootsiesAgent(FootsiesAgentBase):
         **kwargs,
     ):
         if len(kwargs) > 0:
-            print(f"WARN: unknown keyword arguments for '{self.__class__.__name__}' ({kwargs})")
+            print(
+                f"WARN: unknown keyword arguments for '{self.__class__.__name__}' ({kwargs})"
+            )
 
         self.action_space = action_space
         self.alpha = alpha
@@ -105,6 +108,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.epsilon_start = epsilon
         self.epsilon = epsilon
         self.epsilon_decay_rate = epsilon_decay_rate
+        self.min_epsilon_stay = min_epsilon_stay
         self.min_epsilon = min_epsilon
         self.device = device
 
@@ -139,6 +143,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_iteration = 0
         self.current_observation = None
         self.current_action = None
+        self.epsilon_stay_counter = 0
 
         # For evaluation
         self._test_states = None
@@ -235,9 +240,13 @@ class FootsiesAgent(FootsiesAgentBase):
 
             # Linear epsilon decay
             self.epsilon = self.epsilon - self.epsilon_decay_rate
-            # Once the minimum is reached, reset back to full (avoid convergence to a local optimum)
+            # Once the minimum is reached, stay at the minimum for some episodes
             if self.epsilon < self.min_epsilon:
-                self.epsilon = self.epsilon_start
+                self.epsilon_stay_counter += 1
+                # After staying at the minimum for some time, reset exploration (avoid convergence to a local optimum)
+                if self.epsilon_stay_counter >= self.min_epsilon_stay:
+                    self.epsilon = self.epsilon_start
+                    self.epsilon_stay_counter = 0
 
             # Accumulate loss as a metric
             self._cummulative_loss += loss.item()
@@ -298,7 +307,11 @@ class FootsiesAgent(FootsiesAgentBase):
         return np.mean(q_values.std(axis=1))
 
     def evaluate_average_loss_and_clear(self) -> float:
-        res = (self._cummulative_loss / self._cummulative_loss_n) if self._cummulative_loss_n != 0 else 0
+        res = (
+            (self._cummulative_loss / self._cummulative_loss_n)
+            if self._cummulative_loss_n != 0
+            else 0
+        )
         self._cummulative_loss = 0
         self._cummulative_loss_n = 0
         return res
@@ -311,18 +324,18 @@ class FootsiesAgent(FootsiesAgentBase):
         model_path = os.path.join(folder_path, "model_weights.pth")
         torch.save(self.q_network.state_dict(), model_path)
 
-    def _extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         q_network = deepcopy(self.q_network)
         q_network.requires_grad_(False)
-        
+
         def internal_policy(obs):
             obs = self._obs_to_torch(obs)
-            
+
             q_values = [
                 q_network(torch.cat((obs, self._action_onehot(action)), dim=1)).item()
                 for action in range(self.actions_length)
             ]
-            
+
             return np.argmax(q_values)
-        
+
         return super()._extract_policy(env, internal_policy)

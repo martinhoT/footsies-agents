@@ -126,6 +126,7 @@ def train(
     self_play: bool = False,
     self_play_snapshot_frequency: int = 1000,
     self_play_max_snapshots: int = 100,
+    penalize_truncation: float = None, # penalize the agent if the time limit was exceeded, to discourage lengthening the episode
 ):
     print("Preprocessing...", end=" ", flush=True)
     agent.preprocess(env)
@@ -147,6 +148,10 @@ def train(
             while not (terminated or truncated):
                 action = agent.act(obs)
                 obs, reward, terminated, truncated, info = env.step(action)
+                
+                if penalize_truncation is not None and truncated:
+                    reward = penalize_truncation
+                
                 agent.update(obs, reward, terminated, truncated)
 
             # Set a new opponent from the opponent pool
@@ -402,7 +407,7 @@ if __name__ == "__main__":
     if load:
         load_agent_model(agent, model_name)
 
-    # Set a good default agent
+    # Set a good default agent for self-play
     if will_footsies_self_play:
         footsies_env: FootsiesEnv = env.unwrapped
         footsies_env.set_opponent(agent.extract_policy(env))
