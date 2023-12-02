@@ -118,16 +118,43 @@ def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
     return kwargs
 
 
-# Self-play only works if env if FootsiesEnv
+# Self-play assumes env is FootsiesEnv
 def train(
     agent: FootsiesAgentBase,
     env: Env,
     n_episodes: int = None,
     self_play: bool = False,
-    self_play_snapshot_frequency: int = 1000,
+    self_play_snapshot_frequency: int = 100,
     self_play_max_snapshots: int = 100,
-    penalize_truncation: float = None, # penalize the agent if the time limit was exceeded, to discourage lengthening the episode
+    self_play_mix_bot: int = None,
+    penalize_truncation: float = None,
 ):
+    """
+    Train an `agent` on the given Gymnasium environment `env`
+
+    Parameters
+    ----------
+    agent: FootsiesAgentBase
+        implementation of the FootsiesAgentBase, representing the agent
+    env: Env
+        the Gymnasium environment to train on
+    n_episodes: int
+        if specified, the number of training episodes
+    self_play: bool
+        if true, use self-play during training. Assumes the environment is FootsiesEnv or a wrapped version of it
+    self_play_snapshot_frequency: int
+        how frequent to take a snapshot of the current policy for the opponent pool
+    self_play_max_snapshots: int
+        maximum capacity of the opponent pool. If at maximum, the oldest opponents are discarded
+    self_play_mix_bot: int
+        if specified, will include the in-game FOOTSIES bot as an opponent.
+        Will enter after `self_play_mix_bot` episodes and stay for `self_play_mix_bot` episodes.
+        As such, the opponent distribution will be 50/50, distributed between the snapshots and the in-game bot.
+        This argument merely controls the switch frequency
+    penalize_truncation: float
+        penalize the agent if the time limit was exceeded, to discourage lengthening the episode
+    """
+
     print("Preprocessing...", end=" ", flush=True)
     agent.preprocess(env)
     print("done!")
@@ -137,7 +164,10 @@ def train(
     # Only used for self-play
     opponent_pool = deque([], maxlen=self_play_max_snapshots)
     if self_play:
-        opponent_pool.append(env.opponent)
+        opponent_pool.append(env.unwrapped.opponent)
+
+    mix_bot_counter = 0
+    mix_bot_playing = False
 
     try:
         for episode in tqdm(training_iterator):
@@ -160,8 +190,24 @@ def train(
                 if episode % self_play_snapshot_frequency == 0:
                     opponent_pool.append(agent.extract_policy(env))
 
-                new_opponent = random.sample(opponent_pool, 1)[0]
-                env.unwrapped.set_opponent(new_opponent)
+                mix_bot_counter += 1
+                # Switch to the bot if the counter has surpassed the threshold
+                if self_play_mix_bot is not None and mix_bot_counter >= self_play_mix_bot:
+                    # Go back to using opponent pool opponents
+                    if mix_bot_playing:
+                        mix_bot_counter = 0
+                        mix_bot_playing = False
+                
+                    # Start using the in-game bot instead
+                    else:
+                        env.unwrapped.set_opponent(None)
+                        mix_bot_counter = 0
+                        mix_bot_playing = True
+                
+                # As long as the in-game bot is not playing, we will switch opponent every game
+                if not mix_bot_playing:
+                    new_opponent = random.sample(opponent_pool, 1)[0]
+                    env.unwrapped.set_opponent(new_opponent)
             
             # NOTE: necessary so that the FOOTSIES environment can restart on outside truncation
             if truncated and isinstance(env.unwrapped, FootsiesEnv):
@@ -266,6 +312,12 @@ if __name__ == "__main__":
         type=int,
         default=100,
         help="maximum number of snapshots to hold at once in the opponent pool",
+    )
+    parser.add_argument(
+        "--footsies-self-play-mix-bot",
+        type=int,
+        default=None,
+        help="the frequency, in number of episodes, with which the opponent during self-play will be the in-game bot",
     )
     parser.add_argument(
         "--footsies-self-play-port",
@@ -398,13 +450,13 @@ if __name__ == "__main__":
     for k, v in env_kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
 
-    print(f"Importing agent '{args.agent}'")
+    agent = import_agent(args.agent, env, model_kwargs)
+    model_name = args.agent if args.model_name is None else args.model_name
+
+    print(f"Imported agent '{args.agent}' with name '{model_name}'")
     print(f" Agent arguments:")
     for k, v in model_kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
-
-    agent = import_agent(args.agent, env, model_kwargs)
-    model_name = args.agent if args.model_name is None else args.model_name
 
     save = not args.no_save
     load = not args.no_load
@@ -438,6 +490,7 @@ if __name__ == "__main__":
         will_footsies_self_play,
         args.footsies_self_play_snapshot_freq,
         args.footsies_self_play_max_snapshots,
+        args.footsies_self_play_mix_bot,
         args.penalize_truncation,
     )
 

@@ -83,12 +83,12 @@ class FootsiesAgent(FootsiesAgentBase):
         observation_space: Space,
         action_space: Space,
         alpha: float = 0.5,
-        learning_rate: float = 0.00001,
-        discount_factor: float = 0.95,
+        learning_rate: float = 0.01,
+        discount_factor: float = 1.0,
         epsilon: float = 1.0,
         epsilon_decay_rate: float = 0.001,  # after 1000 games, the agent goes from 1 epsilon to 0
         min_epsilon: float = 0.0,
-        min_epsilon_stay: float = 100,  # for how many episodes should the agent stay at the min_epsilon before exploring again
+        min_epsilon_stay: float = 1000,  # for how many episodes should the agent stay at the min_epsilon before exploring again
         shallow: bool = True,
         shallow_size: int = 32,
         q_value_min: float = -1,
@@ -247,6 +247,9 @@ class FootsiesAgent(FootsiesAgentBase):
                 if self.epsilon_stay_counter >= self.min_epsilon_stay:
                     self.epsilon = self.epsilon_start
                     self.epsilon_stay_counter = 0
+                
+                else:
+                    self.epsilon = min(self.epsilon, self.epsilon_decay_rate)
 
             # Accumulate loss as a metric
             self._cummulative_loss += loss.item()
