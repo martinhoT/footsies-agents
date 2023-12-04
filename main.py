@@ -19,6 +19,10 @@ from collections import deque
 
 from agents.logger import TrainingLoggerWrapper
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from stable_baselines3.common.base_class import BaseAlgorithm
+
 """
 Practical considerations:
 
@@ -27,6 +31,16 @@ Practical considerations:
 """
 
 # TODO: add ability to specify SB3 algorithm to use (like "--sb3 ppo"). Should not use the train(...) function, that's for FootsiesAgentBase implementations
+# TODO: try using Optuna
+
+
+def import_sb3(agent_name: str, env: Env, parameters: dict) -> BaseAlgorithm:
+    import stable_baselines3
+    agent_class = stable_baselines3.__dict__[agent_name]
+    return agent_class(
+        env=env,
+        **parameters,
+    )
 
 
 def import_agent(agent_name: str, env: Env, parameters: dict) -> FootsiesAgentBase:
@@ -45,26 +59,30 @@ def import_loggables(agent_name: str, agent: FootsiesAgentBase) -> List[Any]:
     return loggables_module.get_loggables(agent)
 
 
-def load_agent_model(agent: FootsiesAgentBase, model_name: str, folder: str = "saved"):
+def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
     agent_folder_path = os.path.join(folder, model_name)
 
     if os.path.exists(agent_folder_path):
         if not os.path.isdir(agent_folder_path):
             raise OSError(f"the existing file {agent_folder_path} is not a folder!")
 
-        agent.load(agent_folder_path)
+        if isinstance(agent, FootsiesAgentBase):
+            agent.load(agent_folder_path)
+        else:
+            agent.set_parameters(agent_folder_path)
         print("Agent loaded")
 
     else:
         print("Can't load agent, there was no agent saved!")
 
 
-def save_agent_model(agent: FootsiesAgentBase, model_name: str, folder: str = "saved"):
+def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
     agent_folder_path = os.path.join(folder, model_name)
 
     if not os.path.exists(agent_folder_path):
         os.makedirs(agent_folder_path)
 
+    # Both FOOTSIES and SB3 agents use the same method and signature (mostly)
     agent.save(agent_folder_path)
     print("Agent saved")
 
@@ -249,7 +267,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "agent",
         type=str,
-        help=f"agent implementation to use (available: {available_agents_str})",
+        help=f"agent implementation to use (available: {available_agents_str}). If name is in the form 'sb3.<agent>', then the Stable-Baselines3 algorithm <agent> will be used instead",
     )
     parser.add_argument(
         "-e",
@@ -306,7 +324,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--footsies-self-play",
         action="store_true",
-        help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper",
+        help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper. Note: SB3 agents don't support this feature",
     )
     parser.add_argument(
         "--footsies-self-play-snapshot-freq",
@@ -339,7 +357,7 @@ if __name__ == "__main__":
         * 60,  # NOTE: not actually sure if it's 60, for FOOTSIES it may be 50
         help="add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES",
     )
-    parser.add_argument("--episodes", type=int, default=None, help="number of episodes")
+    parser.add_argument("--episodes", type=int, default=None, help="number of episodes. Will be ignored if an SB3 agent is used")
     parser.add_argument("--penalize-truncation", type=float, default=None, help="how much to penalize the agent in case the environment is truncated, useful when a time limit is defined for instance. No penalization by default")
     parser.add_argument(
         "--no-save",
@@ -405,17 +423,30 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Prepare various variables, including keyword arguments
+
     env_kwargs = extract_kwargs(args.env_N_kwargs, args.env_S_kwargs, args.env_B_kwargs)
     model_kwargs = extract_kwargs(
         args.model_N_kwargs, args.model_S_kwargs, args.model_B_kwargs
     )
 
+    is_sb3 = args.agent.startswith("sb3.")
     will_footsies_self_play = args.footsies_self_play and args.env == "FOOTSIES"
+
+    if is_sb3:
+        if will_footsies_self_play:
+            print("WARN: self-play with SB3 algorithms is not supported, self-play will be disabled")
+            will_footsies_self_play = False
+        
+        if args.episodes is not None:
+            print("WARN: specifying a number of episodes for SB3 algorithms is not supported, will be ignored")
 
     if will_footsies_self_play:
         # Set dummy opponent for now, and set later with a copy of the instanced agent
         env_kwargs["opponent"] = lambda o: (False, False, False)
         env_kwargs["opponent_port"] = args.footsies_self_play_port
+
+    # Prepare environment
 
     if args.env == "FOOTSIES":
         print("Initializing FOOTSIES")
@@ -457,10 +488,19 @@ if __name__ == "__main__":
     for k, v in env_kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
 
-    agent = import_agent(args.agent, env, model_kwargs)
-    model_name = args.agent if args.model_name is None else args.model_name
+    # Prepare agent
+    
+    if is_sb3:
+        agent_name = args.agent[4:]
+        agent = import_sb3(agent_name, env, model_kwargs)
+            
+    else:
+        agent_name = args.agent
+        agent = import_agent(agent_name, env, model_kwargs)
 
-    print(f"Imported agent '{args.agent}' with name '{model_name}'")
+    model_name = agent_name if args.model_name is None else args.model_name
+
+    print(f"Imported agent '{agent_name + ' (SB3)' if is_sb3 else ''}' with name '{model_name}'")
     print(f" Agent arguments:")
     for k, v in model_kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
@@ -476,7 +516,7 @@ if __name__ == "__main__":
         footsies_env: FootsiesEnv = env.unwrapped
         footsies_env.set_opponent(agent.extract_policy(env))
 
-    if not args.no_log:
+    if not args.no_log and not is_sb3:
         print("Logging enabled")
         loggables = import_loggables(args.agent, agent)
 
@@ -491,16 +531,37 @@ if __name__ == "__main__":
             **loggables,
         )
 
-    train(
-        agent,
-        env,
-        args.episodes,
-        will_footsies_self_play,
-        args.footsies_self_play_snapshot_freq,
-        args.footsies_self_play_max_snapshots,
-        args.footsies_self_play_mix_bot,
-        args.penalize_truncation,
-    )
+    if is_sb3:
+        try:
+            agent.learn(
+                tb_log_name=args.log_dir,
+                reset_num_timesteps=False,
+                progress_bar=True,
+            )
+
+        # NOTE: duplicated from train(...)
+        except KeyboardInterrupt:
+            print("Training manually interrupted")
+        
+        except Exception as e:
+            print(
+                f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training"
+            )
+            from traceback import print_exception
+
+            print_exception(e)
+
+    else:
+        train(
+            agent,
+            env,
+            args.episodes,
+            will_footsies_self_play,
+            args.footsies_self_play_snapshot_freq,
+            args.footsies_self_play_max_snapshots,
+            args.footsies_self_play_mix_bot,
+            args.penalize_truncation,
+        )
 
     if save:
         save_agent_model(agent, model_name)
