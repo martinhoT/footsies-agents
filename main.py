@@ -26,6 +26,8 @@ Practical considerations:
   Therefore, the policy should ideally be able to consider a history at least 60 frames long.
 """
 
+# TODO: add ability to specify SB3 algorithm to use (like "--sb3 ppo"). Should not use the train(...) function, that's for FootsiesAgentBase implementations
+
 
 def import_agent(agent_name: str, env: Env, parameters: dict) -> FootsiesAgentBase:
     agent_module_str = ".".join(("agents", agent_name, "agent"))
@@ -188,6 +190,7 @@ def train(
             if self_play:
                 # Perform a snapshot of the agent at the current
                 if episode % self_play_snapshot_frequency == 0:
+                    print("Agent snapshot created!")
                     opponent_pool.append(agent.extract_policy(env))
 
                 mix_bot_counter += 1
@@ -197,20 +200,24 @@ def train(
                     if mix_bot_playing:
                         mix_bot_counter = 0
                         mix_bot_playing = False
+                        print("Will use opponents from the opponent pool now!")
                 
                     # Start using the in-game bot instead
                     else:
                         env.unwrapped.set_opponent(None)
                         mix_bot_counter = 0
                         mix_bot_playing = True
+                        print("Will use the in-game opponent now!")
                 
                 # As long as the in-game bot is not playing, we will switch opponent every game
                 if not mix_bot_playing:
+                    print("Switched to new opponent from opponent pool!")
                     new_opponent = random.sample(opponent_pool, 1)[0]
                     env.unwrapped.set_opponent(new_opponent)
             
             # NOTE: necessary so that the FOOTSIES environment can restart on outside truncation
             if truncated and isinstance(env.unwrapped, FootsiesEnv):
+                print("Environment truncated!")
                 env.unwrapped.hard_reset()
 
     except KeyboardInterrupt:
@@ -479,6 +486,7 @@ if __name__ == "__main__":
             log_dir=args.log_dir,
             cummulative_reward=True,
             win_rate=True,
+            truncation=True,
             test_states_number=args.log_test_states_number,
             **loggables,
         )

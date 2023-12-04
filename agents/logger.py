@@ -15,6 +15,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         log_dir: str = None,
         cummulative_reward: bool = False,
         win_rate: bool = False,
+        truncation: bool = False,
         network_histograms: List[nn.Module] = None,
         custom_evaluators: List[Tuple[str, Callable[[], float]]] = None,
         custom_evaluators_over_test_states: List[
@@ -38,6 +39,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             the total accumulated reward since training started
         win_rate: bool
             the agent's win rate. Only makes sense for the FOOTSIES environment
+        truncation: bool
+            the number of truncated episodes
         network_histograms: List[torch.nn.Module]
             list of networks whose weight and bias histograms will be logged
         custom_evaluators: List[Tuple[str, Callable[[], float]]]
@@ -53,6 +56,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.log_frequency = log_frequency
         self.cummulative_reward = cummulative_reward
         self.win_rate = win_rate
+        self.truncation = truncation
         self.network_histograms = (
             [] if network_histograms is None else network_histograms
         )
@@ -69,6 +73,9 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
         self.summary_writer = SummaryWriter(log_dir=log_dir)
         self.cummulative_reward = 0
+        self.total_wins = 0
+        self.total_truncated_episodes = 0
+        self.total_terminated_episodes = 0
         self.current_step = 0
         self.current_episode = 0
 
@@ -84,6 +91,14 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         if terminated or truncated:
             self.current_episode += 1
 
+        if terminated:
+            if reward == 1.0:
+                self.total_wins += 1
+            self.total_terminated_episodes += 1
+        
+        if truncated:
+            self.total_truncated_episodes += 1
+
         # Write logs
         if self.current_step % self.log_frequency == 0:
             if self.cummulative_reward:
@@ -95,12 +110,16 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             if self.win_rate:
                 self.summary_writer.add_scalar(
                     "Performance/Win rate",
-                    (self.current_episode + self.cummulative_reward)
-                    / (2 * self.current_episode)
-                    if self.current_episode >= 1
-                    else 0.5,
+                    self.total_wins / self.total_terminated_episodes,
                     self.current_step,
                 )
+            if self.truncation:
+                self.summary_writer.add_scalar(
+                    "Training/Truncated episodes",
+                    self.total_truncated_episodes / self.current_episode,
+                    self.current_step,
+                )
+
 
             for network in self.network_histograms:
                 for layer_name, layer in network.named_parameters():
