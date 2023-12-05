@@ -59,6 +59,8 @@ def import_loggables(agent_name: str, agent: FootsiesAgentBase) -> List[Any]:
 def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
     agent_folder_path = os.path.join(folder, model_name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
+    if not is_footsies_agent:
+        agent_folder_path = agent_folder_path + ".zip"
 
     if os.path.exists(agent_folder_path):
         if is_footsies_agent and not os.path.isdir(agent_folder_path):
@@ -231,11 +233,6 @@ def train(
                     print("Switched to new opponent from opponent pool!")
                     new_opponent = random.sample(opponent_pool, 1)[0]
                     env.unwrapped.set_opponent(new_opponent)
-            
-            # NOTE: necessary so that the FOOTSIES environment can restart on outside truncation
-            if truncated and isinstance(env.unwrapped, FootsiesEnv):
-                print("Environment truncated!")
-                env.unwrapped.hard_reset()
 
     except KeyboardInterrupt:
         print("Training manually interrupted")
@@ -534,6 +531,10 @@ if __name__ == "__main__":
 
     if is_sb3:
         try:
+            from stable_baselines3.common.logger import configure
+            logger = configure(args.log_dir, ["tensorboard"])
+            agent.set_logger(logger)
+
             agent.learn(
                 total_timesteps=args.time_steps,
                 tb_log_name=args.log_dir,

@@ -163,17 +163,11 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                 state, _, terminated, truncated, _ = env.step(action)
 
                 if terminated or truncated:
-                    # NOTE: necessary so that the FOOTSIES environment can restart on outside truncation
-                    if truncated and isinstance(env.unwrapped, FootsiesEnv):
-                        env.unwrapped.hard_reset()
                     env.reset()
 
             self.test_states.append((state, None))
 
-            if isinstance(env.unwrapped, FootsiesEnv):
-                env.unwrapped.hard_reset()
-            else:
-                env.close()
+            env.close()
 
     def load(self, folder_path: str):
         self.agent.load(folder_path)

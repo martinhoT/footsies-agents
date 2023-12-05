@@ -1,10 +1,10 @@
 #!/bin/sh
-# 350k timesteps should amount to ~30 mins
+# 300k timesteps should amount to 1 min
 python3 main.py sb3.ppo \
     --footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
     --footsies-wrapper-norm \
     --footsies-wrapper-acd \
-    --time-steps 350000 \
+    --time-steps 10000000 \
     -mS \
         policy MlpPolicy \
     -mN \

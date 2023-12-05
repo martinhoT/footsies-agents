@@ -322,7 +322,10 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def save(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")
+        dropout = self.q_network.has_dropout
+        self.q_network.has_dropout = False
         torch.save(self.q_network.state_dict(), model_path)
+        self.q_network.has_dropout = dropout
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         q_network = deepcopy(self.q_network)
