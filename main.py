@@ -58,12 +58,13 @@ def import_loggables(agent_name: str, agent: FootsiesAgentBase) -> List[Any]:
 
 def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
     agent_folder_path = os.path.join(folder, model_name)
+    is_footsies_agent = isinstance(agent, FootsiesAgentBase)
 
     if os.path.exists(agent_folder_path):
-        if not os.path.isdir(agent_folder_path):
-            raise OSError(f"the existing file {agent_folder_path} is not a folder!")
+        if is_footsies_agent and not os.path.isdir(agent_folder_path):
+            raise OSError(f"the existing file '{agent_folder_path}' is not a folder!")
 
-        if isinstance(agent, FootsiesAgentBase):
+        if is_footsies_agent:
             agent.load(agent_folder_path)
         else:
             agent.set_parameters(agent_folder_path)
@@ -75,8 +76,9 @@ def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, 
 
 def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
     agent_folder_path = os.path.join(folder, model_name)
+    is_footsies_agent = isinstance(agent, FootsiesAgentBase)
 
-    if not os.path.exists(agent_folder_path):
+    if is_footsies_agent and not os.path.exists(agent_folder_path):
         os.makedirs(agent_folder_path)
 
     # Both FOOTSIES and SB3 agents use the same method and signature (mostly)
@@ -355,6 +357,7 @@ if __name__ == "__main__":
         help="add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES",
     )
     parser.add_argument("--episodes", type=int, default=None, help="number of episodes. Will be ignored if an SB3 agent is used")
+    parser.add_argument("--time-steps", type=int, default=None, help="number of time steps. Will be ignored if a FOOTSIES agent is used")
     parser.add_argument("--penalize-truncation", type=float, default=None, help="how much to penalize the agent in case the environment is truncated, useful when a time limit is defined for instance. No penalization by default")
     parser.add_argument(
         "--no-save",
@@ -532,6 +535,7 @@ if __name__ == "__main__":
     if is_sb3:
         try:
             agent.learn(
+                total_timesteps=args.time_steps,
                 tb_log_name=args.log_dir,
                 reset_num_timesteps=False,
                 progress_bar=True,
