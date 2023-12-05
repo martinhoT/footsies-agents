@@ -16,12 +16,10 @@ from tqdm import tqdm
 from itertools import count
 from typing import List, Any
 from collections import deque
+from stable_baselines3.common.base_class import BaseAlgorithm
 
 from agents.logger import TrainingLoggerWrapper
 
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from stable_baselines3.common.base_class import BaseAlgorithm
 
 """
 Practical considerations:
@@ -30,13 +28,12 @@ Practical considerations:
   Therefore, the policy should ideally be able to consider a history at least 60 frames long.
 """
 
-# TODO: add ability to specify SB3 algorithm to use (like "--sb3 ppo"). Should not use the train(...) function, that's for FootsiesAgentBase implementations
 # TODO: try using Optuna
 
 
 def import_sb3(agent_name: str, env: Env, parameters: dict) -> BaseAlgorithm:
     import stable_baselines3
-    agent_class = stable_baselines3.__dict__[agent_name]
+    agent_class = stable_baselines3.__dict__[agent_name.upper()]
     return agent_class(
         env=env,
         **parameters,
@@ -500,7 +497,7 @@ if __name__ == "__main__":
 
     model_name = agent_name if args.model_name is None else args.model_name
 
-    print(f"Imported agent '{agent_name + ' (SB3)' if is_sb3 else ''}' with name '{model_name}'")
+    print(f"Imported agent '{agent_name + (' (SB3)' if is_sb3 else '')}' with name '{model_name}'")
     print(f" Agent arguments:")
     for k, v in model_kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
@@ -527,6 +524,7 @@ if __name__ == "__main__":
             cummulative_reward=True,
             win_rate=True,
             truncation=True,
+            episode_length=True,
             test_states_number=args.log_test_states_number,
             **loggables,
         )

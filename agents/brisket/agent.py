@@ -239,17 +239,14 @@ class FootsiesAgent(FootsiesAgentBase):
             self.trainY = torch.tensor([], device=self.device, requires_grad=False)
 
             # Linear epsilon decay
-            self.epsilon = self.epsilon - self.epsilon_decay_rate
+            self.epsilon = max(self.min_epsilon, self.epsilon - self.epsilon_decay_rate)
             # Once the minimum is reached, stay at the minimum for some episodes
-            if self.epsilon < self.min_epsilon:
+            if self.epsilon <= self.min_epsilon:
                 self.epsilon_stay_counter += 1
                 # After staying at the minimum for some time, reset exploration (avoid convergence to a local optimum)
                 if self.epsilon_stay_counter >= self.min_epsilon_stay:
                     self.epsilon = self.epsilon_start
                     self.epsilon_stay_counter = 0
-                
-                else:
-                    self.epsilon = min(self.epsilon, self.epsilon_decay_rate)
 
             # Accumulate loss as a metric
             self._cummulative_loss += loss.item()

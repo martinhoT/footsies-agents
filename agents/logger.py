@@ -5,6 +5,7 @@ from torch.utils.tensorboard import SummaryWriter
 from agents.base import FootsiesAgentBase
 from typing import List, Callable, Any, Tuple
 from footsies_gym.envs.footsies import FootsiesEnv
+from collections import deque
 
 
 class TrainingLoggerWrapper(FootsiesAgentBase):
@@ -16,6 +17,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         cummulative_reward: bool = False,
         win_rate: bool = False,
         truncation: bool = False,
+        episode_length: bool = False,
         network_histograms: List[nn.Module] = None,
         custom_evaluators: List[Tuple[str, Callable[[], float]]] = None,
         custom_evaluators_over_test_states: List[
@@ -41,6 +43,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             the agent's win rate. Only makes sense for the FOOTSIES environment
         truncation: bool
             the number of truncated episodes
+        episode_length: bool
+            the average length of the episodes
         network_histograms: List[torch.nn.Module]
             list of networks whose weight and bias histograms will be logged
         custom_evaluators: List[Tuple[str, Callable[[], float]]]
@@ -57,6 +61,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.cummulative_reward = cummulative_reward
         self.win_rate = win_rate
         self.truncation = truncation
+        self.episode_length = episode_length
         self.network_histograms = (
             [] if network_histograms is None else network_histograms
         )
@@ -78,6 +83,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.total_terminated_episodes = 0
         self.current_step = 0
         self.current_episode = 0
+        self.current_episode_length = 0
+        self.episode_lengths = deque([], maxlen=100)
 
     def act(self, obs) -> "any":
         return self.agent.act(obs)
@@ -87,15 +94,18 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
         self.cummulative_reward += reward
         self.current_step += 1
+        self.current_episode_length += 1
 
         if terminated or truncated:
             self.current_episode += 1
+            self.episode_lengths.append(self.current_episode_length)
+            self.current_episode_length = 0
 
         if terminated:
-            if reward == 1.0:
+            if reward > 0.0:
                 self.total_wins += 1
             self.total_terminated_episodes += 1
-        
+
         if truncated:
             self.total_truncated_episodes += 1
 
@@ -116,10 +126,16 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             if self.truncation:
                 self.summary_writer.add_scalar(
                     "Training/Truncated episodes",
-                    self.total_truncated_episodes / self.current_episode,
+                    self.total_truncated_episodes,
                     self.current_step,
                 )
-
+            if self.episode_length:
+                self.summary_writer.add_scalar(
+                    "Training/Episode length",
+                    sum(self.episode_lengths) / len(self.episode_lengths),
+                    self.current_step,
+                )
+                self.episode_lengths.clear()
 
             for network in self.network_histograms:
                 for layer_name, layer in network.named_parameters():

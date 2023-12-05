@@ -1,5 +1,6 @@
 from agents.base import FootsiesAgentBase
-# from gymnasium import Env
+from gymnasium import Env
+from typing import Callable, Tuple
 
 
 class FootsiesAgent(FootsiesAgentBase):
