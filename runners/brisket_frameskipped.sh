@@ -1,2 +1,8 @@
 #!/bin/sh
-python3 main.py brisket --footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 --footsies-wrapper-norm --footsies-wrapper-acd --footsies-wrapper-fs --model-name brisket_frameskipped -mN epsilon_decay_rate 0.00005 "$@"
+python3 main.py brisket \
+    --footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
+    --footsies-wrapper-norm \
+    --footsies-wrapper-acd \
+    --footsies-wrapper-fs \
+    --model-name brisket_frameskipped \
+    "$@"
