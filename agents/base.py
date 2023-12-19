@@ -14,7 +14,7 @@ class FootsiesAgentBase(ABC):
         """Get the chosen action for the currently observed environment state"""
 
     @abstractmethod
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
+    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
         """After acting in the environment, process the perceived observation and reward"""
 
     def preprocess(self, env: Env):

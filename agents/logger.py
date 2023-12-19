@@ -89,7 +89,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
     def act(self, obs) -> "any":
         return self.agent.act(obs)
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
+    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
         self.agent.update(next_obs, reward, terminated, truncated)
 
         self.cummulative_reward += reward
