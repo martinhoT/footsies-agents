@@ -29,7 +29,8 @@ Practical considerations:
   Therefore, the policy should ideally be able to consider a history at least 60 frames long.
 """
 
-# TODO: try using Optuna
+# TODO: try Optuna
+# TODO: try adding noise to some observation variables (such as position) for better generalization?
 
 
 def import_sb3(agent_name: str, env: Env, parameters: dict) -> BaseAlgorithm:
@@ -204,7 +205,7 @@ def train(
                 if penalize_truncation is not None and truncated:
                     reward = penalize_truncation
                 
-                agent.update(obs, reward, terminated, truncated)
+                agent.update(obs, reward, terminated, truncated, info)
 
             # Set a new opponent from the opponent pool
             if self_play:
