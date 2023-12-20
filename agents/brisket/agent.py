@@ -192,7 +192,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
         return obs
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
+    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
         next_obs = self._obs_to_torch(next_obs)
 
         # Get one-hot encoded action
