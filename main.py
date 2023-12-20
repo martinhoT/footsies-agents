@@ -19,6 +19,7 @@ from collections import deque
 from stable_baselines3.common.base_class import BaseAlgorithm
 
 from agents.logger import TrainingLoggerWrapper
+from agents.utils import snapshot_sb3_policy, wrap_policy
 
 
 """
@@ -230,7 +231,7 @@ def train(
                 
                 # As long as the in-game bot is not playing, we will switch opponent every game
                 if not mix_bot_playing:
-                    print("Switched to new opponent from opponent pool!")
+                    # print("Switched to new opponent from opponent pool!")
                     new_opponent = random.sample(opponent_pool, 1)[0]
                     env.unwrapped.set_opponent(new_opponent)
 
@@ -320,7 +321,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--footsies-self-play",
         action="store_true",
-        help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper. Note: SB3 agents don't support this feature",
+        help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper",
     )
     parser.add_argument(
         "--footsies-self-play-snapshot-freq",
@@ -431,10 +432,6 @@ if __name__ == "__main__":
     will_footsies_self_play = args.footsies_self_play and args.env == "FOOTSIES"
 
     if is_sb3:
-        if will_footsies_self_play:
-            print("WARN: self-play with SB3 algorithms is not supported, self-play will be disabled")
-            will_footsies_self_play = False
-        
         if args.episodes is not None:
             print("WARN: specifying a number of episodes for SB3 algorithms is not supported, will be ignored")
 
@@ -511,7 +508,10 @@ if __name__ == "__main__":
     # Set a good default agent for self-play
     if will_footsies_self_play:
         footsies_env: FootsiesEnv = env.unwrapped
-        footsies_env.set_opponent(agent.extract_policy(env))
+        if is_sb3:
+            footsies_env.set_opponent(wrap_policy(env, snapshot_sb3_policy(agent)))
+        else:
+            footsies_env.set_opponent(agent.extract_policy(env))
 
     if not args.no_log and not is_sb3:
         print("Logging enabled")
@@ -534,6 +534,10 @@ if __name__ == "__main__":
             from stable_baselines3.common.logger import configure
             logger = configure(args.log_dir, ["tensorboard"])
             agent.set_logger(logger)
+
+            # opponent_pool = deque([], maxlen=args.self_play_max_snapshots)
+            # if will_footsies_self_play:
+            #     opponent_pool.append(env.unwrapped.opponent)
 
             agent.learn(
                 total_timesteps=args.time_steps,

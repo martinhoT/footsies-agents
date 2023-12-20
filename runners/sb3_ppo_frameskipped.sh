@@ -4,8 +4,9 @@ python3 main.py sb3.ppo \
     --footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
     --footsies-wrapper-norm \
     --footsies-wrapper-acd \
-    --time-steps 10000000 \
-    --model-name ppo \
+    --footsies-wrapper-fs \
+    --time-steps 1000000 \
+    --model-name ppo_frameskipped \
     -mS \
         policy MlpPolicy \
     -mN \
