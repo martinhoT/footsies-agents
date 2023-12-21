@@ -5,11 +5,9 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 $agent_script \
     --no-save \
     --no-log \
-    -mN \
-        epsilon 0 \
-        min_epsilon 0 \
     -eS \
         render_mode human \
+        sync_mode synced_non_blocking \
     -eB \
         fast_forward false \
         vs_player true \

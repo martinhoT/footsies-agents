@@ -1,5 +1,6 @@
 from copy import deepcopy
 import os
+import numpy as np
 import torch
 from torch import nn
 from agents.base import FootsiesAgentBase
@@ -33,7 +34,7 @@ class PlayerModel:
 
         self.network = PlayerModelNetwork(obs_size, n_moves)
         self.loss_function = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(params=self.network.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.SGD(params=self.network.parameters(), lr=1e2)
 
         self.x_batch_as_list = []
         self.y_batch_as_list = []
@@ -47,7 +48,7 @@ class PlayerModel:
         self.step += 1
 
         if self.step >= self.optimize_frequency:
-            x_batch = torch.stack(self.x_batch_as_list)
+            x_batch = torch.cat(self.x_batch_as_list)
             y_batch = torch.stack(self.y_batch_as_list)
             error = None
 
@@ -70,10 +71,17 @@ class PlayerModel:
 
             self.x_batch_as_list.clear()
             self.y_batch_as_list.clear()
+            self.step = 0
 
     def predict(self, obs: torch.Tensor) -> "any":
         with torch.no_grad():
-            return torch.argmax(self.network(obs))
+            return torch.argmax(self.network(obs), axis=1)
+
+    def load(self, path: str):
+        self.network.load_state_dict(torch.load(path))
+
+    def save(self, path: str):
+        torch.save(self.network.state_dict(), path)
 
 
 # TODO: there are three different ways we can predict actions: primitive actions discretized, primitive actions as tuple, and moves. Are all supported?
@@ -121,7 +129,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.p2_model.update(self.current_observation, p2_move)
 
     def _obs_to_tensor(self, obs):
-        return torch.tensor(obs, dtype=torch.float32)
+        return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
 
     def _move_onehot(self, move: int):
         onehot = torch.zeros((self.n_moves,))
@@ -155,9 +163,12 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def _initialize_test_states(self, test_states):
         if self._test_observations is None or self._test_actions is None:
-            observations, actions = list(zip(*test_states))
-            self._test_observations = torch.tensor(observations)
-            self._test_actions = torch.tensor(actions)
+            # If the state is terminal, then there will be no action. Discard those states
+            observations, actions = map(np.array,
+                zip(*filter(lambda sa: sa[1] is not None, test_states))
+            )
+            self._test_observations = torch.tensor(observations, dtype=torch.float32)
+            self._test_actions = torch.tensor(actions, dtype=torch.float32)
 
     def evaluate_divergence_between_players(self, test_states) -> float:
         self._initialize_test_states(test_states)

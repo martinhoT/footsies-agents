@@ -90,7 +90,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         return self.agent.act(obs)
 
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
-        self.agent.update(next_obs, reward, terminated, truncated)
+        self.agent.update(next_obs, reward, terminated, truncated, info)
 
         self.cummulative_reward += reward
         self.current_step += 1

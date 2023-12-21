@@ -7,7 +7,7 @@ class FootsiesAgent(FootsiesAgentBase):
     def act(self, obs) -> "any":
         ...
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool):
+    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
         ...
 
     # def preprocess(self, env: Env):
