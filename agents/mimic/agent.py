@@ -158,19 +158,23 @@ class PlayerModel:
             self.step = 0
 
     def predict(self, obs: torch.Tensor, deterministic: bool = False, snap_to_fraction_of: int = 10) -> "any":
-        torch
         with torch.no_grad():
             out = self.network(obs)
             snapped = torch.round(snap_to_fraction_of * out) / snap_to_fraction_of
-            probs = snapped / torch.sum(snapped)
+            probs = snapped / torch.sum(snapped, axis=1, keepdim=True)
             
             if deterministic:
                 return torch.argmax(probs, axis=1)
             else:    
-                probs_cummulative = torch.cumsum(probs, 0)
-                sampled = torch.rand((1,)).item()
-                return torch.nonzero(sampled < probs_cummulative)[0]
-            
+                probs_cummulative = torch.cumsum(probs, 1)
+                sampled = torch.rand((probs_cummulative.shape[0], 1))
+                # I just want to know the index of the first time sampled < probs_cummulative on each row, but it's convoluted
+                nonzeros = torch.nonzero(sampled < probs_cummulative)
+                # Information across all rows is in a single dimension, so we need to determine the points in which we transition from one row to the next
+                i = torch.squeeze(torch.nonzero((nonzeros[:-1] - nonzeros[1:])[:, 0]) + 1, dim=1)
+                # Add the initial index that is not taken into account by the previous operation
+                i = torch.cat((torch.tensor([0]), i))
+                return nonzeros[i, 1]
 
     def load(self, path: str):
         self.network.load_state_dict(torch.load(path))
@@ -206,6 +210,12 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self._test_observations = None
         self._test_actions = None
+        self._p1_correct = 0
+        self._p2_correct = 0
+        self._random_correct = 0
+        # Multiply the "correct" counters by the decay to avoid infinitely increasing counters and prioritize recent values.
+        # Set to a value such that the 1000th counter value in the past will have a weight of 1%
+        self._correct_decay = 0.01 ** (1 / 1000)
 
     def act(self, obs) -> "any":
         obs = self._obs_to_tensor(obs)
@@ -218,11 +228,18 @@ class FootsiesAgent(FootsiesAgentBase):
         key = "action" if self.over_primitive_actions else "move"
         # This is assuming that, when using moves, all relevant moves have contiguous IDs from 0, without breaks
         # That is, the irrelevant moves (WIN and DEAD) have the largest IDs
-        p1_move = self._move_onehot(info["p1_" + key])
-        p2_move = self._move_onehot(info["p2_" + key])
+        p1_move = info["p1_" + key]
+        p2_move = info["p2_" + key]
+        p1_move_oh = self._move_onehot(p1_move)
+        p2_move_oh = self._move_onehot(p2_move)
 
-        self.p1_model.update(self.current_observation, p1_move)
-        self.p2_model.update(self.current_observation, p2_move)
+        self.p1_model.update(self.current_observation, p1_move_oh)
+        self.p2_model.update(self.current_observation, p2_move_oh)
+
+        # Update metrics
+        self._p1_correct = (self._p1_correct * self._correct_decay) + (self.p1_model.predict(self.current_observation) == p1_move)
+        self._p2_correct = (self._p2_correct * self._correct_decay) + (self.p2_model.predict(self.current_observation) == p2_move)
+        self._random_correct = (self._random_correct * self._correct_decay) + (torch.rand((1,)).item() < 1 / self.n_moves)
 
     def _obs_to_tensor(self, obs):
         return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
@@ -274,13 +291,10 @@ class FootsiesAgent(FootsiesAgentBase):
 
         return torch.sum(p1_predicted == p2_predicted) / self._test_actions.size(0)
 
-    # TODO: accuracy doesn't make sense
-    def evaluate_accuracy(self, test_states: List[Tuple[Any, Any]]) -> float:
-        self._initialize_test_states(test_states)
-
-        predicted = self.p1_model.predict(self._test_observations)
-
-        return torch.sum(predicted == self._test_actions) / self._test_actions.size(0)
+    def evaluate_performance(self, p1: bool) -> float:
+        """Evaluate relative performance against a random predictor (how many times does it predict better than a random predictor)"""
+        correct = self._p1_correct if p1 else self._p2_correct        
+        return correct / self._random_correct
 
     # NOTE: this only works if the class was defined to be over primitive actions
     def extract_policy(
