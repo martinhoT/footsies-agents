@@ -174,7 +174,15 @@ class PlayerModel:
                 i = torch.squeeze(torch.nonzero((nonzeros[:-1] - nonzeros[1:])[:, 0]) + 1, dim=1)
                 # Add the initial index that is not taken into account by the previous operation
                 i = torch.cat((torch.tensor([0]), i))
-                return nonzeros[i, 1]
+                try:
+                    return nonzeros[i, 1]
+                except IndexError as e:
+                    print("wrong indexing")
+                    print(" nonzeros:", nonzeros)
+                    print(" i:", i)
+                    print(" obs:", obs)
+                    print(" probs:", probs)
+                    raise e
 
     def load(self, path: str):
         self.network.load_state_dict(torch.load(path))
@@ -217,10 +225,11 @@ class FootsiesAgent(FootsiesAgentBase):
         # Set to a value such that the 1000th counter value in the past will have a weight of 1%
         self._correct_decay = 0.01 ** (1 / 1000)
 
-    def act(self, obs) -> "any":
+    def act(self, obs, p1: bool = True, deterministic: bool = False) -> "any":
+        model = self.p1_model if p1 else self.p2_model
         obs = self._obs_to_tensor(obs)
         self.current_observation = obs
-        return self.p1_model.predict(obs)
+        return model.predict(obs, deterministic=deterministic)
 
     def update(
         self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict

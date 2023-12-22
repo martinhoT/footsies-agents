@@ -86,8 +86,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.current_episode_length = 0
         self.episode_lengths = deque([], maxlen=100)
 
-    def act(self, obs) -> "any":
-        return self.agent.act(obs)
+    def act(self, obs, *args, **kwargs) -> "any":
+        return self.agent.act(obs, *args, **kwargs)
 
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
         self.agent.update(next_obs, reward, terminated, truncated, info)
