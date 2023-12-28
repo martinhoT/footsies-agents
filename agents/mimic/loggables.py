@@ -15,5 +15,7 @@ def get_loggables(agent: FootsiesAgent):
         ],
         "custom_evaluators_over_test_states": [
             ("Learning/Divergence", agent.evaluate_divergence_between_players),
+            ("Learning/Uncertainty_P1", lambda test_states: agent.evaluate_decision_entropy(test_states, True)),
+            ("Learning/Uncertainty_P1", lambda test_states: agent.evaluate_decision_entropy(test_states, False)),
         ],
     }

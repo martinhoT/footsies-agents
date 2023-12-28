@@ -16,15 +16,17 @@ RELEVANT_MOVES = set(FootsiesMove) - {FootsiesMove.WIN, FootsiesMove.DEAD}
 class InputClip(nn.Module):
     # Range of [5, 5] allows representing the sigmoid values of 0.01 and 0.99
     # The idea is that the network should not be too sure or unsure of the outcomes, and allow better adaptability by avoiding very small gradients at the sigmoid's tails
-    # NOTE: watch out, gradients can become 0 because of this, maybe make a leaky version
-    def __init__(self, minimum: float = -5, maximum: float = 5):
+    # NOTE: watch out, gradients can become 0 without leaking, a leaky version has better adaptability (as in the Loss of Plasticity in Deep Continual Learning paper)
+    def __init__(self, minimum: float = -5, maximum: float = 5, leaky_coef: float = 0):
         """Clip input into range"""
         super().__init__()
         self.minimum = minimum
         self.maximum = maximum
+        self.leaky_coef = leaky_coef
     
     def forward(self, x: torch.Tensor):
-        return torch.clip(x, self.minimum, self.maximum)
+
+        return torch.clip(x, min=self.minimum + self.leaky_coef * (x - 5), max=self.maximum + self.leaky_coef * (x + 5))
 
 
 class ProbabilityDistribution(nn.Module):
@@ -51,7 +53,7 @@ class DebugStoreRecent(nn.Module):
 # Also, softmax has the problem of not allowing more than one dominant action (for a stochastic agent, for instance), it only focuses on one of the inputs.
 # Softmax also makes the gradients for each output neuron dependent on the values of the other output neurons
 class PlayerModelNetwork(nn.Module):
-    def __init__(self, input_dim: int, output_dim: int, output_sigmoid: bool = False):
+    def __init__(self, input_dim: int, output_dim: int, output_sigmoid: bool = False, leaky_coef: float = 0):
         super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(input_dim, 32),
@@ -65,7 +67,7 @@ class PlayerModelNetwork(nn.Module):
         self.debug_store_3 = DebugStoreRecent()
 
         if output_sigmoid:
-            self.layers.append(InputClip())
+            self.layers.append(InputClip(leaky_coef=leaky_coef))
             self.layers.append(self.debug_store_1)
             self.layers.append(nn.Sigmoid())
             self.layers.append(self.debug_store_2)
@@ -88,10 +90,11 @@ class PlayerModel:
         optimize_frequency: int = 1000,
         distribution_noise: float = 1e-4,
         use_sigmoid: bool = True,
+        leaky_coef: float = 0,
     ):
         self.optimize_frequency = optimize_frequency
 
-        self.network = PlayerModelNetwork(obs_size, n_moves, output_sigmoid=use_sigmoid)
+        self.network = PlayerModelNetwork(obs_size, n_moves, output_sigmoid=use_sigmoid, leaky_coef=leaky_coef)
         # NOTE: CrossEntropyLoss already applies Softmax at the end, which is redundant
         # self.loss_function = nn.CrossEntropyLoss()
         # NOTE: when we don't have a probability distribution, don't use this, since 0s in the target don't have any effect compared to 1s.
@@ -146,9 +149,11 @@ class PlayerModel:
                 self.cummulative_loss += loss.item()
                 self.cummulative_loss_n += 1
 
+                # TODO: investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
                 if all(
                     not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
                     for layer in self.network.layers
+                    if "weight" in layer.__dict__ and "bias" in layer.__dict__
                 ):
                     raise RuntimeError("learning is dead, gradients are 0!")
 
@@ -159,9 +164,7 @@ class PlayerModel:
 
     def predict(self, obs: torch.Tensor, deterministic: bool = False, snap_to_fraction_of: int = 10) -> "any":
         with torch.no_grad():
-            out = self.network(obs)
-            snapped = torch.round(snap_to_fraction_of * out) / snap_to_fraction_of
-            probs = snapped / torch.sum(snapped, axis=1, keepdim=True)
+            probs = self.probability_distribution(obs, snap_to_fraction_of)
             
             if deterministic:
                 return torch.argmax(probs, axis=1)
@@ -184,6 +187,20 @@ class PlayerModel:
                     print(" probs:", probs)
                     raise e
 
+
+    # TODO: if over primitive actions, the model is prone to having great uncertainty
+    def probability_distribution(self, obs: torch.Tensor, snap_to_fraction_of: int = 10):
+        with torch.no_grad():
+            out = self.network(obs)
+            snapped = torch.round(snap_to_fraction_of * out) / snap_to_fraction_of
+            if torch.all(snapped == 0):
+                print(f"Oops, one distribution had all 0s ({out})! Will use uniform distribution")
+                probs = torch.ones(snapped.shape) / snapped.shape[1]
+            else:
+                probs = snapped / torch.sum(snapped, axis=1, keepdim=True)
+            
+        return probs
+
     def load(self, path: str):
         self.network.load_state_dict(torch.load(path))
 
@@ -200,6 +217,7 @@ class FootsiesAgent(FootsiesAgentBase):
         over_primitive_actions: bool = False,
         optimize_frequency: int = 1000,
         use_sigmoid: bool = True,
+        leaky_coef: float = 0,
     ):
         self.observation_space = observation_space
         self.action_space = action_space
@@ -208,10 +226,10 @@ class FootsiesAgent(FootsiesAgentBase):
         self.n_moves = action_space.n if over_primitive_actions else len(RELEVANT_MOVES)
 
         self.p1_model = PlayerModel(
-            observation_space.shape[0], self.n_moves, optimize_frequency, use_sigmoid=use_sigmoid
+            observation_space.shape[0], self.n_moves, optimize_frequency, use_sigmoid=use_sigmoid, leaky_coef=leaky_coef,
         )
         self.p2_model = PlayerModel(
-            observation_space.shape[0], self.n_moves, optimize_frequency, use_sigmoid=use_sigmoid
+            observation_space.shape[0], self.n_moves, optimize_frequency, use_sigmoid=use_sigmoid, leaky_coef=leaky_coef,
         )
 
         self.current_observation = None
@@ -242,6 +260,7 @@ class FootsiesAgent(FootsiesAgentBase):
         p1_move_oh = self._move_onehot(p1_move)
         p2_move_oh = self._move_onehot(p2_move)
 
+        # TODO: evaluate only when a move transition occurs (essentially frame skipping)
         self.p1_model.update(self.current_observation, p1_move_oh)
         self.p2_model.update(self.current_observation, p2_move_oh)
 
@@ -257,6 +276,13 @@ class FootsiesAgent(FootsiesAgentBase):
         onehot = torch.zeros((self.n_moves,))
         onehot[move] = 1
         return onehot
+
+    # From https://en.wikipedia.org/wiki/Hick's_law#Law
+    def decision_entropy(self, obs: torch.Tensor, p1: bool) -> float:
+        model = self.p1_model if p1 else self.p2_model
+
+        probs = model.probability_distribution(obs)
+        return torch.sum(probs * torch.log2(1 / probs + 1))
 
     def load(self, folder_path: str):
         p1_path = os.path.join(folder_path, "p1")
@@ -283,7 +309,12 @@ class FootsiesAgent(FootsiesAgentBase):
         model.cummulative_loss_n = 0
         return res
 
-    def _initialize_test_states(self, test_states):
+    def evaluate_performance(self, p1: bool) -> float:
+        """Evaluate relative performance against a random predictor (how many times does it predict better than a random predictor)"""
+        correct = self._p1_correct if p1 else self._p2_correct
+        return correct / self._random_correct
+
+    def _initialize_test_states(self, test_states: List[torch.Tensor]):
         if self._test_observations is None or self._test_actions is None:
             # If the state is terminal, then there will be no action. Discard those states
             observations, actions = map(
@@ -292,7 +323,7 @@ class FootsiesAgent(FootsiesAgentBase):
             self._test_observations = torch.tensor(observations, dtype=torch.float32)
             self._test_actions = torch.tensor(actions, dtype=torch.float32)
 
-    def evaluate_divergence_between_players(self, test_states) -> float:
+    def evaluate_divergence_between_players(self, test_states: List[torch.Tensor]) -> float:
         self._initialize_test_states(test_states)
 
         p1_predicted = self.p1_model.predict(self._test_observations, deterministic=True)
@@ -300,10 +331,10 @@ class FootsiesAgent(FootsiesAgentBase):
 
         return torch.sum(p1_predicted == p2_predicted) / self._test_actions.size(0)
 
-    def evaluate_performance(self, p1: bool) -> float:
-        """Evaluate relative performance against a random predictor (how many times does it predict better than a random predictor)"""
-        correct = self._p1_correct if p1 else self._p2_correct        
-        return correct / self._random_correct
+    def evaluate_decision_entropy(self, test_states: List[torch.Tensor], p1: bool) -> float:
+        self._initialize_test_states(test_states)
+
+        return self.decision_entropy(self._test_observations, p1=p1)
 
     # NOTE: this only works if the class was defined to be over primitive actions
     def extract_policy(

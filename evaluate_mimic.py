@@ -23,6 +23,7 @@ footsies_env = FootsiesEnv(
     log_file=os.path.join(os.getcwd(), "out.log"),
     log_file_overwrite=True,
     by_example=True,
+    fast_forward=False,
 )
 
 statistics = FootsiesStatistics(footsies_env)
@@ -50,6 +51,7 @@ ax.grid()
 xdata, ydata = [], []
 
 def init():
+    ax.set_title("Win rate")
     ax.set_ylim(ymin=-0.1, ymax=1.1)
     ax.set_xlim(1, 10)
     del xdata[:]
