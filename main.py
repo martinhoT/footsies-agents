@@ -20,6 +20,8 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import snapshot_sb3_policy, wrap_policy
+from args import parse_args
+from self_play import SelfPlayManager
 
 
 """
@@ -90,67 +92,12 @@ def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, 
     print("Agent saved")
 
 
-def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
-    kwargs = {}
-    if n_kwargs is not None:
-        if len(n_kwargs) % 2 != 0:
-            raise ValueError(
-                "the values passed to '--[...]-F-kwargs' should be a list of key-value pairs"
-            )
-
-        def convert_to_int_or_float(number):
-            try:
-                res = int(number)
-            except ValueError:
-                res = float(number)
-
-            return res
-
-        kwargs.update(
-            {
-                k: convert_to_int_or_float(v)
-                for k, v in zip(n_kwargs[0::2], n_kwargs[1::2])
-            }
-        )
-
-    if s_kwargs is not None:
-        if len(s_kwargs) % 2 != 0:
-            raise ValueError(
-                "the values passed to '--[...]-S-kwargs' should be a list of key-value pairs"
-            )
-
-        kwargs.update(dict(zip(s_kwargs[0::2], s_kwargs[1::2])))
-
-    if b_kwargs is not None:
-        if len(b_kwargs) % 2 != 0:
-            raise ValueError(
-                "the values passed to '--[...]-B-kwargs' should be a list of key-value pairs"
-            )
-
-        for k, v in zip(b_kwargs[0::2], b_kwargs[1::2]):
-            v_lower = v.lower()
-            if v_lower == "true":
-                kwargs[k] = True
-            elif v_lower == "false":
-                kwargs[k] = False
-            else:
-                raise ValueError(
-                    f"the value passed to key '{k}' on the '--[...]-B-kwargs' kwarg list is not a boolean ('{v}' is not 'true' or 'false')"
-                )
-
-    return kwargs
-
-
-# Self-play assumes env is FootsiesEnv
 def train(
     agent: FootsiesAgentBase,
     env: Env,
     n_episodes: int = None,
-    self_play: bool = False,
-    self_play_snapshot_frequency: int = 100,
-    self_play_max_snapshots: int = 100,
-    self_play_mix_bot: int = None,
     penalize_truncation: float = None,
+    self_play_manager: SelfPlayManager = None,
 ):
     """
     Train an `agent` on the given Gymnasium environment `env`
@@ -163,19 +110,10 @@ def train(
         the Gymnasium environment to train on
     n_episodes: int
         if specified, the number of training episodes
-    self_play: bool
-        if true, use self-play during training. Assumes the environment is FootsiesEnv or a wrapped version of it
-    self_play_snapshot_frequency: int
-        how frequent to take a snapshot of the current policy for the opponent pool
-    self_play_max_snapshots: int
-        maximum capacity of the opponent pool. If at maximum, the oldest opponents are discarded
-    self_play_mix_bot: int
-        if specified, will include the in-game FOOTSIES bot as an opponent.
-        Will enter after `self_play_mix_bot` episodes and stay for `self_play_mix_bot` episodes.
-        As such, the opponent distribution will be 50/50, distributed between the snapshots and the in-game bot.
-        This argument merely controls the switch frequency
     penalize_truncation: float
         penalize the agent if the time limit was exceeded, to discourage lengthening the episode
+    self_play_manager: SelfPlayManager
+        opponent pool manager for self-play. If None, self-play will not be performed
     """
 
     print("Preprocessing...", end=" ", flush=True)
@@ -185,15 +123,11 @@ def train(
     training_iterator = count() if n_episodes is None else range(n_episodes)
 
     # Only used for self-play
-    opponent_pool = deque([], maxlen=self_play_max_snapshots)
-    if self_play:
-        opponent_pool.append(env.unwrapped.opponent)
-
-    mix_bot_counter = 0
-    mix_bot_playing = False
+    if self_play_manager is not None:
+        self_play_manager._add_opponent(env.unwrapped.opponent)
 
     try:
-        for episode in tqdm(training_iterator):
+        for _ in tqdm(training_iterator):
             obs, info = env.reset()
 
             terminated = False
@@ -208,33 +142,9 @@ def train(
                 agent.update(obs, reward, terminated, truncated, info)
 
             # Set a new opponent from the opponent pool
-            if self_play:
-                # Perform a snapshot of the agent at the current
-                if episode % self_play_snapshot_frequency == 0:
-                    print("Agent snapshot created!")
-                    opponent_pool.append(agent.extract_policy(env))
-
-                mix_bot_counter += 1
-                # Switch to the bot if the counter has surpassed the threshold
-                if self_play_mix_bot is not None and mix_bot_counter >= self_play_mix_bot:
-                    # Go back to using opponent pool opponents
-                    if mix_bot_playing:
-                        mix_bot_counter = 0
-                        mix_bot_playing = False
-                        print("Will use opponents from the opponent pool now!")
-                
-                    # Start using the in-game bot instead
-                    else:
-                        env.unwrapped.set_opponent(None)
-                        mix_bot_counter = 0
-                        mix_bot_playing = True
-                        print("Will use the in-game opponent now!")
-                
-                # As long as the in-game bot is not playing, we will switch opponent every game
-                if not mix_bot_playing:
-                    # print("Switched to new opponent from opponent pool!")
-                    new_opponent = random.sample(opponent_pool, 1)[0]
-                    env.unwrapped.set_opponent(new_opponent)
+            if self_play_manager is not None:
+                if self_play_manager.update_at_episode(agent, env):
+                    env.unwrapped.set_opponent(self_play_manager.current_opponent)
 
     except KeyboardInterrupt:
         print("Training manually interrupted")
@@ -252,221 +162,30 @@ def train(
 
 
 if __name__ == "__main__":
-    available_agents = [
-        file.name
-        for file in os.scandir("agents")
-        if file.is_dir() and file.name != "__pycache__"
-    ]
-    available_agents_str = ", ".join(available_agents)
-
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument(
-        "agent",
-        type=str,
-        help=f"agent implementation to use (available: {available_agents_str}). If name is in the form 'sb3.<agent>', then the Stable-Baselines3 algorithm <agent> will be used instead",
-    )
-    parser.add_argument(
-        "-e",
-        "--env",
-        type=str,
-        default="FOOTSIES",
-        help="Gymnasium environment to use. The special value 'FOOTSIES' instantiates the FOOTSIES environment",
-    )
-    parser.add_argument(
-        "-eN",
-        "--env-N-kwargs",
-        action="extend",
-        nargs="+",
-        type=str,
-        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as numbers",
-    )
-    parser.add_argument(
-        "-eS",
-        "--env-S-kwargs",
-        action="extend",
-        nargs="+",
-        type=str,
-        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as strings",
-    )
-    parser.add_argument(
-        "-eB",
-        "--env-B-kwargs",
-        action="extend",
-        nargs="+",
-        type=str,
-        help="key-value pairs to pass as keyword arguments to the environment. Values are treated as booleans",
-    )
-    parser.add_argument(
-        "--footsies-path",
-        type=str,
-        default=None,
-        help="location of the FOOTSIES executable. Only required if using the FOOTSIES environment",
-    )
-    parser.add_argument(
-        "--footsies-wrapper-norm",
-        action="store_true",
-        help="use the Normalized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
-    )
-    parser.add_argument(
-        "--footsies-wrapper-acd",
-        action="store_true",
-        help="use the Action Combinations Discretized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
-    )
-    parser.add_argument(
-        "--footsies-wrapper-fs",
-        action="store_true",
-        help="use the Frame Skipped wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
-    )
-    parser.add_argument(
-        "--footsies-self-play",
-        action="store_true",
-        help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper",
-    )
-    parser.add_argument(
-        "--footsies-self-play-snapshot-freq",
-        type=int,
-        default=1000,
-        help="the frequency with which to take snapshots of the current agent for the opponent pool, in number of episodes",
-    )
-    parser.add_argument(
-        "--footsies-self-play-max-snapshots",
-        type=int,
-        default=100,
-        help="maximum number of snapshots to hold at once in the opponent pool",
-    )
-    parser.add_argument(
-        "--footsies-self-play-mix-bot",
-        type=int,
-        default=None,
-        help="the frequency, in number of episodes, with which the opponent during self-play will be the in-game bot",
-    )
-    parser.add_argument(
-        "--footsies-self-play-port",
-        type=int,
-        default=11001,
-        help="port to be used for the opponent socket",
-    )
-    parser.add_argument(
-        "--wrapper-time-limit",
-        type=int,
-        default=99
-        * 60,  # NOTE: not actually sure if it's 60, for FOOTSIES it may be 50
-        help="add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES",
-    )
-    parser.add_argument("--episodes", type=int, default=None, help="number of episodes. Will be ignored if an SB3 agent is used")
-    parser.add_argument("--time-steps", type=int, default=None, help="number of time steps. Will be ignored if a FOOTSIES agent is used")
-    parser.add_argument("--penalize-truncation", type=float, default=None, help="how much to penalize the agent in case the environment is truncated, useful when a time limit is defined for instance. No penalization by default")
-    parser.add_argument(
-        "--no-save",
-        action="store_true",
-        help="if passed, the model won't be saved to disk after training",
-    )
-    parser.add_argument(
-        "--no-load",
-        action="store_true",
-        help="if passed, the model won't be loaded from disk before training",
-    )
-    parser.add_argument(
-        "--model-name",
-        type=str,
-        help="the name of the model for saving and loading",
-        default=None,
-    )
-    parser.add_argument(
-        "-mN",
-        "--model-N-kwargs",
-        action="extend",
-        nargs="+",
-        type=str,
-        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as numbers",
-    )
-    parser.add_argument(
-        "-mS",
-        "--model-S-kwargs",
-        action="extend",
-        nargs="+",
-        type=str,
-        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as strings",
-    )
-    parser.add_argument(
-        "-mB",
-        "--model-B-kwargs",
-        action="extend",
-        nargs="+",
-        type=str,
-        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as booleans",
-    )
-    parser.add_argument(
-        "--no-log", action="store_true", help="if passed, the model won't be logged"
-    )
-    parser.add_argument(
-        "--log-frequency",
-        type=int,
-        default=5000,
-        help="number of time steps between each log",
-    )
-    parser.add_argument(
-        "--log-test-states-number",
-        type=int,
-        default=5000,
-        help="number of test states to use when evaluating some metrics for logging",
-    )
-    parser.add_argument(
-        "--log-dir",
-        type=str,
-        default=None,
-        help="directory to which Tensorboard logs will be written",
-    )
-
-    args = parser.parse_args()
-
-    # Prepare various variables, including keyword arguments
-
-    env_kwargs = extract_kwargs(args.env_N_kwargs, args.env_S_kwargs, args.env_B_kwargs)
-    model_kwargs = extract_kwargs(
-        args.model_N_kwargs, args.model_S_kwargs, args.model_B_kwargs
-    )
-
-    is_sb3 = args.agent.startswith("sb3.")
-    will_footsies_self_play = args.footsies_self_play and args.env == "FOOTSIES"
-
-    if is_sb3:
-        if args.episodes is not None:
-            print("WARN: specifying a number of episodes for SB3 algorithms is not supported, will be ignored")
-
-    if will_footsies_self_play:
-        # Set dummy opponent for now, and set later with a copy of the instanced agent
-        env_kwargs["opponent"] = lambda o: (False, False, False)
-        env_kwargs["opponent_port"] = args.footsies_self_play_port
+    args = parse_args()
 
     # Prepare environment
 
-    if args.env == "FOOTSIES":
+    if args.env.is_footsies:
         print("Initializing FOOTSIES")
-        if args.footsies_path is None:
-            raise ValueError(
-                "the path to the FOOTSIES executable should be specified with '--footsies-path' when using the FOOTSIES environment"
-            )
 
         # Set arguments so that training is easier by default
         env = FootsiesEnv(
             game_path=args.footsies_path,
             frame_delay=0,  # frame delay of 0 by default
             dense_reward=True,  # dense reward enabled by default
-            **env_kwargs,
+            **args.env.kwargs,
         )
 
-        if args.footsies_wrapper_norm:
+        if args.env.footsies_wrapper_norm:
             print(" Adding FootsiesNormalized wrapper")
             env = FootsiesNormalized(env)
 
-        if args.footsies_wrapper_fs:
+        if args.env.footsies_wrapper_fs:
             print(" Adding FootsiesFrameSkipped wrapper")
             env = FootsiesFrameSkipped(env)
 
-        if args.wrapper_time_limit > 0:
+        if args.env.wrapper_time_limit > 0:
             env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
 
         env = FlattenObservation(env)
@@ -476,64 +195,57 @@ if __name__ == "__main__":
             env = FootsiesActionCombinationsDiscretized(env)
 
     else:
-        print(f"Initializing environment {args.env}")
-        env = gym.make(args.env, **env_kwargs)
+        print(f"Initializing environment {args.env.name}")
+        env = gym.make(args.env.name, **args.env.kwargs)
 
     print(" Environment arguments:")
-    for k, v in env_kwargs.items():
+    for k, v in args.env.kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
 
     # Prepare agent
     
-    if is_sb3:
-        agent_name = args.agent[4:]
-        agent = import_sb3(agent_name, env, model_kwargs)
+    if args.agent.is_sb3:
+        agent = import_sb3(args.agent.name, env, args.agent.kwargs)
             
     else:
-        agent_name = args.agent
-        agent = import_agent(agent_name, env, model_kwargs)
+        agent = import_agent(args.agent.name, env, args.agent.kwargs)
 
-    model_name = agent_name if args.model_name is None else args.model_name
-
-    print(f"Imported agent '{agent_name + (' (SB3)' if is_sb3 else '')}' with name '{model_name}'")
+    print(f"Imported agent '{args.agent.name + (' (SB3)' if args.agent.is_sb3 else '')}' with name '{args.agent.model_name}'")
     print(f" Agent arguments:")
-    for k, v in model_kwargs.items():
+    for k, v in args.agent.kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
 
-    save = not args.no_save
-    load = not args.no_load
+    if args.misc.load:
+        load_agent_model(agent, args.agent.model_name)
 
-    if load:
-        load_agent_model(agent, model_name)
-
-    # Set a good default agent for self-play
-    if will_footsies_self_play:
+    # Set a good default agent for self-play (FOOTSIES only)
+    if args.self_play.enabled:
         footsies_env: FootsiesEnv = env.unwrapped
-        if is_sb3:
+        if args.agent.is_sb3:
             footsies_env.set_opponent(wrap_policy(env, snapshot_sb3_policy(agent)))
         else:
             footsies_env.set_opponent(agent.extract_policy(env))
 
-    if not args.no_log and not is_sb3:
+    if args.misc.log and not args.agent.is_sb3:
         print("Logging enabled")
-        loggables = import_loggables(args.agent, agent)
+        loggables = import_loggables(args.agent.name, agent)
 
         agent = TrainingLoggerWrapper(
             agent,
-            log_frequency=args.log_frequency,
-            log_dir=args.log_dir,
+            log_frequency=args.misc.log_frequency,
+            log_dir=args.misc.log_dir,
             cummulative_reward=True,
             win_rate=True,
             truncation=True,
             episode_length=True,
-            test_states_number=args.log_test_states_number,
+            test_states_number=args.misc.log_test_states_number,
             **loggables,
         )
 
-    if is_sb3:
+    if args.agent.is_sb3:
         try:
             from stable_baselines3.common.logger import configure
-            logger = configure(args.log_dir, ["tensorboard"])
+            logger = configure(args.misc.log_dir, ["tensorboard"])
             agent.set_logger(logger)
 
             # opponent_pool = deque([], maxlen=args.self_play_max_snapshots)
@@ -542,7 +254,7 @@ if __name__ == "__main__":
 
             agent.learn(
                 total_timesteps=args.time_steps,
-                tb_log_name=args.log_dir,
+                tb_log_name=args.misc.log_dir,
                 reset_num_timesteps=False,
                 progress_bar=True,
             )
@@ -564,12 +276,14 @@ if __name__ == "__main__":
             agent,
             env,
             args.episodes,
-            will_footsies_self_play,
-            args.footsies_self_play_snapshot_freq,
-            args.footsies_self_play_max_snapshots,
-            args.footsies_self_play_mix_bot,
             args.penalize_truncation,
+            self_play_manager=SelfPlayManager(
+                snapshot_method=(lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env)),
+                snapshot_frequency=args.self_play.snapshot_freq,
+                max_snapshots=args.self_play.max_snapshots,
+                mix_bot=args.self_play.mix_bot,
+            ),
         )
 
-    if save:
-        save_agent_model(agent, model_name)
+    if args.misc.save:
+        save_agent_model(agent, args.agent.model_name)
