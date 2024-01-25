@@ -23,7 +23,7 @@ footsies_env = FootsiesEnv(
     log_file=os.path.join(os.getcwd(), "out.log"),
     log_file_overwrite=True,
     by_example=True,
-    fast_forward=False,
+    fast_forward=True,
 )
 
 statistics = FootsiesStatistics(footsies_env)
@@ -41,7 +41,6 @@ agent = AutoencoderAgent(env.observation_space, env.action_space,
 )
 
 load_agent_model(agent, "autoencoder")
-
 
 
 fig = plt.figure()

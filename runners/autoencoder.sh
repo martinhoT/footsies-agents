@@ -4,8 +4,13 @@ python3 main.py autoencoder \
     --footsies-wrapper-norm \
     --footsies-wrapper-acd \
     -eB by_example true \
+    -mN \
+        encoded_dim 36 \
+        encoder_hidden_layers 1 \
+        encoder_hidden_layer_size 32 \
+        decoder_hidden_layers 1 \
+        decoder_hidden_layer_size 32 \
     -mB \
-        encoded_dim 3 \
         normalized false \
         include_sequentiality_loss false \
     "$@"

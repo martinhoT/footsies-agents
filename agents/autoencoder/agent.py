@@ -12,22 +12,45 @@ class Normalize(nn.Module):
 
 
 class Autoencoder(nn.Module):
-    def __init__(self, state_dim: int, encoded_dim: int, normalized: bool = True):
+    def __init__(
+            self,
+            state_dim: int,
+            encoded_dim: int,
+            normalized: bool = False,
+            encoder_hidden_layers: int = 1,
+            encoder_hidden_layers_size: int = 32,
+            decoder_hidden_layers: int = 1,
+            decoder_hidden_layer_size: int = 32,
+    ):
         super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(state_dim, encoded_dim),
-            # nn.Linear(state_dim, 32),
-            # nn.Linear(32, encoded_dim),
-        )
+        if encoder_hidden_layers > 0:
+            self.encoder = nn.Sequential(
+                nn.Linear(state_dim, encoder_hidden_layers_size),
+                *(nn.Linear(encoder_hidden_layers_size, encoder_hidden_layers_size) for _ in range(encoder_hidden_layers - 1)),
+                nn.Linear(encoder_hidden_layers_size, encoded_dim)
+            )
+
+        elif encoder_hidden_layers < 0:
+            self.encoder = nn.Identity()
+        
+        else:
+            self.encoder = nn.Sequential(nn.Linear(state_dim, encoded_dim))
 
         if normalized:
             self.encoder.append(Normalize())
 
-        self.decoder = nn.Sequential(
-            nn.Linear(encoded_dim, state_dim),
-            # nn.Linear(encoded_dim, 32),
-            # nn.Linear(32, state_dim),
-        )
+        if decoder_hidden_layers > 0:
+            self.decoder = nn.Sequential(
+                nn.Linear(encoded_dim, decoder_hidden_layer_size),
+                *(nn.Linear(decoder_hidden_layer_size, decoder_hidden_layer_size) for _ in range(encoder_hidden_layers - 1)),
+                nn.Linear(decoder_hidden_layer_size, state_dim)
+            )
+
+        elif decoder_hidden_layers < 0:
+            self.decoder = nn.Identity()
+        
+        else:
+            self.decoder = nn.Sequential(nn.Linear(encoded_dim, state_dim))
 
     def forward(self, x: torch.Tensor):
         return self.decoder(self.encoder(x))
@@ -39,15 +62,27 @@ class FootsiesAgent(FootsiesAgentBase):
         observation_space: Space,
         action_space: Space,
         encoded_dim: int,
-        optimize_frequency: int = 1000,
-        normalized: bool = True,
+        normalized: bool = False,
+        encoder_hidden_layers: int = 1,
+        encoder_hidden_layer_size: int = 32,
+        decoder_hidden_layers: int = 1,
+        decoder_hidden_layer_size: int = 32,
         include_sequentiality_loss: bool = False,
+        optimize_frequency: int = 1000,
         learning_rate: float = 1e-2,
     ):
         self.optimize_frequency = optimize_frequency
         self.include_sequentiality_loss = include_sequentiality_loss
 
-        self.autoencoder = Autoencoder(observation_space.shape[0], encoded_dim, normalized)
+        self.autoencoder = Autoencoder(
+            state_dim=observation_space.shape[0],
+            encoded_dim=encoded_dim,
+            normalized=normalized,
+            encoder_hidden_layers=encoder_hidden_layers,
+            encoder_hidden_layers_size=encoder_hidden_layer_size,
+            decoder_hidden_layers=decoder_hidden_layers,
+            decoder_hidden_layer_size=decoder_hidden_layer_size,
+        )
 
         self.optimizer = torch.optim.SGD(params=self.autoencoder.parameters(), lr=learning_rate)
 
@@ -82,7 +117,10 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def train(self, batch: torch.Tensor) -> Tuple[float, float]:
         self.optimizer.zero_grad()
-        
+
+        # TODO: remove
+        batch = batch[:1, :]
+
         z = self.autoencoder.encoder(batch)
         predicted = self.autoencoder.decoder(z)
         # Euclidean distance
@@ -96,6 +134,15 @@ class FootsiesAgent(FootsiesAgentBase):
             loss += loss_seq
 
         loss.backward()
+
+        # weight: torch.Tensor = self.autoencoder.encoder[0].weight
+        # weight_grad: torch.Tensor = weight.grad
+        # weight_target = torch.eye(36) # we should learn the identity function
+        # weight_correct_direction = torch.abs(weight_target - (weight + weight_grad)) < torch.abs(weight_target - weight)
+        # bias: torch.Tensor = self.autoencoder.encoder[0].bias
+        # bias_grad = bias.grad
+        # bias_correct_direction = torch.abs(bias + bias_grad) < torch.abs(bias) # we should learn 0s for bias
+
         self.optimizer.step()
 
         return loss.item(), (loss_seq.item() if loss_seq is not None else 0)
