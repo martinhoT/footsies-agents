@@ -281,7 +281,7 @@ if __name__ == "__main__":
                 snapshot_frequency=args.self_play.snapshot_freq,
                 max_snapshots=args.self_play.max_snapshots,
                 mix_bot=args.self_play.mix_bot,
-            ),
+            ) if args.self_play.enabled else None,
         )
 
     if args.misc.save:
