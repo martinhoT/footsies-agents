@@ -315,14 +315,14 @@ def parse_args() -> MainArgs:
         agent=AgentArgs(
             kwargs=model_kwargs,
             name=args.agent[4:] if is_sb3 else args.agent,
-            model_name=args.agent.name if args.agent.model_name is None else args.agent.model_name,
+            model_name=args.agent if args.model_name is None else args.model_name,
             is_sb3=is_sb3,
         ),
         env=EnvArgs(
             kwargs=env_kwargs,
             name=args.env,
             is_footsies=is_footsies,
-            wrapper_time_limit=args.wrapper_time_limite,
+            wrapper_time_limit=args.wrapper_time_limit,
             footsies_wrapper_norm=args.footsies_wrapper_norm,
             footsies_wrapper_acd=args.footsies_wrapper_acd,
             footsies_wrapper_fs=args.footsies_wrapper_fs,
@@ -330,7 +330,7 @@ def parse_args() -> MainArgs:
         self_play=SelfPlayArgs(
             enabled=will_footsies_self_play,
             snapshot_freq=args.footsies_self_play_snapshot_freq,
-            max_snapshots=args.footsies_self_paly_max_snapshots,
+            max_snapshots=args.footsies_self_play_max_snapshots,
             mix_bot=args.footsies_self_play_mix_bot,
         )
     )

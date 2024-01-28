@@ -143,7 +143,7 @@ def train(
 
             # Set a new opponent from the opponent pool
             if self_play_manager is not None:
-                if self_play_manager.update_at_episode(agent, env):
+                if self_play_manager.update_at_episode():
                     env.unwrapped.set_opponent(self_play_manager.current_opponent)
 
     except KeyboardInterrupt:
@@ -171,7 +171,6 @@ if __name__ == "__main__":
 
         # Set arguments so that training is easier by default
         env = FootsiesEnv(
-            game_path=args.footsies_path,
             frame_delay=0,  # frame delay of 0 by default
             dense_reward=True,  # dense reward enabled by default
             **args.env.kwargs,
@@ -186,11 +185,11 @@ if __name__ == "__main__":
             env = FootsiesFrameSkipped(env)
 
         if args.env.wrapper_time_limit > 0:
-            env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
+            env = TimeLimit(env, max_episode_steps=args.env.wrapper_time_limit)
 
         env = FlattenObservation(env)
 
-        if args.footsies_wrapper_acd:
+        if args.env.footsies_wrapper_acd:
             print(" Adding FootsiesActionCombinationsDiscretized wrapper")
             env = FootsiesActionCombinationsDiscretized(env)
 
