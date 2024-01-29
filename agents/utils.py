@@ -20,7 +20,7 @@ def wrap_policy(
     current_env = env
     while current_env != current_env.unwrapped:
         if isinstance(current_env, ObservationWrapper):
-            if isinstance(current_env, (FootsiesNormalized,)):
+            if isinstance(current_env, FootsiesNormalized):
                 footsies_observation_wrappers.append(current_env)
             else:
                 observation_wrappers.append(current_env)

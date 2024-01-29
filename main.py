@@ -169,12 +169,7 @@ if __name__ == "__main__":
     if args.env.is_footsies:
         print("Initializing FOOTSIES")
 
-        # Set arguments so that training is easier by default
-        env = FootsiesEnv(
-            frame_delay=0,  # frame delay of 0 by default
-            dense_reward=True,  # dense reward enabled by default
-            **args.env.kwargs,
-        )
+        env = FootsiesEnv(**args.env.kwargs)
 
         if args.env.footsies_wrapper_norm:
             print(" Adding FootsiesNormalized wrapper")
