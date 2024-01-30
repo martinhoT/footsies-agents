@@ -1,5 +1,6 @@
 import os
 import torch
+import numpy as np
 from torch import nn
 from agents.base import FootsiesAgentBase
 from gymnasium import Env, Space
@@ -62,33 +63,41 @@ class FootsiesAgent(FootsiesAgentBase):
         self.cummulative_loss = 0
         self.cummulative_loss_n = 0
 
-    def _obs_to_tensor(self, obs):
+    def _obs_to_tensor(self, obs: np.ndarray) -> torch.Tensor:
         return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
 
-    def _update_batch(self, obs, agent_action: int, opponent_action: int, next_obs):
+    def _action_to_tensor(self, action: int, num_classes: int) -> torch.Tensor:
+        return nn.functional.one_hot(torch.tensor(action), num_classes=num_classes).unsqueeze(0)
+
+    def _update_batch(self, obs: np.ndarray, agent_action: int, opponent_action: int, next_obs):
         obs = self._obs_to_tensor(obs)
         next_obs = self._obs_to_tensor(next_obs)
-        agent_action_oh = nn.functional.one_hot(torch.tensor(agent_action), num_classes=self.agent_action_dim).unsqueeze(0)
-        opponent_action_oh = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).unsqueeze(0)
+        agent_action_oh = self._action_to_tensor(agent_action, self.agent_action_dim)
+        opponent_action_oh = self._action_to_tensor(opponent_action, self.opponent_action_dim)
         self.state_batch_as_list.append(torch.hstack((obs, agent_action_oh, opponent_action_oh, next_obs)))
+    
+    # NOTE: DAMAGE is being included in the actions
+    def simplify_action(self, action: int) -> int:
+        """Simplify the player's action. For instance, guard motions will be set to BACKWARD"""
+        if action >= 10 and action <= 14: # GUARD_M ... GUARD_PROXIMITY
+            action = 2 # BACKWARD
+        
+        return action
 
-    def act(self, obs) -> "any":
+    def act(self, obs: np.ndarray) -> "any":
         self.current_observation = obs
         return 0
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
+    def update(self, next_obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info: dict):
         if not self.by_primitive_actions:
             agent_action = info["p1_move"]
             opponent_action = info["p2_move"]
+
+            agent_action = self.simplify_action(agent_action)
+            opponent_action = self.simplify_action(opponent_action)
+    
         else:
             return
-
-        # NOTE: DAMAGE is being included in the actions
-        # Set guard motions to BACKWARD to make the model's work easier
-        if opponent_action >= 10 and opponent_action <= 14: # GUARD_M ... GUARD_PROXIMITY
-            opponent_action = 2 # BACKWARD
-        if agent_action >= 10 and agent_action <= 14: # GUARD_M ... GUARD_PROXIMITY
-            agent_action = 2 # BACKWARD
 
         self._update_batch(self.current_observation, agent_action, opponent_action, next_obs)
 
@@ -129,6 +138,22 @@ class FootsiesAgent(FootsiesAgentBase):
             self.cummulative_loss_n = 0
 
         return res
+
+    def predict(self, obs: np.ndarray, agent_action: int, opponent_action: int) -> np.ndarray:
+        """Predict the next observation. The prediction is sanitized to contain valid values"""
+        with torch.no_grad():
+            next_obs: torch.Tensor = self.game_model(torch.hstack((
+                self._obs_to_tensor(obs),
+                self._action_to_tensor(agent_action, self.agent_action_dim),
+                self._action_to_tensor(opponent_action, self.opponent_action_dim),
+            )))
+
+        next_obs[:, 2:17] = 1.0 * (next_obs[:, 2:17] > 0.5)
+        next_obs[:, 17:32] = 1.0 * (next_obs[:, 17:32] > 0.5)
+        next_obs[:, 32] = torch.clamp(next_obs[:, 32], 0.0, 1.0)
+        next_obs[:, 33] = torch.clamp(next_obs[:, 33], 0.0, 1.0)
+
+        return next_obs.numpy(force=True)
 
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")

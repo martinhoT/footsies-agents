@@ -1,20 +1,29 @@
 import copy
 import dearpygui.dearpygui as dpg
 import numpy as np
+import pprint
 from datetime import datetime
 from typing import Callable
-from gymnasium import Env
+from gymnasium import Env, ObservationWrapper
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.state import FootsiesBattleState
+from footsies_gym.state import FootsiesBattleState, FootsiesState
 from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index
 from agents.base import FootsiesAgentBase
 
 
-def discretized_action_to_tuple(discretized_action):
+def discretized_action_to_tuple(discretized_action: int) -> tuple:
     return ((discretized_action & 1) != 0, (discretized_action & 2) != 0, (discretized_action & 4) != 0)
+
+
+def tuple_action_to_discretized(tuple_action: tuple) -> int:
+    return (tuple_action[0] << 0) + (tuple_action[1] << 1) + (tuple_action[2] << 2)
+
+
+def footsies_move_from_one_hot(one_hot: np.ndarray) -> FootsiesMove:
+    return footsies_move_index_to_move[np.where(one_hot == 1.0)[0].item()]
 
 
 def editable_dpg_value(item: int | str):
@@ -24,11 +33,31 @@ def editable_dpg_value(item: int | str):
     )
 
 
+# NOTE: assumes no other wrapper that transforms the observation space is used (like FrameSkipped)
+def transformed_observation_from_root(env: Env, root_obs: "any") -> "any":
+    observation_wrappers: list[ObservationWrapper] = []
+    current_env = env
+
+    while current_env != current_env.unwrapped:
+        if isinstance(current_env, ObservationWrapper):
+            observation_wrappers.append(current_env)
+
+        current_env = current_env.env
+
+    obs = root_obs
+    for observation_wrapper in reversed(observation_wrappers):
+        obs = observation_wrapper.observation(obs)
+
+    return obs
+
+
 class Analyser:
     
     def __init__(self,
         env: Env,
         agent: FootsiesAgentBase,
+        custom_elements_callback: Callable[["Analyser"], None], # function that will be called when the main DPG window is being created, allowing the addition of custom elements
+        custom_state_update_callback: Callable[["Analyser"], None], # function that will be called when the battle state is updated (either through the 'Advance' button or by manipulation)
     ):
         footsies_env: FootsiesEnv = env.unwrapped
         if footsies_env.sync_mode != "synced_non_blocking":
@@ -39,6 +68,8 @@ class Analyser:
         self.env = env
         self.footsies_env = footsies_env
         self.agent = agent
+        self.custom_elements_callback = custom_elements_callback
+        self.custom_state_update_callback = custom_state_update_callback
 
         # Check environment wrappers
         self.discretized_actions = False
@@ -60,12 +91,12 @@ class Analyser:
         self.requires_reset = True
 
         self.saved_battle_states = []
-        self.previous_state = None
-        self.next_state = None
         self.episode_counter = -1
 
         # DPG items
         self.dpg_saved_battle_state_list: int | str = None
+
+        self.text_output_formatter = pprint.PrettyPrinter(indent=1)
 
     def battle_state_label(self, battle_state: FootsiesBattleState) -> str:
         return f"State at frame {battle_state.frameCount} and episode {self.episode_counter} ({datetime.now().time()})"
@@ -77,7 +108,7 @@ class Analyser:
         current_saved_battle_state_list = self.saved_battle_states_labels
         dpg.configure_item(self.dpg_saved_battle_state_list, items=current_saved_battle_state_list + [self.battle_state_label(battle_state)])
 
-    def load_battle_state(self, battle_state: FootsiesBattleState, require_update: bool = False):
+    def load_battle_state(self, battle_state: FootsiesBattleState, require_update: bool = True):
         self.footsies_env.load_battle_state(battle_state)
 
         if require_update:
@@ -91,12 +122,20 @@ class Analyser:
             self.p2_move_progress = battle_state.p2State.currentActionFrame / self.p2_move.value.duration
             self.frame = battle_state.frameCount
             # NOTE: reward is not saved (maybe not needed?)
+        
+        # TODO: guarantee that p1MostRecentAction is the same as would be normally obtained (it's obtained differently in the game code)
+        state = FootsiesState.from_battle_state(battle_state)
+        self.current_observation = transformed_observation_from_root(self.env, self.footsies_env._extract_obs(state))
+        self.custom_state_update_callback(self)
 
     def load_battle_state_from_selected(self):
-        self.load_battle_state(self.selected_battle_state, require_update=True)
+        self.load_battle_state(self.selected_battle_state)
 
     def update_current_action_from_agent(self):
         action = self.agent.act(self.current_observation)
+        if action is None:
+            raise RuntimeError("this agent could not produce an action for the current observation")
+
         if self.discretized_actions:
             action_tuple = discretized_action_to_tuple(action)
 
@@ -105,20 +144,21 @@ class Analyser:
     def update_observation(self, observation: np.ndarray):
         self.p1_guard = round(observation[0] * 3)
         self.p2_guard = round(observation[1] * 3)
-        self.p1_move = footsies_move_index_to_move[np.where(observation[2:17] == 1.0)[0].item()]
-        self.p2_move = footsies_move_index_to_move[np.where(observation[17:32] == 1.0)[0].item()]
+        self.p1_move = footsies_move_from_one_hot(observation[2:17])
+        self.p2_move = footsies_move_from_one_hot(observation[17:32])
         self.p1_move_progress = observation[32]
         self.p2_move_progress = observation[33]
         self.p1_position = observation[34] * 4.4
         self.p2_position = observation[35] * 4.4
 
+        self.current_observation = observation
+
     def advance(self):
         if self.requires_reset:
             self.episode_counter += 1
             obs, info = self.env.reset()
-            self.update_observation(obs)
+
             self.reward = 0
-            self.frame = info["frame"]
             self.requires_reset = False
 
         else:
@@ -126,20 +166,25 @@ class Analyser:
                 self.update_current_action_from_agent()
 
             current_action = self.current_action
-            next_observation, reward, terminated, truncated, info = self.env.step(current_action)
-            
-            self.update_observation(next_observation)
-            self.reward = reward
-            self.frame = info["frame"]
+            obs, reward, terminated, truncated, info = self.env.step(current_action)
 
+            self.reward = reward
             self.requires_reset = terminated or truncated
 
-    @property
-    def current_action(self) -> tuple[bool, bool, bool]:
-        if self.discretized_actions:
-            return (self.action_left << 0) + (self.action_right << 1) + (self.action_attack << 2)
+        self.update_observation(obs)
+        self.text_output = self.text_output_formatter.pformat(info)
+        self.frame = info["frame"]
+        
+        self.custom_state_update_callback(self)
 
-        return (self.action_left, self.action_right, self.action_attack)
+    @property
+    def current_action(self) -> tuple[bool, bool, bool] | int:
+        action = (self.action_left, self.action_right, self.action_attack)
+        
+        if self.discretized_actions:
+            return tuple_action_to_discretized(action)
+
+        return action
 
     @property
     def saved_battle_states_labels(self) -> list[str]:
@@ -187,46 +232,43 @@ class Analyser:
     use_custom_action: bool = editable_dpg_value("use_custom_action")
     reward: float = editable_dpg_value("reward")
     frame: int = editable_dpg_value("frame")
-
-    def register_dpg_elements_callback(self, dpg_elements_callback: Callable[["Analyser"], None]):
-        """Register a function that will be called when the main DPG window is being created, allowing the addition of custom elements"""
-        dpg_elements_callback()
+    text_output: str = editable_dpg_value("text_output")
 
     def start(self):
         dpg.create_context()
         dpg.create_viewport(title="FOOTSIES data analyser", width=600, height=300)
 
         with dpg.window() as main_window:
-            # Battle state zone
-            with dpg.group(horizontal=True):
-                # Footsies battle state modifier
-                with dpg.group():
-                    with dpg.table():
-                        dpg.add_table_column(label="Property")
-                        dpg.add_table_column(label="P1")
-                        dpg.add_table_column(label="P2")
+            # Footsies battle state modifier
+            with dpg.group():
+                with dpg.table():
+                    dpg.add_table_column(label="Property")
+                    dpg.add_table_column(label="P1")
+                    dpg.add_table_column(label="P2")
 
-                        with dpg.table_row():
-                            dpg.add_text("Guard")
-                            dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard")
-                            dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard")
-                        
-                        with dpg.table_row():
-                            dpg.add_text("Position")
-                            dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position")
-                            dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position")
+                    with dpg.table_row():
+                        dpg.add_text("Guard")
+                        dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard")
+                        dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard")
+                    
+                    with dpg.table_row():
+                        dpg.add_text("Position")
+                        dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position")
+                        dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position")
 
-                        with dpg.table_row():
-                            dpg.add_text("Move")
-                            dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move")
-                            dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move")
+                    with dpg.table_row():
+                        dpg.add_text("Move")
+                        dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move")
+                        dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move")
 
-                        with dpg.table_row():
-                            dpg.add_text("Move progress")
-                            dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress")
-                            dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress")
+                    with dpg.table_row():
+                        dpg.add_text("Move progress")
+                        dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress")
+                        dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress")
 
-                    dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state))
+                dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state, require_update=False))
+
+            dpg.add_separator()
 
             # Footsies battle state manager (save/load)
             with dpg.group(horizontal=True):
@@ -234,6 +276,8 @@ class Analyser:
                 dpg.add_button(label="Load", callback=self.load_battle_state_from_selected)
             
             self.dpg_saved_battle_state_list = dpg.add_listbox([])
+
+            dpg.add_separator()
 
             # Action selector
             with dpg.group(horizontal=True):
@@ -247,10 +291,18 @@ class Analyser:
                 dpg.add_text("Custom action:")
                 dpg.add_checkbox(default_value=False, tag="use_custom_action")
             
+            dpg.add_separator()
+
             dpg.add_input_float(label="Reward", tag="reward", enabled=False)
             dpg.add_input_int(label="Frame", tag="frame", enabled=False)
 
             dpg.add_button(label="Advance", callback=self.advance)
+
+            dpg.add_text("Game info (only updated on advance)")
+            dpg.add_input_text(multiline=True, no_spaces=False, tag="text_output", enabled=False)
+
+            dpg.add_separator()
+            self.custom_elements_callback(self)
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
