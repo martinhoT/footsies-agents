@@ -1,20 +1,16 @@
-import copy
 import dearpygui.dearpygui as dpg
 import numpy as np
-from datetime import datetime
-from typing import Callable
-from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
-from gymnasium.spaces.utils import flatten
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.state import FootsiesBattleState
-from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index
-from agents.base import FootsiesAgentBase
+from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index, action_moves
 from analysis import Analyser, footsies_move_from_one_hot
 from agents.game_model.agent import FootsiesAgent as GameModelAgent
 from main import load_agent_model
+
+
+agent_opponent_moves = action_moves + [FootsiesMove.DAMAGE]
 
 
 def load_predicted_battle_state(analyser: Analyser):
@@ -30,13 +26,9 @@ def load_predicted_battle_state(analyser: Analyser):
     analyser.load_battle_state(analyser.custom_battle_state, require_update=False)
 
 
-def load_predicted_battle_state_and_advance(analyser: Analyser):
-    load_predicted_battle_state(analyser=analyser)
-    analyser.advance()
-
-
+# TODO: add section with previous state
 def include_game_model_dpg_elements(analyser: Analyser):
-    dpg.add_text("Prediced next state")
+    dpg.add_text("Prediced current state based on previous state")
     # Predicted state
     with dpg.table():
         dpg.add_table_column(label="Property")
@@ -64,26 +56,19 @@ def include_game_model_dpg_elements(analyser: Analyser):
             dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress_predicted", enabled=False)
     
     with dpg.group(horizontal=True):
+        dpg.add_text("Agent action performed on previous state")
+        dpg.add_combo([m.name for m in agent_opponent_moves], tag="agent_action", callback=update_prediction)
+    
+    with dpg.group(horizontal=True):
+        dpg.add_text("Opponent action performed on previous state")
+        dpg.add_combo([m.name for m in agent_opponent_moves], tag="opponent_action", callback=update_prediction)
+
+    with dpg.group(horizontal=True):
         dpg.add_button(label="Apply", callback=lambda: load_predicted_battle_state(analyser=analyser))
-        dpg.add_button(label="Apply and Advance", callback=lambda: load_predicted_battle_state_and_advance(analyser=analyser))
 
 
-def prediction_on_state_update(analyser: Analyser):
-    agent: GameModelAgent = analyser.agent
-
-    obs = analyser.current_observation
-    agent_action = agent.simplify_action(
-        footsies_move_id_to_index[
-            footsies_move_from_one_hot(obs[2:17]).value.id
-        ]
-    )
-    opponent_action = agent.simplify_action(
-        footsies_move_id_to_index[
-            footsies_move_from_one_hot(obs[17:32]).value.id
-        ]
-    )
-
-    next_obs = agent.predict(obs, agent_action, opponent_action).squeeze(0)
+def update_prediction(observation, agent_action, opponent_action):
+    next_obs = agent.predict(observation, agent_action, opponent_action).squeeze(0)
 
     # TODO: how should I handle cases where the model doesn't predict any move?
     p1_move = footsies_move_from_one_hot(next_obs[2:17]) if np.any(next_obs[2:17] > 0.0) else FootsiesMove.DEAD
@@ -97,6 +82,22 @@ def prediction_on_state_update(analyser: Analyser):
     dpg.set_value("p2_move_progress_predicted", next_obs[33])
     dpg.set_value("p1_position_predicted", next_obs[34] * 4.4)
     dpg.set_value("p2_position_predicted", next_obs[35] * 4.4)
+    dpg.set_value("agent_action", footsies_move_index_to_move[agent_action].name)
+    dpg.set_value("opponent_action", footsies_move_index_to_move[opponent_action].name)
+
+
+def predict_next_state(analyser: Analyser):
+    if analyser.previous_observation is None:
+        return
+
+    agent: GameModelAgent = analyser.agent
+
+    # Note: we need to consider the current information when determining the players' moves, but the previous observation!
+    observation = analyser.previous_observation
+    agent_action = agent.simplify_action(analyser.current_info["p1_move"])
+    opponent_action = agent.simplify_action(analyser.current_info["p2_move"])
+
+    update_prediction(observation, agent_action, opponent_action)
 
 
 if __name__ == "__main__":
@@ -129,6 +130,6 @@ if __name__ == "__main__":
         env=env,
         agent=agent,
         custom_elements_callback=include_game_model_dpg_elements,
-        custom_state_update_callback=prediction_on_state_update,
+        custom_state_update_callback=predict_next_state,
     )
     analyser.start()

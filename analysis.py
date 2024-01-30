@@ -12,6 +12,10 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.state import FootsiesBattleState, FootsiesState
 from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index
 from agents.base import FootsiesAgentBase
+from collections import namedtuple
+
+
+AnalyserState = namedtuple("AnalyserSavedState", ["battle_state", "observation", "info", "reward"])
 
 
 def discretized_action_to_tuple(discretized_action: int) -> tuple:
@@ -88,9 +92,12 @@ class Analyser:
             raise ValueError("the environment should have the normalized observations wrapper on")
 
         self.current_observation = None
+        self.current_info = None
+        self.previous_observation = None
+        self.previous_info = None
         self.requires_reset = True
 
-        self.saved_battle_states = []
+        self.saved_battle_states: list[AnalyserState] = []
         self.episode_counter = -1
 
         # DPG items
@@ -103,7 +110,9 @@ class Analyser:
 
     def save_battle_state(self):
         battle_state = self.footsies_env.save_battle_state()
-        self.saved_battle_states.append(battle_state)
+        self.saved_battle_states.append(AnalyserState(
+            battle_state, self.current_observation, self.current_info, self.reward
+        ))
 
         current_saved_battle_state_list = self.saved_battle_states_labels
         dpg.configure_item(self.dpg_saved_battle_state_list, items=current_saved_battle_state_list + [self.battle_state_label(battle_state)])
@@ -121,15 +130,17 @@ class Analyser:
             self.p1_move_progress = battle_state.p1State.currentActionFrame / self.p1_move.value.duration
             self.p2_move_progress = battle_state.p2State.currentActionFrame / self.p2_move.value.duration
             self.frame = battle_state.frameCount
-            # NOTE: reward is not saved (maybe not needed?)
         
         # TODO: guarantee that p1MostRecentAction is the same as would be normally obtained (it's obtained differently in the game code)
-        state = FootsiesState.from_battle_state(battle_state)
-        self.current_observation = transformed_observation_from_root(self.env, self.footsies_env._extract_obs(state))
+        footsies_state = FootsiesState.from_battle_state(battle_state)
+        self.previous_observation = self.current_observation
+        self.current_observation = transformed_observation_from_root(self.env, self.footsies_env._extract_obs(footsies_state))
         self.custom_state_update_callback(self)
 
     def load_battle_state_from_selected(self):
-        self.load_battle_state(self.selected_battle_state)
+        saved_state = self.selected_saved_state
+        self.load_battle_state(saved_state.battle_state)
+        self.update_state(saved_state.observation, saved_state.info, saved_state.reward)
 
     def update_current_action_from_agent(self):
         action = self.agent.act(self.current_observation)
@@ -141,7 +152,8 @@ class Analyser:
 
         self.action_left, self.action_right, self.action_attack = action_tuple
 
-    def update_observation(self, observation: np.ndarray):
+    def update_state(self, observation, info, reward):
+        # Observation
         self.p1_guard = round(observation[0] * 3)
         self.p2_guard = round(observation[1] * 3)
         self.p1_move = footsies_move_from_one_hot(observation[2:17])
@@ -151,14 +163,24 @@ class Analyser:
         self.p1_position = observation[34] * 4.4
         self.p2_position = observation[35] * 4.4
 
+        self.previous_observation = self.current_observation
         self.current_observation = observation
+
+        # Info
+        self.previous_info = self.current_info
+        self.current_info = info
+        self.text_output = self.text_output_formatter.pformat(info)
+        self.frame = info["frame"]
+
+        # Reward
+        self.reward = reward
 
     def advance(self):
         if self.requires_reset:
             self.episode_counter += 1
             obs, info = self.env.reset()
 
-            self.reward = 0
+            reward = 0
             self.requires_reset = False
 
         else:
@@ -168,12 +190,9 @@ class Analyser:
             current_action = self.current_action
             obs, reward, terminated, truncated, info = self.env.step(current_action)
 
-            self.reward = reward
             self.requires_reset = terminated or truncated
 
-        self.update_observation(obs)
-        self.text_output = self.text_output_formatter.pformat(info)
-        self.frame = info["frame"]
+        self.update_state(obs, info, reward)
         
         self.custom_state_update_callback(self)
 
@@ -191,7 +210,7 @@ class Analyser:
         return dpg.get_item_configuration(self.dpg_saved_battle_state_list)["items"]
 
     @property
-    def selected_battle_state(self) -> FootsiesBattleState:
+    def selected_saved_state(self) -> AnalyserState:
         selected_battle_state_label = dpg.get_value(self.dpg_saved_battle_state_list)
         index = self.saved_battle_states_labels.index(selected_battle_state_label)
         return self.saved_battle_states[index]

@@ -5,8 +5,15 @@ from torch import nn
 from agents.base import FootsiesAgentBase
 from gymnasium import Env, Space
 from typing import Callable, Tuple
-from footsies_gym.moves import actionable_moves
 
+
+# TODO: Current model characteristics
+# - The current model learns:
+#   - move progress and duration
+#     - but only in some situations (doesn't work in situations that don't happen, which makes sense)
+# - The current model doesn't learn:
+#   - to switch moves after their progress has finished
+#   - attack hits, even blocks
 
 class GameModel(nn.Module):
     def __init__(
@@ -90,6 +97,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def update(self, next_obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info: dict):
         if not self.by_primitive_actions:
+            # Reminder: these actions are the ones in the next observation!
             agent_action = info["p1_move"]
             opponent_action = info["p2_move"]
 
