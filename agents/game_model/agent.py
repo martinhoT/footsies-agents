@@ -5,6 +5,7 @@ from torch import nn
 from agents.base import FootsiesAgentBase
 from gymnasium import Env, Space
 from typing import Callable, Tuple
+from itertools import pairwise
 
 
 # TODO: Current model characteristics
@@ -21,14 +22,54 @@ class GameModel(nn.Module):
         state_dim: int,
         agent_action_dim: int,
         opponent_action_dim: int,
+        hidden_layer_sizes: list[int] = None,
+        hidden_layer_activation: nn.Module = nn.LeakyReLU,
     ):
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(state_dim + agent_action_dim + opponent_action_dim, state_dim),
-        )
+        
+        if hidden_layer_sizes is None:
+            hidden_layer_sizes = [64, 64]
 
-    def forward(self, x: torch.Tensor):
-        return self.layers(x)
+        input_dim = state_dim + agent_action_dim + opponent_action_dim
+        if len(hidden_layer_sizes) == 0:
+            self.layers = nn.Sequential(nn.Linear(input_dim, state_dim))
+        else:
+            layers = [
+                nn.Linear(input_dim, hidden_layer_sizes[0]),
+                hidden_layer_activation(),
+            ]
+
+            for hidden_layer_size_in, hidden_layer_size_out in pairwise(hidden_layer_sizes):
+                layers.append(
+                    nn.Linear(hidden_layer_size_in, hidden_layer_size_out)
+                )
+                layers.append(
+                    hidden_layer_activation(),
+                )
+            
+            layers.append(
+                nn.Linear(hidden_layer_sizes[-1], state_dim)
+            )
+
+            self.layers = nn.Sequential(*layers)
+
+        # Different activations for different parts of the output state
+        # This is a "staircase sigmoid" for snapping to integers. It's not differentiable everywhere, but PyTorch handles this gracefully
+        self.guard_activation = lambda x: 1 / (1 + torch.exp(-15 * (torch.remainder(x, 1) - 0.5))) + torch.floor(x)
+        self.move_activation = nn.Softmax(dim=1)
+        self.move_progress_activation = nn.Identity()
+        self.position_activation = nn.Identity()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        res = self.layers(x)
+        # NOTE: the stacking order is important! it depends on how the environment observations are flattened (guard comes first, then move, etc.)
+        return torch.hstack((
+            self.guard_activation(res[:, 0:2]),
+            self.move_activation(res[:, 2:17]),     # player 1
+            self.move_activation(res[:, 17:32]),    # player 2
+            self.move_progress_activation(res[:, 32:34]),
+            self.position_activation(res[:, 34:36]),
+        ))
 
 
 # NOTE: trained by example
@@ -40,8 +81,11 @@ class FootsiesAgent(FootsiesAgentBase):
         action_space: Space,
         opponent_action_dim: int,
         by_primitive_actions: bool = False,
-        optimize_frequency: int = 1000,
+        move_transition_scale: float = 60.0, # scale training examples where move transitions occur, since they are very important
+        optimize_frequency: int = 1000, # mini-batch size, bad name
         learning_rate: float = 1e-2,
+        hidden_layer_sizes_specification: str = "64,64",
+        hidden_layer_activation_specification: str = "LeakyReLU",
     ):
         if by_primitive_actions:
             raise NotImplementedError("can't train on primitive opponent actions yet")
@@ -50,6 +94,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.state_dim = observation_space.shape[0]
         self.agent_action_dim = action_space.shape[0] if by_primitive_actions else opponent_action_dim
         self.opponent_action_dim = opponent_action_dim
+        self.move_transition_scale = move_transition_scale
         self.optimize_frequency = optimize_frequency
         self.learning_rate = learning_rate
 
@@ -57,6 +102,8 @@ class FootsiesAgent(FootsiesAgentBase):
             state_dim=self.state_dim,
             agent_action_dim=self.agent_action_dim,
             opponent_action_dim=self.opponent_action_dim,
+            hidden_layer_sizes=[int(n) for n in hidden_layer_sizes_specification.split(",")] if hidden_layer_sizes_specification else [],
+            hidden_layer_activation=getattr(nn, hidden_layer_activation_specification),
         )
 
         self.optimizer = torch.optim.SGD(params=self.game_model.parameters(), lr=learning_rate)
@@ -127,9 +174,18 @@ class FootsiesAgent(FootsiesAgentBase):
 
         predicted = self.game_model(batch_x)
         # Euclidean distance
-        prediction_distance = torch.sqrt(torch.sum((predicted - batch_y)**2, dim=1))
-        loss = torch.mean(prediction_distance)
+        guard_distance = torch.sqrt(torch.sum((predicted[:, 0:2] - batch_y[:, 0:2])**2, dim=1))
+        # Cross entropy loss
+        move_distance_p1 = -torch.sum(torch.log(predicted[:, 2:17]) * batch_y[:, 2:17], dim=1)
+        move_distance_p2 = -torch.sum(torch.log(predicted[:, 17:32]) * batch_y[:, 17:32], dim=1)
+        # Euclidean distance
+        move_progress_and_position_distance = torch.sqrt(torch.sum((predicted[:, 32:36] - batch_y[:, 32:36])**2, dim=1))
 
+        # Give more weight to training examples in which a move transition occurred
+        # NOTE: this assumes the state variables are placed before the agent and opponent action features
+        move_transition_multiplier = 1 + torch.any(batch_x[:, 2:32] != batch_y[:, 2:32], dim=1) * (self.move_transition_scale - 1)
+
+        loss = torch.mean((guard_distance + move_distance_p1 + move_distance_p2 + move_progress_and_position_distance) * move_transition_multiplier)
         loss.backward()
 
         self.optimizer.step()
@@ -139,7 +195,7 @@ class FootsiesAgent(FootsiesAgentBase):
     def evaluate_average_loss(self, *, clear: bool) -> float:
         res = (
             self.cummulative_loss / self.cummulative_loss_n
-        ) if self.cummulative_loss_n != 0 else (0, 0)
+        ) if self.cummulative_loss_n != 0 else 0
         
         if clear:
             self.cummulative_loss = 0
@@ -156,8 +212,9 @@ class FootsiesAgent(FootsiesAgentBase):
                 self._action_to_tensor(opponent_action, self.opponent_action_dim),
             )))
 
-        next_obs[:, 2:17] = 1.0 * (next_obs[:, 2:17] > 0.5)
-        next_obs[:, 17:32] = 1.0 * (next_obs[:, 17:32] > 0.5)
+        # Get the maximum
+        next_obs[:, 2:17] = 1.0 * (next_obs[:, 2:17] == torch.max(next_obs[:, 2:17]))
+        next_obs[:, 17:32] = 1.0 * (next_obs[:, 17:32] == torch.max(next_obs[:, 17:32]))
         next_obs[:, 32] = torch.clamp(next_obs[:, 32], 0.0, 1.0)
         next_obs[:, 33] = torch.clamp(next_obs[:, 33], 0.0, 1.0)
 

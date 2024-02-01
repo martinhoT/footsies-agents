@@ -154,17 +154,27 @@ class Analyser:
 
     def update_state(self, observation, info, reward):
         # Observation
-        self.p1_guard = round(observation[0] * 3)
-        self.p2_guard = round(observation[1] * 3)
-        self.p1_move = footsies_move_from_one_hot(observation[2:17])
-        self.p2_move = footsies_move_from_one_hot(observation[17:32])
-        self.p1_move_progress = observation[32]
-        self.p2_move_progress = observation[33]
-        self.p1_position = observation[34] * 4.4
-        self.p2_position = observation[35] * 4.4
-
         self.previous_observation = self.current_observation
         self.current_observation = observation
+
+        if self.previous_observation is not None:
+            self.p1_guard_prev = round(self.previous_observation[0] * 3)
+            self.p2_guard_prev = round(self.previous_observation[1] * 3)
+            self.p1_move_prev = footsies_move_from_one_hot(self.previous_observation[2:17])
+            self.p2_move_prev = footsies_move_from_one_hot(self.previous_observation[17:32])
+            self.p1_move_progress_prev = self.previous_observation[32]
+            self.p2_move_progress_prev = self.previous_observation[33]
+            self.p1_position_prev = self.previous_observation[34] * 4.4
+            self.p2_position_prev = self.previous_observation[35] * 4.4
+
+        self.p1_guard = round(self.current_observation[0] * 3)
+        self.p2_guard = round(self.current_observation[1] * 3)
+        self.p1_move = footsies_move_from_one_hot(self.current_observation[2:17])
+        self.p2_move = footsies_move_from_one_hot(self.current_observation[17:32])
+        self.p1_move_progress = self.current_observation[32]
+        self.p2_move_progress = self.current_observation[33]
+        self.p1_position = self.current_observation[34] * 4.4
+        self.p2_position = self.current_observation[35] * 4.4
 
         # Info
         self.previous_info = self.current_info
@@ -231,6 +241,21 @@ class Analyser:
 
         return battle_state
 
+    p1_guard_prev: int = editable_dpg_value("p1_guard_prev")
+    p2_guard_prev: int = editable_dpg_value("p2_guard_prev")
+    p1_position_prev: float = editable_dpg_value("p1_position_prev")
+    p2_position_prev: float = editable_dpg_value("p2_position_prev")
+    p1_move_prev: FootsiesMove = property(
+        fget=lambda self: FootsiesMove[dpg.get_value("p1_move_prev")],
+        fset=lambda self, value: dpg.set_value("p1_move_prev", value.name)
+    )
+    p2_move_prev: FootsiesMove = property(
+        fget=lambda self: FootsiesMove[dpg.get_value("p2_move_prev")],
+        fset=lambda self, value: dpg.set_value("p2_move_prev", value.name)
+    )
+    p1_move_progress_prev: float = editable_dpg_value("p1_move_progress_prev")
+    p2_move_progress_prev: float = editable_dpg_value("p2_move_progress_prev")
+
     p1_guard: int = editable_dpg_value("p1_guard")
     p2_guard: int = editable_dpg_value("p2_guard")
     p1_position: float = editable_dpg_value("p1_position")
@@ -245,6 +270,7 @@ class Analyser:
     )
     p1_move_progress: float = editable_dpg_value("p1_move_progress")
     p2_move_progress: float = editable_dpg_value("p2_move_progress")
+
     action_left: bool = editable_dpg_value("action_left")
     action_right: bool = editable_dpg_value("action_right")
     action_attack: bool = editable_dpg_value("action_attack")
@@ -258,34 +284,63 @@ class Analyser:
         dpg.create_viewport(title="FOOTSIES data analyser", width=600, height=300)
 
         with dpg.window() as main_window:
+            # Footsies previous battle state
+            dpg.add_text("Previous state")
+            with dpg.table():
+                dpg.add_table_column(label="Property")
+                dpg.add_table_column(label="P1")
+                dpg.add_table_column(label="P2")
+
+                with dpg.table_row():
+                    dpg.add_text("Guard")
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard_prev", enabled=False)
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard_prev", enabled=False)
+                
+                with dpg.table_row():
+                    dpg.add_text("Position")
+                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position_prev", enabled=False)
+                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position_prev", enabled=False)
+
+                with dpg.table_row():
+                    dpg.add_text("Move")
+                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move_prev", enabled=False)
+                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move_prev", enabled=False)
+
+                with dpg.table_row():
+                    dpg.add_text("Move progress")
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress_prev", enabled=False)
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress_prev", enabled=False)
+
+            dpg.add_separator()    
+            
             # Footsies battle state modifier
-            with dpg.group():
-                with dpg.table():
-                    dpg.add_table_column(label="Property")
-                    dpg.add_table_column(label="P1")
-                    dpg.add_table_column(label="P2")
+            dpg.add_text("Current state")
+            with dpg.table():
+                dpg.add_table_column(label="Property")
+                dpg.add_table_column(label="P1")
+                dpg.add_table_column(label="P2")
 
-                    with dpg.table_row():
-                        dpg.add_text("Guard")
-                        dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard")
-                        dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard")
-                    
-                    with dpg.table_row():
-                        dpg.add_text("Position")
-                        dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position")
-                        dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position")
+                with dpg.table_row():
+                    dpg.add_text("Guard")
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard")
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard")
+                
+                with dpg.table_row():
+                    dpg.add_text("Position")
+                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position")
+                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position")
 
-                    with dpg.table_row():
-                        dpg.add_text("Move")
-                        dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move")
-                        dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move")
+                with dpg.table_row():
+                    dpg.add_text("Move")
+                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move")
+                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move")
 
-                    with dpg.table_row():
-                        dpg.add_text("Move progress")
-                        dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress")
-                        dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress")
+                with dpg.table_row():
+                    dpg.add_text("Move progress")
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress")
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress")
 
-                dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state, require_update=False))
+            dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state, require_update=False))
 
             dpg.add_separator()
 

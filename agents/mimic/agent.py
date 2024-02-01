@@ -7,10 +7,10 @@ from agents.base import FootsiesAgentBase
 from gymnasium import Env
 from typing import Any, Callable, List, Tuple
 from gymnasium import Space
-from footsies_gym.moves import FootsiesMove
+from footsies_gym.moves import FOOTSIES_ACTION_MOVES
 
 
-RELEVANT_MOVES = set(FootsiesMove) - {FootsiesMove.WIN, FootsiesMove.DEAD}
+# TODO: test with a new state variable that indicates the time since the last interaction (since we don't have memory...)
 
 
 class InputClip(nn.Module):
@@ -212,7 +212,7 @@ class PlayerModel:
                     print(" probs_cummulative:", probs_cummulative)
                     raise e
 
-    # TODO: if over primitive actions, the model is prone to having great uncertainty
+    # TODO: if over primitive actions, the model is prone to having great uncertainty (why, past me?)
     def probability_distribution(
         self, obs: torch.Tensor, snap_to_fraction_of: int = 10
     ):
@@ -257,7 +257,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.action_space = action_space
         self.over_primitive_actions = over_primitive_actions
 
-        self.n_moves = action_space.n if over_primitive_actions else len(RELEVANT_MOVES)
+        self.n_moves = action_space.n if over_primitive_actions else len(FOOTSIES_ACTION_MOVES)
 
         self.p1_model = PlayerModel(
             observation_space.shape[0],

@@ -4,13 +4,13 @@ from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index, action_moves
+from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index, FOOTSIES_ACTION_MOVES
 from analysis import Analyser, footsies_move_from_one_hot
 from agents.game_model.agent import FootsiesAgent as GameModelAgent
 from main import load_agent_model
 
 
-agent_opponent_moves = action_moves + [FootsiesMove.DAMAGE]
+agent_opponent_moves = FOOTSIES_ACTION_MOVES + [FootsiesMove.DAMAGE]
 
 
 def load_predicted_battle_state(analyser: Analyser):
@@ -57,11 +57,11 @@ def include_game_model_dpg_elements(analyser: Analyser):
     
     with dpg.group(horizontal=True):
         dpg.add_text("Agent action performed on previous state")
-        dpg.add_combo([m.name for m in agent_opponent_moves], tag="agent_action", callback=update_prediction)
+        dpg.add_combo([m.name for m in agent_opponent_moves], tag="agent_action", callback=lambda: predict_next_state(analyser))
     
     with dpg.group(horizontal=True):
         dpg.add_text("Opponent action performed on previous state")
-        dpg.add_combo([m.name for m in agent_opponent_moves], tag="opponent_action", callback=update_prediction)
+        dpg.add_combo([m.name for m in agent_opponent_moves], tag="opponent_action", callback=lambda: predict_next_state(analyser))
 
     with dpg.group(horizontal=True):
         dpg.add_button(label="Apply", callback=lambda: load_predicted_battle_state(analyser=analyser))
@@ -70,9 +70,8 @@ def include_game_model_dpg_elements(analyser: Analyser):
 def update_prediction(observation, agent_action, opponent_action):
     next_obs = agent.predict(observation, agent_action, opponent_action).squeeze(0)
 
-    # TODO: how should I handle cases where the model doesn't predict any move?
-    p1_move = footsies_move_from_one_hot(next_obs[2:17]) if np.any(next_obs[2:17] > 0.0) else FootsiesMove.DEAD
-    p2_move = footsies_move_from_one_hot(next_obs[17:32]) if np.any(next_obs[17:32] > 0.0) else FootsiesMove.DEAD
+    p1_move = footsies_move_from_one_hot(next_obs[2:17])
+    p2_move = footsies_move_from_one_hot(next_obs[17:32])
 
     dpg.set_value("p1_guard_predicted", round(next_obs[0] * 3))
     dpg.set_value("p2_guard_predicted", round(next_obs[1] * 3))
@@ -86,7 +85,7 @@ def update_prediction(observation, agent_action, opponent_action):
     dpg.set_value("opponent_action", footsies_move_index_to_move[opponent_action].name)
 
 
-def predict_next_state(analyser: Analyser):
+def predict_next_state(analyser: Analyser, agent_action: int = None, opponent_action: int = None):
     if analyser.previous_observation is None:
         return
 
@@ -94,10 +93,17 @@ def predict_next_state(analyser: Analyser):
 
     # Note: we need to consider the current information when determining the players' moves, but the previous observation!
     observation = analyser.previous_observation
+    agent_action = footsies_move_id_to_index[FootsiesMove[dpg.get_value("agent_action")].value.id] if agent_action is None else agent_action
+    opponent_action = footsies_move_id_to_index[FootsiesMove[dpg.get_value("opponent_action")].value.id] if opponent_action is None else opponent_action
+    
+    update_prediction(observation, agent_action, opponent_action)
+
+
+def update_info_and_predict_next_state(analyser: Analyser):
     agent_action = agent.simplify_action(analyser.current_info["p1_move"])
     opponent_action = agent.simplify_action(analyser.current_info["p2_move"])
 
-    update_prediction(observation, agent_action, opponent_action)
+    predict_next_state(analyser, agent_action, opponent_action)
 
 
 if __name__ == "__main__":
@@ -124,12 +130,12 @@ if __name__ == "__main__":
         by_primitive_actions=False,
     )
 
-    load_agent_model(agent, "game_model")
+    load_agent_model(agent, "game_model_new_scaled_big_batch")
 
     analyser = Analyser(
         env=env,
         agent=agent,
         custom_elements_callback=include_game_model_dpg_elements,
-        custom_state_update_callback=predict_next_state,
+        custom_state_update_callback=update_info_and_predict_next_state,
     )
     analyser.start()
