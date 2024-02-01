@@ -1,16 +1,13 @@
 import dearpygui.dearpygui as dpg
-import numpy as np
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index, FOOTSIES_ACTION_MOVES
+from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index
 from analysis import Analyser, footsies_move_from_one_hot
 from agents.game_model.agent import FootsiesAgent as GameModelAgent
+from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDEX_MAP
 from main import load_agent_model
-
-
-agent_opponent_moves = FOOTSIES_ACTION_MOVES + [FootsiesMove.DAMAGE]
 
 
 def load_predicted_battle_state(analyser: Analyser):
@@ -26,7 +23,6 @@ def load_predicted_battle_state(analyser: Analyser):
     analyser.load_battle_state(analyser.custom_battle_state, require_update=False)
 
 
-# TODO: add section with previous state
 def include_game_model_dpg_elements(analyser: Analyser):
     dpg.add_text("Prediced current state based on previous state")
     # Predicted state
@@ -57,11 +53,11 @@ def include_game_model_dpg_elements(analyser: Analyser):
     
     with dpg.group(horizontal=True):
         dpg.add_text("Agent action performed on previous state")
-        dpg.add_combo([m.name for m in agent_opponent_moves], tag="agent_action", callback=lambda: predict_next_state(analyser))
+        dpg.add_combo([m.name for m in FOOTSIES_ACTION_MOVES], tag="agent_action", callback=lambda: predict_next_state(analyser))
     
     with dpg.group(horizontal=True):
         dpg.add_text("Opponent action performed on previous state")
-        dpg.add_combo([m.name for m in agent_opponent_moves], tag="opponent_action", callback=lambda: predict_next_state(analyser))
+        dpg.add_combo([m.name for m in FOOTSIES_ACTION_MOVES], tag="opponent_action", callback=lambda: predict_next_state(analyser))
 
     with dpg.group(horizontal=True):
         dpg.add_button(label="Apply", callback=lambda: load_predicted_battle_state(analyser=analyser))
@@ -100,8 +96,8 @@ def predict_next_state(analyser: Analyser, agent_action: int = None, opponent_ac
 
 
 def update_info_and_predict_next_state(analyser: Analyser):
-    agent_action = agent.simplify_action(analyser.current_info["p1_move"])
-    opponent_action = agent.simplify_action(analyser.current_info["p2_move"])
+    agent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[analyser.current_info["p1_move"]]
+    opponent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[analyser.current_info["p2_move"]]
 
     predict_next_state(analyser, agent_action, opponent_action)
 

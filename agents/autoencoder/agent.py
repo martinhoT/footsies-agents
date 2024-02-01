@@ -118,9 +118,6 @@ class FootsiesAgent(FootsiesAgentBase):
     def train(self, batch: torch.Tensor) -> Tuple[float, float]:
         self.optimizer.zero_grad()
 
-        # TODO: remove
-        batch = batch[:1, :]
-
         z = self.autoencoder.encoder(batch)
         predicted = self.autoencoder.decoder(z)
         # Euclidean distance

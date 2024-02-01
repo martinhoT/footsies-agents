@@ -228,6 +228,7 @@ if __name__ == "__main__":
             agent,
             log_frequency=args.misc.log_frequency,
             log_dir=args.misc.log_dir,
+            step_start_value=args.misc.log_step_start,
             cummulative_reward=True,
             win_rate=True,
             truncation=True,

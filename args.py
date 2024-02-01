@@ -23,6 +23,7 @@ class MiscArgs:
     log_dir: str
     log_frequency: int
     log_test_states_number: int
+    log_step_start: int
 
 
 @dataclass
@@ -271,6 +272,12 @@ def parse_args() -> MainArgs:
         default=None,
         help="directory to which Tensorboard logs will be written",
     )
+    parser.add_argument(
+        "--log-step-start",
+        type=int,
+        default=0,
+        help="value at which the logging time step will start, useful for appending to existing logs",
+    )
 
     args = parser.parse_args()
 
@@ -311,6 +318,7 @@ def parse_args() -> MainArgs:
             log_dir=args.log_dir,
             log_frequency=args.log_frequency,
             log_test_states_number=args.log_test_states_number,
+            log_step_start=args.log_step_start,
         ),
         agent=AgentArgs(
             kwargs=model_kwargs,

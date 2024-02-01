@@ -4,89 +4,50 @@ import numpy as np
 import torch
 from torch import nn
 from agents.base import FootsiesAgentBase
+from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
 from gymnasium import Env
-from typing import Any, Callable, List, Tuple
+from typing import Callable, List, Tuple
 from gymnasium import Space
-from footsies_gym.moves import FOOTSIES_ACTION_MOVES
+from agents.utils import FOOTSIES_ACTION_MOVES
 
 
 # TODO: test with a new state variable that indicates the time since the last interaction (since we don't have memory...)
 
-
-class InputClip(nn.Module):
-    # Range of [5, 5] allows representing the sigmoid values of 0.01 and 0.99
-    # The idea is that the network should not be too sure or unsure of the outcomes, and allow better adaptability by avoiding very small gradients at the sigmoid's tails
-    # NOTE: watch out, gradients can become 0 without leaking, a leaky version has better adaptability (as in the Loss of Plasticity in Deep Continual Learning paper)
-    def __init__(self, minimum: float = -5, maximum: float = 5, leaky_coef: float = 0):
-        """Clip input into range"""
-        super().__init__()
-        self.minimum = minimum
-        self.maximum = maximum
-        self.leaky_coef = leaky_coef
-
-    def forward(self, x: torch.Tensor):
-        return torch.clip(
-            x,
-            min=self.minimum + self.leaky_coef * (x - 5),
-            max=self.maximum + self.leaky_coef * (x + 5),
-        )
-
-
-class ProbabilityDistribution(nn.Module):
-    def __init__(self):
-        """Makes input sum to 1"""
-        super().__init__()
-
-    def forward(self, x: torch.Tensor):
-        return x / torch.sum(x)
-
-
-class DebugStoreRecent(nn.Module):
-    def __init__(self):
-        """Store the most recent input"""
-        super().__init__()
-        self.stored = None
-
-    def forward(self, x: torch.Tensor):
-        self.stored = x
-        return x
-
-
 # Sigmoid output is able to tackle action combinations.
 # Also, softmax has the problem of not allowing more than one dominant action (for a stochastic agent, for instance), it only focuses on one of the inputs.
 # Softmax also makes the gradients for each output neuron dependent on the values of the other output neurons
+# And, since during training we are not giving the actual probability distributions as targets, it might not be appropriate to train assuming they are
 class PlayerModelNetwork(nn.Module):
+    DEBUG = False
+
     def __init__(
         self,
         input_dim: int,
         output_dim: int,
-        output_sigmoid: bool = False,
-        leaky_coef: float = 0,
+        use_sigmoid_output: bool = False,
+        input_clip: bool = False,
+        input_clip_leaky_coef: float = 0,
+        hidden_layer_sizes: list[int] = None,
+        hidden_layer_activation: nn.Module = nn.LeakyReLU,
     ):
         super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(input_dim, 32),
-            # nn.Linear(32, 32),
-            # nn.LeakyReLU(),
-            nn.Linear(32, output_dim),
+
+        self.layers = create_layered_network(
+            input_dim, output_dim, hidden_layer_sizes, hidden_layer_activation
         )
 
-        self.debug_store_1 = DebugStoreRecent()
-        self.debug_store_2 = DebugStoreRecent()
-        self.debug_store_3 = DebugStoreRecent()
+        self.debug_stores = []
 
-        if output_sigmoid:
-            self.layers.append(InputClip(leaky_coef=leaky_coef))
-            self.layers.append(self.debug_store_1)
-            self.layers.append(nn.Sigmoid())
-            self.layers.append(self.debug_store_2)
-            # Since during training we are not giving the actual probability distributions as targets, it might not be appropriate to train assuming they are
-            # self.layers.append(ProbabilityDistribution())
-            # self.layers.append(self.debug_store_3)
+        if input_clip:
+            self.layers.append(InputClip(leaky_coef=input_clip_leaky_coef))
+            if self.DEBUG:
+                debug_store = DebugStoreRecent()
+                self.debug_stores.append(debug_store)
+                self.layers.append(debug_store)
 
-        else:
-            # self.layers.append(nn.Softmax(dim=1))
-            pass
+        self.layers.append(
+            nn.Sigmoid() if use_sigmoid_output else nn.Softmax(dim=1)
+        )
 
     def forward(self, x: torch.Tensor):
         return self.layers(x)
@@ -98,19 +59,34 @@ class PlayerModel:
         obs_size: int,
         n_moves: int,
         optimize_frequency: int = 1000,
-        use_sigmoid: bool = True,
-        leaky_coef: float = 0,
+        use_sigmoid_output: bool = False,
+        input_clip: bool = False,
+        input_clip_leaky_coef: float = 0,
+        hidden_layer_sizes: list[int] = None,
+        hidden_layer_activation: nn.Module = nn.LeakyReLU,
         max_allowed_loss: float = +torch.inf,
         learning_rate: float = 1e-2,
     ):
         self.optimize_frequency = optimize_frequency
-        self.use_sigmoid = use_sigmoid
+        self.use_sigmoid_output = use_sigmoid_output
 
         self.network = PlayerModelNetwork(
-            obs_size, n_moves, output_sigmoid=self.use_sigmoid, leaky_coef=leaky_coef
+            input_dim=obs_size,
+            output_dim=n_moves,
+            use_sigmoid_output=self.use_sigmoid_output,
+            input_clip=input_clip,
+            input_clip_leaky_coef=input_clip_leaky_coef,
+            hidden_layer_sizes=hidden_layer_sizes,
+            hidden_layer_activation=hidden_layer_activation,
         )
 
-        self.loss_function = nn.MSELoss(reduction="mean") if self.use_sigmoid else nn.CrossEntropyLoss()
+        # Mean squared error
+        if self.use_sigmoid_output:
+            self.loss_function = lambda predicted, target: torch.mean((predicted - target)**2, dim=1)
+        # Cross entropy loss
+        else:
+            self.loss_function = lambda predicted, target: -torch.sum(torch.log(predicted) * target, dim=1)
+
         self.optimizer = torch.optim.SGD(params=self.network.parameters(), lr=learning_rate)
 
         # Just to make training easier, know which layers actually have learnable parameters
@@ -163,7 +139,7 @@ class PlayerModel:
                 self.cummulative_loss += loss.item()
                 self.cummulative_loss_n += 1
 
-                # TODO: investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
+                # investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
                 if all(
                     not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
                     for i, layer in enumerate(self.network.layers)
@@ -218,7 +194,7 @@ class PlayerModel:
     ):
         with torch.no_grad():
             out = self.network(obs)
-            if self.use_sigmoid:
+            if self.use_sigmoid_output:
                 snapped = torch.round(snap_to_fraction_of * out) / snap_to_fraction_of
                 if torch.all(snapped == 0):
                     print(
@@ -229,7 +205,7 @@ class PlayerModel:
                     probs = snapped / torch.sum(snapped, axis=1, keepdim=True)
             
             else:
-                probs = nn.Softmax(dim=1)(out)
+                probs = out
 
         return probs
 
@@ -263,7 +239,7 @@ class FootsiesAgent(FootsiesAgentBase):
             observation_space.shape[0],
             self.n_moves,
             optimize_frequency,
-            use_sigmoid=use_sigmoid,
+            use_sigmoid_output=use_sigmoid,
             leaky_coef=leaky_coef,
             max_allowed_loss=max_allowed_loss,
             learning_rate=learning_rate,
@@ -272,7 +248,7 @@ class FootsiesAgent(FootsiesAgentBase):
             observation_space.shape[0],
             self.n_moves,
             optimize_frequency,
-            use_sigmoid=use_sigmoid,
+            use_sigmoid_output=use_sigmoid,
             leaky_coef=leaky_coef,
             max_allowed_loss=max_allowed_loss,
             learning_rate=learning_rate,
@@ -295,6 +271,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_observation = obs
         return model.predict(obs, deterministic=deterministic)
 
+    # TODO: change moves to include only the action moves
     def update(
         self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict
     ):

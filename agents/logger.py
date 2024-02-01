@@ -24,6 +24,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             Tuple[str, Callable[[List[Tuple[Any, Any]]], float]]
         ] = None,
         test_states_number: int = 10_000,
+        step_start_value: int = 0,
     ):
         """
         A wrapper on FOOTSIES agents which logs the specified training metrics.
@@ -55,6 +56,9 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             The list of state-action pairs won't change in future calls of those methods, so the agents can cache it if they have to perform some transformations on it.
             If there is at least one evaluator, then `preprocess` will collect those test state-action pairs.
             It's a list with the same structure as `custom_evaluators`
+        episode_start_value: int
+            the value with which the time step counter will begin.
+            This is useful if one training run is stopped, and if future logs should continue after the previous training run
         """
         self.agent = agent
         self.log_frequency = log_frequency
@@ -81,7 +85,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.total_wins = 0
         self.total_truncated_episodes = 0
         self.total_terminated_episodes = 0
-        self.current_step = 0
+        self.current_step = step_start_value
         self.current_episode = 0
         self.current_episode_length = 0
         self.episode_lengths = deque([], maxlen=100)

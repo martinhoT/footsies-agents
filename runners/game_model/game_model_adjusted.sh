@@ -9,6 +9,7 @@ python3 main.py game_model \
         opponent_action_dim 10 \
         move_transition_scale 10 \
         optimize_frequency 100000 \
+        learning_rate 0.05 \
     -mB \
         by_primitive_actions false \
     -mS \

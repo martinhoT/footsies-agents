@@ -3,18 +3,11 @@ import torch
 import numpy as np
 from torch import nn
 from agents.base import FootsiesAgentBase
+from agents.utils import FOOTSIES_ACTION_MOVE_INDEX_MAP
+from agents.torch_utils import create_layered_network
 from gymnasium import Env, Space
 from typing import Callable, Tuple
-from itertools import pairwise
 
-
-# TODO: Current model characteristics
-# - The current model learns:
-#   - move progress and duration
-#     - but only in some situations (doesn't work in situations that don't happen, which makes sense)
-# - The current model doesn't learn:
-#   - to switch moves after their progress has finished
-#   - attack hits, even blocks
 
 class GameModel(nn.Module):
     def __init__(
@@ -27,31 +20,11 @@ class GameModel(nn.Module):
     ):
         super().__init__()
         
-        if hidden_layer_sizes is None:
-            hidden_layer_sizes = [64, 64]
-
         input_dim = state_dim + agent_action_dim + opponent_action_dim
-        if len(hidden_layer_sizes) == 0:
-            self.layers = nn.Sequential(nn.Linear(input_dim, state_dim))
-        else:
-            layers = [
-                nn.Linear(input_dim, hidden_layer_sizes[0]),
-                hidden_layer_activation(),
-            ]
-
-            for hidden_layer_size_in, hidden_layer_size_out in pairwise(hidden_layer_sizes):
-                layers.append(
-                    nn.Linear(hidden_layer_size_in, hidden_layer_size_out)
-                )
-                layers.append(
-                    hidden_layer_activation(),
-                )
-            
-            layers.append(
-                nn.Linear(hidden_layer_sizes[-1], state_dim)
-            )
-
-            self.layers = nn.Sequential(*layers)
+        
+        self.layers = create_layered_network(
+            input_dim, state_dim, hidden_layer_sizes, hidden_layer_activation
+        )
 
         # Different activations for different parts of the output state
         # This is a "staircase sigmoid" for snapping to integers. It's not differentiable everywhere, but PyTorch handles this gracefully
@@ -129,14 +102,6 @@ class FootsiesAgent(FootsiesAgentBase):
         agent_action_oh = self._action_to_tensor(agent_action, self.agent_action_dim)
         opponent_action_oh = self._action_to_tensor(opponent_action, self.opponent_action_dim)
         self.state_batch_as_list.append(torch.hstack((obs, agent_action_oh, opponent_action_oh, next_obs)))
-    
-    # NOTE: DAMAGE is being included in the actions
-    def simplify_action(self, action: int) -> int:
-        """Simplify the player's action. For instance, guard motions will be set to BACKWARD"""
-        if action >= 10 and action <= 14: # GUARD_M ... GUARD_PROXIMITY
-            action = 2 # BACKWARD
-        
-        return action
 
     def act(self, obs: np.ndarray) -> "any":
         self.current_observation = obs
@@ -148,8 +113,8 @@ class FootsiesAgent(FootsiesAgentBase):
             agent_action = info["p1_move"]
             opponent_action = info["p2_move"]
 
-            agent_action = self.simplify_action(agent_action)
-            opponent_action = self.simplify_action(opponent_action)
+            agent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[agent_action]
+            opponent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[opponent_action]
     
         else:
             return

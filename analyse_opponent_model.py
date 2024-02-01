@@ -4,13 +4,11 @@ from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, FOOTSIES_ACTION_MOVES
+from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move
 from analysis import Analyser, footsies_move_from_one_hot
 from agents.mimic.agent import FootsiesAgent as OpponentModelAgent
+from agents.utils import FOOTSIES_ACTION_MOVES
 from main import load_agent_model
-
-
-opponent_moves = FOOTSIES_ACTION_MOVES + [FootsiesMove.DAMAGE]
 
 
 def load_predicted_battle_state(analyser: Analyser):
@@ -26,7 +24,6 @@ def load_predicted_battle_state(analyser: Analyser):
     analyser.load_battle_state(analyser.custom_battle_state, require_update=False)
 
 
-# TODO: add section with previous state
 def include_mimic_dpg_elements(analyser: Analyser):
     dpg.add_text("Prediced current state based on previous state")
     # Previous state
@@ -57,7 +54,7 @@ def include_mimic_dpg_elements(analyser: Analyser):
     
     with dpg.group(horizontal=True):
         dpg.add_text("Opponent move actually performed")
-        dpg.add_combo([m.name for m in opponent_moves], tag="agent_action", callback=update_prediction)
+        dpg.add_combo([m.name for m in FOOTSIES_ACTION_MOVES], tag="agent_action", callback=update_prediction)
     
     with dpg.group(horizontal=True):
         dpg.add_button(label="Apply", callback=lambda: load_predicted_battle_state(analyser=analyser))

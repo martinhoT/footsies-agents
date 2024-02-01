@@ -6,6 +6,37 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 # Some wrappers need to be handled in a special manner when extracting a policy for the FOOTSIES environment
 from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
 from footsies_gym.wrappers.normalization import FootsiesNormalized
+from footsies_gym.moves import FootsiesMove
+
+
+# "Action moves" are defined as moves that correspond to intentional actions of the players, i.e. they are a direct result of the player's actions
+FOOTSIES_ACTION_MOVES: list[FootsiesMove] = [FootsiesMove.STAND, FootsiesMove.BACKWARD, FootsiesMove.FORWARD, FootsiesMove.DASH_BACKWARD, FootsiesMove.DASH_FORWARD, FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL]
+# TODO: this DAMAGE -> STAND conversion is valid? Will it not disturb training of STAND? evaluate that
+# This mapping maps a FOOTSIES move to an action move that may have caused it. For DAMAGE, we assume the player did nothing
+FOOTSIES_ACTION_MOVE_MAP: dict[FootsiesMove, FootsiesMove] = {
+    FootsiesMove.STAND: FootsiesMove.STAND,
+    FootsiesMove.FORWARD: FootsiesMove.FORWARD,
+    FootsiesMove.BACKWARD: FootsiesMove.BACKWARD,
+    FootsiesMove.DASH_BACKWARD: FootsiesMove.DASH_BACKWARD,
+    FootsiesMove.DASH_FORWARD: FootsiesMove.DASH_FORWARD,
+    FootsiesMove.N_ATTACK: FootsiesMove.N_ATTACK,
+    FootsiesMove.B_ATTACK: FootsiesMove.B_ATTACK,
+    FootsiesMove.N_SPECIAL: FootsiesMove.N_SPECIAL,
+    FootsiesMove.B_SPECIAL: FootsiesMove.B_SPECIAL,
+    FootsiesMove.DAMAGE: FootsiesMove.STAND,
+    FootsiesMove.GUARD_M: FootsiesMove.BACKWARD,
+    FootsiesMove.GUARD_STAND: FootsiesMove.BACKWARD,
+    FootsiesMove.GUARD_CROUCH: FootsiesMove.GUARD_CROUCH,
+    FootsiesMove.GUARD_BREAK: FootsiesMove.GUARD_BREAK,
+    FootsiesMove.GUARD_PROXIMITY: FootsiesMove.GUARD_PROXIMITY,
+    FootsiesMove.DEAD: FootsiesMove.STAND,
+    FootsiesMove.WIN: FootsiesMove.STAND,
+}
+FOOTSIES_ACTION_MOVE_INDEX_MAP: dict[FootsiesMove, int] = {
+    move: FOOTSIES_ACTION_MOVES.index(FOOTSIES_ACTION_MOVE_MAP[move]) for move in FootsiesMove
+}
+
+assert set(FOOTSIES_ACTION_MOVES) == set(FOOTSIES_ACTION_MOVE_MAP.values()) and len(FOOTSIES_ACTION_MOVE_MAP) == len(FootsiesMove)
 
 
 def wrap_policy(
