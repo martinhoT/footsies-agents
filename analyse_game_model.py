@@ -6,7 +6,7 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index
 from analysis import Analyser, footsies_move_from_one_hot
 from agents.game_model.agent import FootsiesAgent as GameModelAgent
-from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDEX_MAP
+from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDICES_MAP
 from main import load_agent_model
 
 
@@ -96,8 +96,8 @@ def predict_next_state(analyser: Analyser, agent_action: int = None, opponent_ac
 
 
 def update_info_and_predict_next_state(analyser: Analyser):
-    agent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[analyser.current_info["p1_move"]]
-    opponent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[analyser.current_info["p2_move"]]
+    agent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[analyser.current_info["p1_move"]]
+    opponent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[analyser.current_info["p2_move"]]
 
     predict_next_state(analyser, agent_action, opponent_action)
 

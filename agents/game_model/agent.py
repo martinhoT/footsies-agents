@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torch import nn
 from agents.base import FootsiesAgentBase
-from agents.utils import FOOTSIES_ACTION_MOVE_INDEX_MAP
+from agents.utils import FOOTSIES_ACTION_MOVE_INDICES_MAP
 from agents.torch_utils import create_layered_network
 from gymnasium import Env, Space
 from typing import Callable, Tuple
@@ -113,8 +113,8 @@ class FootsiesAgent(FootsiesAgentBase):
             agent_action = info["p1_move"]
             opponent_action = info["p2_move"]
 
-            agent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[agent_action]
-            opponent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[opponent_action]
+            agent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[agent_action]
+            opponent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[opponent_action]
     
         else:
             return

@@ -6,7 +6,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 # Some wrappers need to be handled in a special manner when extracting a policy for the FOOTSIES environment
 from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.moves import FootsiesMove
+from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move
 
 
 # "Action moves" are defined as moves that correspond to intentional actions of the players, i.e. they are a direct result of the player's actions
@@ -26,14 +26,17 @@ FOOTSIES_ACTION_MOVE_MAP: dict[FootsiesMove, FootsiesMove] = {
     FootsiesMove.DAMAGE: FootsiesMove.STAND,
     FootsiesMove.GUARD_M: FootsiesMove.BACKWARD,
     FootsiesMove.GUARD_STAND: FootsiesMove.BACKWARD,
-    FootsiesMove.GUARD_CROUCH: FootsiesMove.GUARD_CROUCH,
-    FootsiesMove.GUARD_BREAK: FootsiesMove.GUARD_BREAK,
-    FootsiesMove.GUARD_PROXIMITY: FootsiesMove.GUARD_PROXIMITY,
+    FootsiesMove.GUARD_CROUCH: FootsiesMove.BACKWARD,
+    FootsiesMove.GUARD_BREAK: FootsiesMove.BACKWARD,
+    FootsiesMove.GUARD_PROXIMITY: FootsiesMove.BACKWARD,
     FootsiesMove.DEAD: FootsiesMove.STAND,
     FootsiesMove.WIN: FootsiesMove.STAND,
 }
 FOOTSIES_ACTION_MOVE_INDEX_MAP: dict[FootsiesMove, int] = {
     move: FOOTSIES_ACTION_MOVES.index(FOOTSIES_ACTION_MOVE_MAP[move]) for move in FootsiesMove
+}
+FOOTSIES_ACTION_MOVE_INDICES_MAP: dict[int, int] = {
+    footsies_move_index_to_move.index(move): FOOTSIES_ACTION_MOVES.index(FOOTSIES_ACTION_MOVE_MAP[move]) for move in FootsiesMove
 }
 
 assert set(FOOTSIES_ACTION_MOVES) == set(FOOTSIES_ACTION_MOVE_MAP.values()) and len(FOOTSIES_ACTION_MOVE_MAP) == len(FootsiesMove)
