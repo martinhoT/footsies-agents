@@ -35,7 +35,7 @@ env = FootsiesActionCombinationsDiscretized(
 )
 
 agent = MimicAgent(env.observation_space, env.action_space,
-    over_primitive_actions=False,
+    by_primitive_actions=False,
     optimize_frequency=3,
     use_sigmoid=True,
 )

@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torch import nn
 from agents.base import FootsiesAgentBase
-from agents.utils import FOOTSIES_ACTION_MOVE_INDICES_MAP
+from agents.utils import FOOTSIES_ACTION_MOVE_INDICES_MAP, FOOTSIES_ACTION_MOVES
 from agents.torch_utils import create_layered_network
 from gymnasium import Env, Space
 from typing import Callable, Tuple
@@ -52,9 +52,8 @@ class FootsiesAgent(FootsiesAgentBase):
         self,
         observation_space: Space,
         action_space: Space,
-        opponent_action_dim: int,
         by_primitive_actions: bool = False,
-        move_transition_scale: float = 60.0, # scale training examples where move transitions occur, since they are very important
+        move_transition_scale: float = 10.0, # scale training examples where move transitions occur, since they are very important
         optimize_frequency: int = 1000, # mini-batch size, bad name
         learning_rate: float = 1e-2,
         hidden_layer_sizes_specification: str = "64,64",
@@ -65,8 +64,8 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.by_primitive_actions = by_primitive_actions
         self.state_dim = observation_space.shape[0]
-        self.agent_action_dim = action_space.shape[0] if by_primitive_actions else opponent_action_dim
-        self.opponent_action_dim = opponent_action_dim
+        self.agent_action_dim = action_space.shape[0] if by_primitive_actions else len(FOOTSIES_ACTION_MOVES)
+        self.opponent_action_dim = self.agent_action_dim   # we assume they use the same action space
         self.move_transition_scale = move_transition_scale
         self.optimize_frequency = optimize_frequency
         self.learning_rate = learning_rate

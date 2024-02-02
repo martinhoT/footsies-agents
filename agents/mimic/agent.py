@@ -8,15 +8,15 @@ from agents.torch_utils import create_layered_network, InputClip, DebugStoreRece
 from gymnasium import Env
 from typing import Callable, List, Tuple
 from gymnasium import Space
-from agents.utils import FOOTSIES_ACTION_MOVES
+from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDICES_MAP
 
 
 # TODO: test with a new state variable that indicates the time since the last interaction (since we don't have memory...)
 
 # Sigmoid output is able to tackle action combinations.
 # Also, softmax has the problem of not allowing more than one dominant action (for a stochastic agent, for instance), it only focuses on one of the inputs.
-# Softmax also makes the gradients for each output neuron dependent on the values of the other output neurons
-# And, since during training we are not giving the actual probability distributions as targets, it might not be appropriate to train assuming they are
+# Softmax also makes the gradients for each output neuron dependent on the values of the other output neurons.
+# And, since during training we are not giving the actual probability distributions as targets, it might not be appropriate to train assuming they are.
 class PlayerModelNetwork(nn.Module):
     DEBUG = False
 
@@ -64,11 +64,13 @@ class PlayerModel:
         input_clip_leaky_coef: float = 0,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.LeakyReLU,
+        move_transition_scale: float = 10.0,
         max_allowed_loss: float = +torch.inf,
         learning_rate: float = 1e-2,
     ):
         self.optimize_frequency = optimize_frequency
         self.use_sigmoid_output = use_sigmoid_output
+        self.move_transition_scale = move_transition_scale
 
         self.network = PlayerModelNetwork(
             input_dim=obs_size,
@@ -119,19 +121,21 @@ class PlayerModel:
         self.step += 1
 
         if self.step >= self.optimize_frequency:
-            x_batch = torch.cat(self.x_batch_as_list)
-            y_batch = torch.stack(self.y_batch_as_list)
+            batch_x = torch.cat(self.x_batch_as_list, 0)
+            batch_y = torch.cat(self.y_batch_as_list, 0)
             loss = None
             base_lr = self.optimizer.param_groups[0]["lr"]
             lr_modifier = 1
+
+            move_transition_multiplier = 1 + torch.hstack((torch.tensor(False), torch.any(batch_x[:-1, 2:32] != batch_x[1:, 2:32], dim=1))) * (self.move_transition_scale - 1)
 
             # Keep training on examples that are problematic
             while loss is None or loss > self.max_loss:
                 self.optimizer.param_groups[0]["lr"] = base_lr * lr_modifier
                 self.optimizer.zero_grad()
 
-                predicted = self.network(x_batch)
-                loss = self.loss_function(predicted, y_batch)
+                predicted = self.network(batch_x)
+                loss = torch.mean(self.loss_function(predicted, batch_y) * move_transition_multiplier)
 
                 loss.backward()
                 self.optimizer.step()
@@ -139,7 +143,7 @@ class PlayerModel:
                 self.cummulative_loss += loss.item()
                 self.cummulative_loss_n += 1
 
-                # investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
+                # Investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
                 if all(
                     not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
                     for i, layer in enumerate(self.network.layers)
@@ -167,9 +171,10 @@ class PlayerModel:
                 return torch.argmax(probs, axis=1)
             else:
                 probs_cummulative = torch.cumsum(probs, 1)
-                sampled = torch.rand((probs_cummulative.shape[0], 1))
+                # Contrary to what the docs say, torch.rand can return 1..., so we multiply by 0.99 to compensate for that
+                sampled = torch.rand(probs_cummulative.shape[0], 1) * 0.99
                 # I just want to know the index of the first time sampled < probs_cummulative on each row, but it's convoluted
-                nonzeros = torch.nonzero(sampled < probs_cummulative)
+                nonzeros = torch.nonzero(sampled <= probs_cummulative)
                 # Information across all rows is in a single dimension, so we need to determine the points in which we transition from one row to the next
                 i = torch.squeeze(
                     torch.nonzero((nonzeros[:-1] - nonzeros[1:])[:, 0]) + 1, dim=1
@@ -222,37 +227,37 @@ class FootsiesAgent(FootsiesAgentBase):
         self,
         observation_space: Space,
         action_space: Space,
-        over_primitive_actions: bool = False,
-        optimize_frequency: int = 1000,
-        use_sigmoid: bool = True,
-        leaky_coef: float = 0,
+        by_primitive_actions: bool = False,
+        use_sigmoid_output: bool = False,
+        input_clip: bool = False,
+        input_clip_leaky_coef: float = 0,
+        hidden_layer_sizes_specification: str = "64,64",
+        hidden_layer_activation_specification: str = "LeakyReLU",
+        move_transition_scale: float = 10.0,
         max_allowed_loss: float = +torch.inf,
+        optimize_frequency: int = 1000,
         learning_rate: float = 1e-2,
     ):
-        self.observation_space = observation_space
-        self.action_space = action_space
-        self.over_primitive_actions = over_primitive_actions
+        self.by_primitive_actions = by_primitive_actions
 
-        self.n_moves = action_space.n if over_primitive_actions else len(FOOTSIES_ACTION_MOVES)
+        self.n_moves = action_space.n if by_primitive_actions else len(FOOTSIES_ACTION_MOVES)
 
-        self.p1_model = PlayerModel(
-            observation_space.shape[0],
-            self.n_moves,
-            optimize_frequency,
-            use_sigmoid_output=use_sigmoid,
-            leaky_coef=leaky_coef,
-            max_allowed_loss=max_allowed_loss,
-            learning_rate=learning_rate,
-        )
-        self.p2_model = PlayerModel(
-            observation_space.shape[0],
-            self.n_moves,
-            optimize_frequency,
-            use_sigmoid_output=use_sigmoid,
-            leaky_coef=leaky_coef,
-            max_allowed_loss=max_allowed_loss,
-            learning_rate=learning_rate,
-        )
+        # Both models have the exact same structure and training regime
+        player_model_kwargs = {
+            "obs_size": observation_space.shape[0],
+            "n_moves": self.n_moves,
+            "optimize_frequency": optimize_frequency,
+            "use_sigmoid_output": use_sigmoid_output,
+            "input_clip": input_clip,
+            "input_clip_leaky_coef": input_clip_leaky_coef,
+            "hidden_layer_sizes": [int(n) for n in hidden_layer_sizes_specification.split(",")] if hidden_layer_sizes_specification else [],
+            "hidden_layer_activation": getattr(nn, hidden_layer_activation_specification),
+            "move_transition_scale": move_transition_scale,
+            "max_allowed_loss": max_allowed_loss,
+            "learning_rate": learning_rate,
+        }
+        self.p1_model = PlayerModel(**player_model_kwargs)
+        self.p2_model = PlayerModel(**player_model_kwargs)
 
         self.current_observation = None
 
@@ -269,21 +274,22 @@ class FootsiesAgent(FootsiesAgentBase):
         model = self.p1_model if p1 else self.p2_model
         obs = self._obs_to_tensor(obs)
         self.current_observation = obs
-        return model.predict(obs, deterministic=deterministic)
+        return model.predict(obs, deterministic=deterministic).item()
 
     # TODO: change moves to include only the action moves
     def update(
         self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict
     ):
-        key = "action" if self.over_primitive_actions else "move"
+        key = "action" if self.by_primitive_actions else "move"
         # This is assuming that, when using moves, all relevant moves have contiguous IDs from 0, without breaks
-        # That is, the irrelevant moves (WIN and DEAD) have the largest IDs
-        p1_move = info["p1_" + key]
-        p2_move = info["p2_" + key]
+        # That is, the irrelevant moves (such as WIN and DEAD) have the largest IDs
+        p1_move = FOOTSIES_ACTION_MOVE_INDICES_MAP[info["p1_" + key]]
+        p2_move = FOOTSIES_ACTION_MOVE_INDICES_MAP[info["p2_" + key]]
         p1_move_oh = self._move_onehot(p1_move)
         p2_move_oh = self._move_onehot(p2_move)
 
         # TODO: evaluate only when a move transition occurs (essentially frame skipping)
+        #       ... but then how do we predict when the opponent is just standing?
         self.p1_model.update(self.current_observation, p1_move_oh)
         self.p2_model.update(self.current_observation, p2_move_oh)
 
@@ -302,9 +308,7 @@ class FootsiesAgent(FootsiesAgentBase):
         return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
 
     def _move_onehot(self, move: int):
-        onehot = torch.zeros((self.n_moves,))
-        onehot[move] = 1
-        return onehot
+        return nn.functional.one_hot(torch.tensor(move), num_classes=self.n_moves).unsqueeze(0)
 
     # From https://en.wikipedia.org/wiki/Hick's_law#Law
     def decision_entropy(self, obs: torch.Tensor, p1: bool) -> float:

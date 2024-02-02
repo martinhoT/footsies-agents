@@ -171,8 +171,6 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
             self.test_states.append((state, None))
 
-            env.close()
-
     def load(self, folder_path: str):
         self.agent.load(folder_path)
 

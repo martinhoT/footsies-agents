@@ -354,6 +354,8 @@ class Analyser:
             dpg.add_separator()
 
             # Action selector
+            dpg.add_text("Player 1 action")
+            
             with dpg.group(horizontal=True):
                 dpg.add_text("Action:")
                 # Disabled by default, will simply display what the agent outputs

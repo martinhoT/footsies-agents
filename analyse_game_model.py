@@ -24,7 +24,7 @@ def load_predicted_battle_state(analyser: Analyser):
 
 
 def include_game_model_dpg_elements(analyser: Analyser):
-    dpg.add_text("Prediced current state based on previous state")
+    dpg.add_text("Prediced current state based on the previous observation")
     # Predicted state
     with dpg.table():
         dpg.add_table_column(label="Property")
