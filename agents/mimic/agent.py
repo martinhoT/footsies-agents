@@ -8,10 +8,14 @@ from agents.torch_utils import create_layered_network, InputClip, DebugStoreRece
 from gymnasium import Env
 from typing import Callable, List, Tuple
 from gymnasium import Space
-from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDICES_MAP
+from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDEX_MAP
+from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move
 
 
-# TODO: test with a new state variable that indicates the time since the last interaction (since we don't have memory...)
+# Actions that have a set duration, and cannot be performed instantly. These actions are candidates for frame skipping
+TEMPORAL_ACTIONS = set(FOOTSIES_ACTION_MOVES) - {FootsiesMove.STAND, FootsiesMove.FORWARD, FootsiesMove.BACKWARD}
+# Moves that signify a player is hit. The opponent is able to cancel into another action in these cases. Note that GUARD_PROXIMITY is not included
+HIT_GUARD_STATES =  {FootsiesMove.DAMAGE, FootsiesMove.GUARD_STAND, FootsiesMove.GUARD_CROUCH, FootsiesMove.GUARD_M, FootsiesMove.GUARD_BREAK}
 
 # Sigmoid output is able to tackle action combinations.
 # Also, softmax has the problem of not allowing more than one dominant action (for a stochastic agent, for instance), it only focuses on one of the inputs.
@@ -221,12 +225,15 @@ class PlayerModel:
         torch.save(self.network.state_dict(), path)
 
 
+# TODO: test with a new state variable that indicates the time since the last interaction (since we don't have memory...)
 # TODO: there are three different ways we can predict actions: primitive actions discretized, primitive actions as tuple, and moves. Are all supported?
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(
         self,
         observation_space: Space,
         action_space: Space,
+        frameskipping: bool = True,
+        append_time_since_last_interaction: bool = False,
         by_primitive_actions: bool = False,
         use_sigmoid_output: bool = False,
         input_clip: bool = False,
@@ -238,6 +245,10 @@ class FootsiesAgent(FootsiesAgentBase):
         optimize_frequency: int = 1000,
         learning_rate: float = 1e-2,
     ):
+        if append_time_since_last_interaction:
+            raise NotImplementedError("appending the time since the last interaction is still not supported")
+
+        self.frameskipping = frameskipping
         self.by_primitive_actions = by_primitive_actions
 
         self.n_moves = action_space.n if by_primitive_actions else len(FOOTSIES_ACTION_MOVES)
@@ -276,29 +287,43 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_observation = obs
         return model.predict(obs, deterministic=deterministic).item()
 
-    # TODO: change moves to include only the action moves
+    def _is_update_skippable(self, player_action: FootsiesMove, player_move_state: FootsiesMove, opponent_move_state: FootsiesMove) -> bool:
+        if not self.frameskipping:
+            return False
+        
+        return (
+            # Is the player performing an action that takes time and the opponent is not hit yet?
+            ((player_action in TEMPORAL_ACTIONS) and (opponent_move_state not in HIT_GUARD_STATES))
+            # Is the player being hit?
+            or player_move_state in HIT_GUARD_STATES
+        )
+
     def update(
         self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict
     ):
         key = "action" if self.by_primitive_actions else "move"
-        # This is assuming that, when using moves, all relevant moves have contiguous IDs from 0, without breaks
-        # That is, the irrelevant moves (such as WIN and DEAD) have the largest IDs
-        p1_move = FOOTSIES_ACTION_MOVE_INDICES_MAP[info["p1_" + key]]
-        p2_move = FOOTSIES_ACTION_MOVE_INDICES_MAP[info["p2_" + key]]
-        p1_move_oh = self._move_onehot(p1_move)
-        p2_move_oh = self._move_onehot(p2_move)
+        
+        # The move_state variables are the direct FOOTSIES moves, all other variables correspond to "action moves" as specified in the utils
+        p1_move_state: FootsiesMove = footsies_move_index_to_move[info["p1_" + key]]
+        p2_move_state: FootsiesMove = footsies_move_index_to_move[info["p2_" + key]]
+        p1_move_idx = FOOTSIES_ACTION_MOVE_INDEX_MAP[p1_move_state]
+        p2_move_idx = FOOTSIES_ACTION_MOVE_INDEX_MAP[p2_move_state]
+        p1_move_oh = self._move_onehot(p1_move_idx)
+        p2_move_oh = self._move_onehot(p2_move_idx)
 
-        # TODO: evaluate only when a move transition occurs (essentially frame skipping)
-        #       ... but then how do we predict when the opponent is just standing?
-        self.p1_model.update(self.current_observation, p1_move_oh)
-        self.p2_model.update(self.current_observation, p2_move_oh)
+        p1_move = FOOTSIES_ACTION_MOVES[p1_move_idx]
+        p2_move = FOOTSIES_ACTION_MOVES[p2_move_idx]
+        if not self._is_update_skippable(p1_move, p1_move_state, p2_move_state):
+            self.p1_model.update(self.current_observation, p1_move_oh)
+        if not self._is_update_skippable(p2_move, p2_move_state, p1_move_state):
+            self.p2_model.update(self.current_observation, p2_move_oh)
 
         # Update metrics
         self._p1_correct = (self._p1_correct * self._correct_decay) + (
-            self.p1_model.predict(self.current_observation) == p1_move
+            self.p1_model.predict(self.current_observation) == p1_move_idx
         )
         self._p2_correct = (self._p2_correct * self._correct_decay) + (
-            self.p2_model.predict(self.current_observation) == p2_move
+            self.p2_model.predict(self.current_observation) == p2_move_idx
         )
         self._random_correct = (self._random_correct * self._correct_decay) + (
             torch.rand((1,)).item() < 1 / self.n_moves

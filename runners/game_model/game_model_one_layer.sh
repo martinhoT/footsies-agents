@@ -7,13 +7,13 @@ python3 main.py game_model \
     -mN \
         move_transition_scale 10 \
         optimize_frequency 100000 \
-        learning_rate 0.5 \
+        learning_rate 0.1 \
     -mB \
         by_primitive_actions false \
     -mS \
-        hidden_layer_sizes_specification 128,128,128 \
+        hidden_layer_sizes_specification 128 \
         hidden_layer_activation_specification LeakyReLU \
     --log-frequency 100000 \
-    --log-dir runs/game_model_fixed \
-    --model-name game_model_fixed \
+    --log-dir runs/game_model_one_layer \
+    --model-name game_model_one_layer \
     "$@"
