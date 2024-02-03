@@ -74,13 +74,17 @@ class OpponentDistributionPlot:
 
 
 class MimicAnalyserManager:
-    def __init__(self):
+    def __init__(self, agent: OpponentModelAgent):
+        self.agent = agent
+
         self.p1_plot = OpponentDistributionPlot("Player 1 move probability distribution")
         self.p2_plot = OpponentDistributionPlot("Player 2 move probability distribution")
 
         n_moves = len(FOOTSIES_ACTION_MOVES)
         self.p1_action_table = ActionTableEstimator(n_moves)
         self.p2_action_table = ActionTableEstimator(n_moves)
+        
+        self.online_learning: bool = False
 
         # DPG items
         self.actual_p1_move = None
@@ -88,7 +92,18 @@ class MimicAnalyserManager:
         self.p1_action_table_estimator_size = None
         self.p2_action_table_estimator_size = None
 
+    def toggle_online_learning(self):
+        self.online_learning = not self.online_learning
+
+    def update_max_loss(self, max_loss: float):
+        self.agent.p1_model.max_loss = max_loss
+        self.agent.p2_model.max_loss = max_loss
+
     def include_mimic_dpg_elements(self, analyser: Analyser):
+        with dpg.group(horizontal=True):
+            dpg.add_checkbox(label="Enable online learning", default_value=self.online_learning, callback=self.toggle_online_learning)
+            dpg.add_input_float(label="Max. allowed loss", default_value=self.agent.p1_model.max_loss, callback=lambda s, a: self.update_max_loss(a))
+
         dpg.add_text("Opponent model estimations on the previous observation")
         
         self.p1_plot.setup()
@@ -127,6 +142,11 @@ class MimicAnalyserManager:
         self.p1_action_table.update(observation, p1_move)
         self.p2_action_table.update(observation, p2_move)
 
+        if self.online_learning:
+            # We need to call act so that the agent can store the current observation. Implementation detail, but whatever
+            agent.act(observation)
+            agent.update(None, None, None, None, analyser.current_info)
+
         observation_torch = torch.tensor(observation, dtype=torch.float32).unsqueeze(0)
         p1_distribution_predicted = agent.p1_model.probability_distribution(observation_torch).squeeze()
         p2_distribution_predicted = agent.p2_model.probability_distribution(observation_torch).squeeze()
@@ -146,6 +166,7 @@ if __name__ == "__main__":
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
         game_port=15000,
         opponent_port=15001,
+        remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=False,
@@ -163,13 +184,16 @@ if __name__ == "__main__":
         by_primitive_actions=False,
         use_sigmoid_output=False,
         input_clip=False,
+        max_allowed_loss=float("+inf"),
         hidden_layer_sizes_specification="",
         hidden_layer_activation_specification="Identity",
+        optimize_frequency=1,
+        learning_rate=0.05,
     )
 
     load_agent_model(agent, "mimic_linear")
 
-    mimic_analyser_manager = MimicAnalyserManager()
+    mimic_analyser_manager = MimicAnalyserManager(agent)
 
     analyser = Analyser(
         env=env,

@@ -67,7 +67,9 @@ class Analyser:
         if footsies_env.sync_mode != "synced_non_blocking":
             raise ValueError("the FOOTSIES environment sync mode is not 'synced_non_blocking', using other modes is not appropriate")
         if footsies_env.render_mode != "human":
-            print("WARNING: the environemnt's render mode was set to a value other than 'human', this might not be intended")
+            print("WARNING: the environment's render mode was set to a value other than 'human', this might not be intended")
+        if footsies_env.by_example:
+            print("INFO: player 1 is set to be the in-game bot, and as such custom actions will not be supported")
 
         self.env = env
         self.footsies_env = footsies_env
@@ -365,7 +367,7 @@ class Analyser:
             
             with dpg.group(horizontal=True):
                 dpg.add_text("Custom action:")
-                dpg.add_checkbox(default_value=False, tag="use_custom_action")
+                dpg.add_checkbox(default_value=False, tag="use_custom_action", enabled=not self.footsies_env.by_example)
             
             dpg.add_separator()
 

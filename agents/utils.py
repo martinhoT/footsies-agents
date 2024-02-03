@@ -10,15 +10,15 @@ from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move
 
 
 # "Action moves" are defined as moves that correspond to intentional actions of the players, i.e. they are a direct result of the player's actions
-FOOTSIES_ACTION_MOVES: list[FootsiesMove] = [FootsiesMove.STAND, FootsiesMove.BACKWARD, FootsiesMove.FORWARD, FootsiesMove.DASH_BACKWARD, FootsiesMove.DASH_FORWARD, FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL]
+FOOTSIES_ACTION_MOVES: list[FootsiesMove] = [FootsiesMove.STAND, FootsiesMove.FORWARD, FootsiesMove.BACKWARD, FootsiesMove.DASH_FORWARD, FootsiesMove.DASH_BACKWARD, FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL]
 # TODO: this DAMAGE -> STAND conversion is valid? Will it not disturb training of STAND? evaluate that
 # This mapping maps a FOOTSIES move to an action move that may have caused it. For DAMAGE, we assume the player did nothing
 FOOTSIES_ACTION_MOVE_MAP: dict[FootsiesMove, FootsiesMove] = {
     FootsiesMove.STAND: FootsiesMove.STAND,
     FootsiesMove.FORWARD: FootsiesMove.FORWARD,
     FootsiesMove.BACKWARD: FootsiesMove.BACKWARD,
-    FootsiesMove.DASH_BACKWARD: FootsiesMove.DASH_BACKWARD,
     FootsiesMove.DASH_FORWARD: FootsiesMove.DASH_FORWARD,
+    FootsiesMove.DASH_BACKWARD: FootsiesMove.DASH_BACKWARD,
     FootsiesMove.N_ATTACK: FootsiesMove.N_ATTACK,
     FootsiesMove.B_ATTACK: FootsiesMove.B_ATTACK,
     FootsiesMove.N_SPECIAL: FootsiesMove.N_SPECIAL,
