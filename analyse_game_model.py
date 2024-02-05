@@ -3,10 +3,10 @@ from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move
+from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 from analysis import Analyser, footsies_move_from_one_hot
 from agents.game_model.agent import FootsiesAgent as GameModelAgent
-from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDICES_MAP, FOOTSIES_ACTION_MOVE_INDEX_MAP
+from agents.action import ActionMap
 from main import load_agent_model
 
 
@@ -43,8 +43,8 @@ def include_game_model_dpg_elements(analyser: Analyser):
 
         with dpg.table_row():
             dpg.add_text("Move")
-            dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move_predicted", enabled=False)
-            dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move_predicted", enabled=False)
+            dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p1_move_predicted", enabled=False)
+            dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p2_move_predicted", enabled=False)
 
         with dpg.table_row():
             dpg.add_text("Move progress")
@@ -53,11 +53,11 @@ def include_game_model_dpg_elements(analyser: Analyser):
     
     with dpg.group(horizontal=True):
         dpg.add_text("Agent action performed on previous state")
-        dpg.add_combo([m.name for m in FOOTSIES_ACTION_MOVES], tag="agent_action", callback=lambda: predict_next_state(analyser))
+        dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="agent_action", callback=lambda: predict_next_state(analyser))
     
     with dpg.group(horizontal=True):
         dpg.add_text("Opponent action performed on previous state")
-        dpg.add_combo([m.name for m in FOOTSIES_ACTION_MOVES], tag="opponent_action", callback=lambda: predict_next_state(analyser))
+        dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="opponent_action", callback=lambda: predict_next_state(analyser))
 
     with dpg.group(horizontal=True):
         dpg.add_button(label="Apply", callback=lambda: load_predicted_battle_state(analyser=analyser))
@@ -77,8 +77,8 @@ def update_prediction(agent: GameModelAgent, observation, agent_action, opponent
     dpg.set_value("p2_move_progress_predicted", next_obs[33])
     dpg.set_value("p1_position_predicted", next_obs[34] * 4.4)
     dpg.set_value("p2_position_predicted", next_obs[35] * 4.4)
-    dpg.set_value("agent_action", FOOTSIES_ACTION_MOVES[agent_action].name)
-    dpg.set_value("opponent_action", FOOTSIES_ACTION_MOVES[opponent_action].name)
+    dpg.set_value("agent_action", ActionMap.SIMPLE_ACTIONS[agent_action].name)
+    dpg.set_value("opponent_action", ActionMap.SIMPLE_ACTIONS[opponent_action].name)
 
 
 def predict_next_state(analyser: Analyser, agent_action: int = None, opponent_action: int = None):
@@ -89,15 +89,15 @@ def predict_next_state(analyser: Analyser, agent_action: int = None, opponent_ac
 
     # Note: we need to consider the current information when determining the players' moves, but the previous observation!
     observation = analyser.previous_observation
-    agent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[FootsiesMove[dpg.get_value("agent_action")]] if agent_action is None else agent_action
-    opponent_action = FOOTSIES_ACTION_MOVE_INDEX_MAP[FootsiesMove[dpg.get_value("opponent_action")]] if opponent_action is None else opponent_action
+    agent_action = ActionMap.simple_from_move(FootsiesMove[dpg.get_value("agent_action")]) if agent_action is None else agent_action
+    opponent_action = ActionMap.simple_from_move(FootsiesMove[dpg.get_value("opponent_action")]) if opponent_action is None else opponent_action
     
     update_prediction(agent, observation, agent_action, opponent_action)
 
 
 def update_info_and_predict_next_state(analyser: Analyser):
-    agent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[analyser.current_info["p1_move"]]
-    opponent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[analyser.current_info["p2_move"]]
+    agent_action = ActionMap.simple_from_move_index(analyser.current_info["p1_move"])
+    opponent_action = ActionMap.simple_from_move_index(analyser.current_info["p2_move"])
 
     predict_next_state(analyser, agent_action, opponent_action)
 
@@ -124,15 +124,15 @@ if __name__ == "__main__":
         observation_space=env.observation_space,
         action_space=env.action_space,
         by_primitive_actions=False,
-        hidden_layer_sizes_specification="128",
+        hidden_layer_sizes_specification="",
         hidden_layer_activation_specification="LeakyReLU",
     )
 
-    load_agent_model(agent, "game_model_one_layer_slight_scale")
+    load_agent_model(agent, "game_model_linear")
 
     analyser = Analyser(
         env=env,
-        agent=agent,
+        agent=lambda obs, info: 0,
         custom_elements_callback=include_game_model_dpg_elements,
         custom_state_update_callback=update_info_and_predict_next_state,
     )

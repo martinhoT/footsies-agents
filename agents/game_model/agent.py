@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torch import nn
 from agents.base import FootsiesAgentBase
-from agents.utils import FOOTSIES_ACTION_MOVE_INDICES_MAP, FOOTSIES_ACTION_MOVES
+from agents.action import ActionMap
 from agents.torch_utils import create_layered_network
 from gymnasium import Env, Space
 from typing import Callable, Tuple
@@ -64,7 +64,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.by_primitive_actions = by_primitive_actions
         self.state_dim = observation_space.shape[0]
-        self.agent_action_dim = action_space.shape[0] if by_primitive_actions else len(FOOTSIES_ACTION_MOVES)
+        self.agent_action_dim = action_space.shape[0] if by_primitive_actions else ActionMap.n_simple()
         self.opponent_action_dim = self.agent_action_dim   # we assume they use the same action space
         self.move_transition_scale = move_transition_scale
         self.optimize_frequency = optimize_frequency
@@ -112,8 +112,8 @@ class FootsiesAgent(FootsiesAgentBase):
             agent_action = info["p1_move"]
             opponent_action = info["p2_move"]
 
-            agent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[agent_action]
-            opponent_action = FOOTSIES_ACTION_MOVE_INDICES_MAP[opponent_action]
+            agent_action = ActionMap.simple_from_move_index(agent_action)
+            opponent_action = ActionMap.simple_from_move_index(opponent_action)
     
         else:
             return

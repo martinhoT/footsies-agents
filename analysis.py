@@ -2,6 +2,7 @@ import copy
 import dearpygui.dearpygui as dpg
 import numpy as np
 import pprint
+import threading
 from datetime import datetime
 from typing import Callable
 from gymnasium import Env, ObservationWrapper
@@ -10,24 +11,17 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.state import FootsiesBattleState, FootsiesState
-from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move, footsies_move_id_to_index
+from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE, FOOTSIES_MOVE_ID_TO_INDEX
 from agents.base import FootsiesAgentBase
+from agents.action import ActionMap
 from collections import namedtuple
 
 
 AnalyserState = namedtuple("AnalyserSavedState", ["battle_state", "observation", "info", "reward"])
 
 
-def discretized_action_to_tuple(discretized_action: int) -> tuple:
-    return ((discretized_action & 1) != 0, (discretized_action & 2) != 0, (discretized_action & 4) != 0)
-
-
-def tuple_action_to_discretized(tuple_action: tuple) -> int:
-    return (tuple_action[0] << 0) + (tuple_action[1] << 1) + (tuple_action[2] << 2)
-
-
 def footsies_move_from_one_hot(one_hot: np.ndarray) -> FootsiesMove:
-    return footsies_move_index_to_move[np.where(one_hot == 1.0)[0].item()]
+    return FOOTSIES_MOVE_INDEX_TO_MOVE[np.where(one_hot == 1.0)[0].item()]
 
 
 def editable_dpg_value(item: int | str):
@@ -59,7 +53,7 @@ class Analyser:
     
     def __init__(self,
         env: Env,
-        agent: FootsiesAgentBase,
+        p1_action_source: FootsiesAgentBase,
         custom_elements_callback: Callable[["Analyser"], None], # function that will be called when the main DPG window is being created, allowing the addition of custom elements
         custom_state_update_callback: Callable[["Analyser"], None], # function that will be called when the battle state is updated (either through the 'Advance' button or by manipulation)
     ):
@@ -73,7 +67,7 @@ class Analyser:
 
         self.env = env
         self.footsies_env = footsies_env
-        self.agent = agent
+        self.p1_action_source = p1_action_source
         self.custom_elements_callback = custom_elements_callback
         self.custom_state_update_callback = custom_state_update_callback
 
@@ -102,6 +96,9 @@ class Analyser:
         self.saved_battle_states: list[AnalyserState] = []
         self.episode_counter = -1
 
+        # Allow advance() to be performed continuously on a separate thread
+        self.advancing = False
+
         # DPG items
         self.dpg_saved_battle_state_list: int | str = None
 
@@ -127,8 +124,8 @@ class Analyser:
             self.p2_position = battle_state.p2State.position[0]
             self.p1_guard = battle_state.p1State.guardHealth
             self.p2_guard = battle_state.p2State.guardHealth
-            self.p1_move = footsies_move_index_to_move[footsies_move_id_to_index[battle_state.p1State.currentActionID]]
-            self.p2_move = footsies_move_index_to_move[footsies_move_id_to_index[battle_state.p2State.currentActionID]]
+            self.p1_move = FOOTSIES_MOVE_INDEX_TO_MOVE[FOOTSIES_MOVE_ID_TO_INDEX[battle_state.p1State.currentActionID]]
+            self.p2_move = FOOTSIES_MOVE_INDEX_TO_MOVE[FOOTSIES_MOVE_ID_TO_INDEX[battle_state.p2State.currentActionID]]
             self.p1_move_progress = battle_state.p1State.currentActionFrame / self.p1_move.value.duration
             self.p2_move_progress = battle_state.p2State.currentActionFrame / self.p2_move.value.duration
             self.frame = battle_state.frameCount
@@ -145,12 +142,12 @@ class Analyser:
         self.update_state(saved_state.observation, saved_state.info, saved_state.reward)
 
     def update_current_action_from_agent(self):
-        action = self.agent.act(self.current_observation, self.current_info)
+        action = self.p1_action_source(self.current_observation, self.current_info)
         if action is None:
             raise RuntimeError("this agent could not produce an action for the current observation")
 
         if self.discretized_actions:
-            action_tuple = discretized_action_to_tuple(action)
+            action_tuple = ActionMap.discrete_to_primitive(action)
 
         self.action_left, self.action_right, self.action_attack = action_tuple
 
@@ -187,6 +184,14 @@ class Analyser:
         # Reward
         self.reward = reward
 
+    def start_advancing(self):
+        self.advancing = True
+        while self.advancing:
+            self.advance()
+
+    def stop_advancing(self):
+        self.advancing = False
+
     def advance(self):
         if self.requires_reset:
             self.episode_counter += 1
@@ -213,7 +218,7 @@ class Analyser:
         action = (self.action_left, self.action_right, self.action_attack)
         
         if self.discretized_actions:
-            return tuple_action_to_discretized(action)
+            return ActionMap.primitive_to_discrete(action)
 
         return action
 
@@ -305,8 +310,8 @@ class Analyser:
 
                 with dpg.table_row():
                     dpg.add_text("Move")
-                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move_prev", enabled=False)
-                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move_prev", enabled=False)
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p1_move_prev", enabled=False)
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p2_move_prev", enabled=False)
 
                 with dpg.table_row():
                     dpg.add_text("Move progress")
@@ -334,8 +339,8 @@ class Analyser:
 
                 with dpg.table_row():
                     dpg.add_text("Move")
-                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p1_move")
-                    dpg.add_combo([m.name for m in footsies_move_index_to_move], tag="p2_move")
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p1_move")
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p2_move")
 
                 with dpg.table_row():
                     dpg.add_text("Move progress")
@@ -374,7 +379,23 @@ class Analyser:
             dpg.add_input_float(label="Reward", tag="reward", enabled=False)
             dpg.add_input_int(label="Frame", tag="frame", enabled=False)
 
-            dpg.add_button(label="Advance", callback=self.advance)
+            with dpg.group(horizontal=True):
+                advance_button = dpg.add_button(label="Advance", callback=self.advance)
+                keep_advancing_button = dpg.add_button(label="Keep advancing")
+                stop_advancing_button = dpg.add_button(label="Stop advancing", enabled=False)
+                
+                def keep_advancing_callback():
+                    dpg.disable_item(advance_button)
+                    dpg.enable_item(stop_advancing_button)
+                    self.start_advancing()
+                
+                def stop_advancing_callback():
+                    self.stop_advancing()
+                    dpg.enable_item(advance_button)
+                    dpg.disable_item(stop_advancing_button)
+
+                dpg.configure_item(keep_advancing_button, callback=lambda: threading.Thread(target=keep_advancing_callback, args=[], daemon=False).start())
+                dpg.configure_item(stop_advancing_button, callback=stop_advancing_callback)
 
             dpg.add_text("Game info (only updated on advance)")
             dpg.add_input_text(multiline=True, no_spaces=False, tag="text_output", enabled=False)

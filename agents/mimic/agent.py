@@ -5,11 +5,11 @@ import torch
 from torch import nn
 from agents.base import FootsiesAgentBase
 from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
+from agents.action import ActionMap
 from gymnasium import Env
 from typing import Callable, List, Tuple
 from gymnasium import Space
-from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDEX_MAP, is_state_actionable_late, is_in_hitstop_late
-from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move
+from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 
 
 # Sigmoid output is able to tackle action combinations.
@@ -250,16 +250,20 @@ class FootsiesAgent(FootsiesAgentBase):
         hidden_layer_activation_specification: str = "LeakyReLU",
         move_transition_scale: float = 10.0,
         max_allowed_loss: float = +torch.inf,
-        mini_batch_size: int = 1000,
+        mini_batch_size: int = 1,
         learning_rate: float = 1e-2,
+        learn_p1: bool = True,
+        learn_p2: bool = True,
     ):
         if append_time_since_last_interaction:
             raise NotImplementedError("appending the time since the last interaction is still not supported")
 
         self.frameskipping = frameskipping
         self.by_primitive_actions = by_primitive_actions
+        self.learn_p1 = learn_p1
+        self.learn_p2 = learn_p2
 
-        self.n_moves = action_space.n if by_primitive_actions else len(FOOTSIES_ACTION_MOVES)
+        self.n_moves = action_space.n if by_primitive_actions else ActionMap.n_simple()
         
         # Masks to selectively remove the portion of the observation that is not relevant (occurs if frameskipping, it is the player's move progress)
         p1_observation_mask = torch.ones((observation_space.shape[0],), dtype=torch.bool)
@@ -305,16 +309,18 @@ class FootsiesAgent(FootsiesAgentBase):
         # Set to a value such that the 1000th counter value in the past will have a weight of 1%
         self._correct_decay = 0.01 ** (1 / 1000)
 
-    def act(self, obs, info: dict, p1: bool = True, deterministic: bool = False) -> "any":
+    def act(self, obs, info: dict, p1: bool = True, deterministic: bool = False, predict: bool = False) -> "any":
         obs = self._obs_to_tensor(obs)
         self.previous_observation = obs
-        self.previous_p1_move_state = footsies_move_index_to_move[info["p1_move"]]
-        self.previous_p2_move_state = footsies_move_index_to_move[info["p2_move"]]
+        self.previous_p1_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p1_move"]]
+        self.previous_p2_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p2_move"]]
 
-        model = self.p1_model if p1 else self.p2_model
-        prediction = model.predict(model.mask_environment_observation(obs), deterministic=deterministic).item()
+        if predict:
+            model = self.p1_model if p1 else self.p2_model
+            prediction = model.predict(model.mask_environment_observation(obs), deterministic=deterministic).item()
+            return prediction
 
-        return prediction
+        return 0
 
     def update(
         self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict
@@ -322,34 +328,31 @@ class FootsiesAgent(FootsiesAgentBase):
         key = "action" if self.by_primitive_actions else "move"
         
         # The move_state variables are the direct FOOTSIES moves, all other variables correspond to "action moves" as specified in the utils
-        p1_move_state: FootsiesMove = footsies_move_index_to_move[info["p1_" + key]]
-        p2_move_state: FootsiesMove = footsies_move_index_to_move[info["p2_" + key]]
-        p1_move_idx = FOOTSIES_ACTION_MOVE_INDEX_MAP[p1_move_state]
-        p2_move_idx = FOOTSIES_ACTION_MOVE_INDEX_MAP[p2_move_state]
-        p1_move_oh = self._move_onehot(p1_move_idx)
-        p2_move_oh = self._move_onehot(p2_move_idx)
+        p1_move_state: FootsiesMove = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p1_" + key]]
+        p2_move_state: FootsiesMove = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p2_" + key]]
+        p1_simple = ActionMap.simple_from_move(p1_move_state)
+        p2_simple = ActionMap.simple_from_move(p2_move_state)
+        p1_simple_oh = self._move_onehot(p1_simple)
+        p2_simple_oh = self._move_onehot(p2_simple)
 
         p1_observation = self.p1_model.mask_environment_observation(self.previous_observation)
         p2_observation = self.p2_model.mask_environment_observation(self.previous_observation)
 
-        print(f"\nUpdates at frame {info['frame']}:")
-        if not self.frameskipping or is_state_actionable_late(self.previous_p1_move_state, self.previous_observation[0, 32], next_obs[32]):
-            print(f"P1 update! Imitating {footsies_move_index_to_move[p1_move_idx].name} | Occurred transition? {self.previous_p1_move_state != p1_move_state}")
-            self.p1_model.update(p1_observation, p1_move_oh, self.previous_p1_move_state != p1_move_state)
-        if not self.frameskipping or is_state_actionable_late(self.previous_p2_move_state, self.previous_observation[0, 33], next_obs[33]):
-            print(f"P2 update! Imitating {footsies_move_index_to_move[p2_move_idx].name} | Occurred transition? {self.previous_p2_move_state != p2_move_state}")
-            self.p2_model.update(p2_observation, p2_move_oh, self.previous_p2_move_state != p2_move_state)
+        if self.learn_p1 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p1_move_state, self.previous_observation[0, 32], next_obs[32])):
+            self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move_state != p1_move_state)
+        if self.learn_p2 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p2_move_state, self.previous_observation[0, 33], next_obs[33])):
+            self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move_state != p2_move_state)
 
         # Update metrics
-        self._p1_correct = (self._p1_correct * self._correct_decay) + (
-            self.p1_model.predict(p1_observation) == p1_move_idx
-        )
-        self._p2_correct = (self._p2_correct * self._correct_decay) + (
-            self.p2_model.predict(p2_observation) == p2_move_idx
-        )
-        self._random_correct = (self._random_correct * self._correct_decay) + (
-            torch.rand((1,)).item() < 1 / self.n_moves
-        )
+        # self._p1_correct = (self._p1_correct * self._correct_decay) + (
+        #     self.p1_model.predict(p1_observation) == p1_move_idx
+        # )
+        # self._p2_correct = (self._p2_correct * self._correct_decay) + (
+        #     self.p2_model.predict(p2_observation) == p2_move_idx
+        # )
+        # self._random_correct = (self._random_correct * self._correct_decay) + (
+        #     torch.rand((1,)).item() < 1 / self.n_moves
+        # )
 
     def _obs_to_tensor(self, obs):
         return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
@@ -357,21 +360,18 @@ class FootsiesAgent(FootsiesAgentBase):
     def _move_onehot(self, move: int):
         return nn.functional.one_hot(torch.tensor(move), num_classes=self.n_moves).unsqueeze(0)
 
-    # From https://en.wikipedia.org/wiki/Hick's_law#Law
     def decision_entropy(self, obs: torch.Tensor, p1: bool) -> float:
         model = self.p1_model if p1 else self.p2_model
 
         probs = model.probability_distribution(model.mask_environment_observation(obs))
 
-        logs = torch.log2(1 / probs + 1)
-        logs = torch.nan_to_num(logs, 0)  # in case there were 0 probabilities
-        return torch.sum(probs * logs)
+        return torch.nansum(probs * torch.log2(probs))
 
     def load(self, folder_path: str):
         p1_path = os.path.join(folder_path, "p1")
         p2_path = os.path.join(folder_path, "p2")
-        self.p1_model.save(p1_path)
-        self.p2_model.save(p2_path)
+        self.p1_model.load(p1_path)
+        self.p2_model.load(p2_path)
 
     def save(self, folder_path: str):
         p1_path = os.path.join(folder_path, "p1")
@@ -412,10 +412,10 @@ class FootsiesAgent(FootsiesAgentBase):
         self._initialize_test_states(test_states)
 
         p1_predicted = self.p1_model.predict(
-            self.p1_model.mask_environment_observation(self._test_observations), deterministic=True
+            self.p1_model.mask_environment_observation(self._test_observations), deterministic=False
         )
         p2_predicted = self.p2_model.predict(
-            self.p2_model.mask_environment_observation(self._test_observations), deterministic=True
+            self.p2_model.mask_environment_observation(self._test_observations), deterministic=False
         )
 
         return torch.sum(p1_predicted == p2_predicted) / self._test_actions.size(0)
