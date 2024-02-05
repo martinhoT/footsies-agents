@@ -1,3 +1,4 @@
+import numpy as np
 from copy import copy
 from typing import Callable, Tuple
 from gymnasium import Env, ObservationWrapper, ActionWrapper
@@ -40,6 +41,33 @@ FOOTSIES_ACTION_MOVE_INDICES_MAP: dict[int, int] = {
 }
 
 assert set(FOOTSIES_ACTION_MOVES) == set(FOOTSIES_ACTION_MOVE_MAP.values()) and len(FOOTSIES_ACTION_MOVE_MAP) == len(FootsiesMove)
+
+# Actions that have a set duration, and cannot be performed instantly. These actions are candidates for frame skipping
+TEMPORAL_ACTIONS = set(FOOTSIES_ACTION_MOVES) - {FootsiesMove.STAND, FootsiesMove.FORWARD, FootsiesMove.BACKWARD}
+# Moves that signify a player is hit. The opponent is able to cancel into another action in these cases. Note that GUARD_PROXIMITY is not included
+HIT_GUARD_STATES = {FootsiesMove.DAMAGE, FootsiesMove.GUARD_STAND, FootsiesMove.GUARD_CROUCH, FootsiesMove.GUARD_M, FootsiesMove.GUARD_BREAK}
+# Neutral moves on which players can act, since they are instantaneous (I think guard proximity also counts?)
+NEUTRAL_STATES = {FootsiesMove.STAND, FootsiesMove.BACKWARD, FootsiesMove.FORWARD, FootsiesMove.GUARD_PROXIMITY}
+
+
+# TODO: the very first hit frame is not being counted as hitstop
+def is_in_hitstop_late(previous_player_move_state: FootsiesMove, previous_move_progress: float, current_move_progress: float) -> bool:
+    """Whether the player, at the previous move state, is in hitstop. This evaluation is done late, as it can't be done on the current state"""
+    return previous_player_move_state in TEMPORAL_ACTIONS and np.isclose(previous_move_progress, current_move_progress) and current_move_progress > 0.0
+
+
+# TODO: case where a move is done one after another not being counted
+def is_state_actionable_late(previous_player_move_state: FootsiesMove, previous_move_progress: float, current_move_progress: float) -> bool:
+    """Whether the player, at the previous move state, is able to perform an action. This evaluation is done late, as it can't be done on the current state"""
+    in_hitstop = is_in_hitstop_late(previous_player_move_state, previous_move_progress, current_move_progress)
+    return (
+        # Is the player in hitstop? (performing an action that takes time and the opponent was just hit)
+        in_hitstop
+        # Previous move has just finished
+        or current_move_progress < previous_move_progress
+        # Is the player in a neutral state?
+        or previous_player_move_state in NEUTRAL_STATES
+    )
 
 
 def wrap_policy(

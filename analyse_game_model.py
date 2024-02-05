@@ -124,11 +124,11 @@ if __name__ == "__main__":
         observation_space=env.observation_space,
         action_space=env.action_space,
         by_primitive_actions=False,
-        hidden_layer_sizes_specification="128,128,128",
+        hidden_layer_sizes_specification="128",
         hidden_layer_activation_specification="LeakyReLU",
     )
 
-    load_agent_model(agent, "game_model_fixed_actual")
+    load_agent_model(agent, "game_model_one_layer_slight_scale")
 
     analyser = Analyser(
         env=env,

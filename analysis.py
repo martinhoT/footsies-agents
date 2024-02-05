@@ -145,7 +145,7 @@ class Analyser:
         self.update_state(saved_state.observation, saved_state.info, saved_state.reward)
 
     def update_current_action_from_agent(self):
-        action = self.agent.act(self.current_observation)
+        action = self.agent.act(self.current_observation, self.current_info)
         if action is None:
             raise RuntimeError("this agent could not produce an action for the current observation")
 

@@ -7,7 +7,7 @@ from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDis
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from analysis import Analyser
 from agents.mimic.agent import FootsiesAgent as OpponentModelAgent
-from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDICES_MAP
+from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDEX_MAP, footsies_move_index_to_move, is_state_actionable_late
 from main import load_agent_model
 
 
@@ -91,6 +91,8 @@ class MimicAnalyserManager:
         self.actual_p2_move = None
         self.p1_action_table_estimator_size = None
         self.p2_action_table_estimator_size = None
+        self.p1_frameskip = None
+        self.p2_frameskip = None
 
     def toggle_online_learning(self):
         self.online_learning = not self.online_learning
@@ -102,7 +104,11 @@ class MimicAnalyserManager:
     def include_mimic_dpg_elements(self, analyser: Analyser):
         with dpg.group(horizontal=True):
             dpg.add_checkbox(label="Enable online learning", default_value=self.online_learning, callback=self.toggle_online_learning)
-            dpg.add_input_float(label="Max. allowed loss", default_value=self.agent.p1_model.max_loss, callback=lambda s, a: self.update_max_loss(a))
+            dpg.add_input_float(label="Max. allowed loss", default_value=self.agent.p1_model.max_loss, width=100, callback=lambda s, a: self.update_max_loss(a))
+            self.p1_frameskip = dpg.add_checkbox(label="Player 1 frameskip", default_value=False, enabled=False)
+            self.p2_frameskip = dpg.add_checkbox(label="Player 2 frameskip", default_value=False, enabled=False)
+
+        dpg.add_separator()
 
         dpg.add_text("Opponent model estimations on the previous observation")
         
@@ -133,23 +139,30 @@ class MimicAnalyserManager:
 
         agent: OpponentModelAgent = analyser.agent
         observation = analyser.previous_observation
-        p1_move = FOOTSIES_ACTION_MOVE_INDICES_MAP[analyser.current_info["p1_move"]]
-        p2_move = FOOTSIES_ACTION_MOVE_INDICES_MAP[analyser.current_info["p2_move"]]
+        p1_move_state = footsies_move_index_to_move[analyser.current_info["p1_move"]]
+        p2_move_state = footsies_move_index_to_move[analyser.current_info["p2_move"]]
+        p1_move_idx = FOOTSIES_ACTION_MOVE_INDEX_MAP[p1_move_state]
+        p2_move_idx = FOOTSIES_ACTION_MOVE_INDEX_MAP[p2_move_state]
+        p1_move = FOOTSIES_ACTION_MOVES[p1_move_idx]
+        p2_move = FOOTSIES_ACTION_MOVES[p2_move_idx]
 
-        dpg.set_value(self.actual_p1_move, FOOTSIES_ACTION_MOVES[p1_move].name)
-        dpg.set_value(self.actual_p2_move, FOOTSIES_ACTION_MOVES[p2_move].name)
+        dpg.set_value(self.actual_p1_move, p1_move.name)
+        dpg.set_value(self.actual_p2_move, p2_move.name)
 
-        self.p1_action_table.update(observation, p1_move)
-        self.p2_action_table.update(observation, p2_move)
+        dpg.set_value(self.p1_frameskip, not is_state_actionable_late(p1_move_state, analyser.previous_observation[32], analyser.current_observation[32]))
+        dpg.set_value(self.p2_frameskip, not is_state_actionable_late(p2_move_state, analyser.previous_observation[33], analyser.current_observation[33]))
+
+        self.p1_action_table.update(observation, p1_move_idx)
+        self.p2_action_table.update(observation, p2_move_idx)
 
         if self.online_learning:
             # We need to call act so that the agent can store the current observation. Implementation detail, but whatever
-            agent.act(observation)
-            agent.update(None, None, None, None, analyser.current_info)
+            agent.act(analyser.previous_observation, analyser.previous_info)
+            agent.update(analyser.current_observation, None, None, None, analyser.current_info)
 
         observation_torch = torch.tensor(observation, dtype=torch.float32).unsqueeze(0)
-        p1_distribution_predicted = agent.p1_model.probability_distribution(observation_torch).squeeze()
-        p2_distribution_predicted = agent.p2_model.probability_distribution(observation_torch).squeeze()
+        p1_distribution_predicted = agent.p1_model.probability_distribution(agent.p1_model.mask_environment_observation(observation_torch)).squeeze()
+        p2_distribution_predicted = agent.p2_model.probability_distribution(agent.p2_model.mask_environment_observation(observation_torch)).squeeze()
         p1_distribution_estimated = self.p1_action_table.probability_distribution(observation)
         p2_distribution_estimated = self.p2_action_table.probability_distribution(observation)
 
@@ -181,17 +194,20 @@ if __name__ == "__main__":
     agent = OpponentModelAgent(
         observation_space=env.observation_space,
         action_space=env.action_space,
+        frameskipping=True,
         by_primitive_actions=False,
         use_sigmoid_output=False,
-        input_clip=False,
+        input_clip=True,
+        input_clip_leaky_coef=0.01,
         max_allowed_loss=float("+inf"),
         hidden_layer_sizes_specification="",
         hidden_layer_activation_specification="Identity",
-        optimize_frequency=1,
+        mini_batch_size=1,
         learning_rate=0.05,
+        move_transition_scale=10,
     )
 
-    load_agent_model(agent, "mimic_linear")
+    # load_agent_model(agent, "mimic_linear")
 
     mimic_analyser_manager = MimicAnalyserManager(agent)
 

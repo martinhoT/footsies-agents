@@ -7,7 +7,7 @@ def get_loggables(agent: FootsiesAgent):
             agent.game_model,
         ],
         "custom_evaluators": [
-            ("Learning/Loss", lambda: agent.evaluate_average_loss(clear=False)),
+            ("Learning/Loss", agent.evaluate_average_loss),
         ],
         "custom_evaluators_over_test_states": [],
     }

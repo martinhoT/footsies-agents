@@ -133,7 +133,7 @@ def train(
             terminated = False
             truncated = False
             while not (terminated or truncated):
-                action = agent.act(obs)
+                action = agent.act(obs, info)
                 obs, reward, terminated, truncated, info = env.step(action)
                 
                 if penalize_truncation is not None and truncated:

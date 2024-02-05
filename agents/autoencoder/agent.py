@@ -92,7 +92,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.cummulative_loss_seq = 0
         self.cummulative_loss_n = 0
 
-    def act(self, obs) -> "any":
+    def act(self, obs, info: dict) -> "any":
         if len(self.state_batch_as_list) == 0:
             self._update_batch(obs)
         return 0

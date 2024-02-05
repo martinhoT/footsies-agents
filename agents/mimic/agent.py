@@ -8,14 +8,9 @@ from agents.torch_utils import create_layered_network, InputClip, DebugStoreRece
 from gymnasium import Env
 from typing import Callable, List, Tuple
 from gymnasium import Space
-from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDEX_MAP
+from agents.utils import FOOTSIES_ACTION_MOVES, FOOTSIES_ACTION_MOVE_INDEX_MAP, is_state_actionable_late, is_in_hitstop_late
 from footsies_gym.moves import FootsiesMove, footsies_move_index_to_move
 
-
-# Actions that have a set duration, and cannot be performed instantly. These actions are candidates for frame skipping
-TEMPORAL_ACTIONS = set(FOOTSIES_ACTION_MOVES) - {FootsiesMove.STAND, FootsiesMove.FORWARD, FootsiesMove.BACKWARD}
-# Moves that signify a player is hit. The opponent is able to cancel into another action in these cases. Note that GUARD_PROXIMITY is not included
-HIT_GUARD_STATES =  {FootsiesMove.DAMAGE, FootsiesMove.GUARD_STAND, FootsiesMove.GUARD_CROUCH, FootsiesMove.GUARD_M, FootsiesMove.GUARD_BREAK}
 
 # Sigmoid output is able to tackle action combinations.
 # Also, softmax has the problem of not allowing more than one dominant action (for a stochastic agent, for instance), it only focuses on one of the inputs.
@@ -62,7 +57,8 @@ class PlayerModel:
         self,
         obs_size: int,
         n_moves: int,
-        optimize_frequency: int = 1000,
+        obs_mask: torch.Tensor = None,
+        mini_batch_size: int = 1000,
         use_sigmoid_output: bool = False,
         input_clip: bool = False,
         input_clip_leaky_coef: float = 0,
@@ -72,7 +68,11 @@ class PlayerModel:
         max_allowed_loss: float = +torch.inf,
         learning_rate: float = 1e-2,
     ):
-        self.optimize_frequency = optimize_frequency
+        if obs_mask is None:
+            obs_mask = torch.ones((obs_size,), dtype=torch.bool)
+        
+        self.obs_mask = obs_mask
+        self.optimize_frequency = mini_batch_size
         self.use_sigmoid_output = use_sigmoid_output
         self.move_transition_scale = move_transition_scale
 
@@ -116,13 +116,21 @@ class PlayerModel:
         self.x_batch_as_list = []
         self.y_batch_as_list = []
         self.step = 0
+        # Whether the first observation in the training batch corresponds to a move transition in the part of the player.
+        # Important when determining the move transtion scale for each observation
+        self.first_obs_of_batch_had_move_transition = None
         self.cummulative_loss = 0
         self.cummulative_loss_n = 0
 
-    def update(self, obs: torch.Tensor, action: torch.Tensor):
+    def mask_environment_observation(self, obs: torch.Tensor) -> torch.Tensor:
+        return obs[:, self.obs_mask]
+
+    def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False):
         self.x_batch_as_list.append(obs)
         self.y_batch_as_list.append(action)
         self.step += 1
+        if self.first_obs_of_batch_had_move_transition is None:
+            self.first_obs_of_batch_had_move_transition = move_transition
 
         if self.step >= self.optimize_frequency:
             batch_x = torch.cat(self.x_batch_as_list, 0)
@@ -131,7 +139,7 @@ class PlayerModel:
             base_lr = self.optimizer.param_groups[0]["lr"]
             lr_modifier = 1
 
-            move_transition_multiplier = 1 + torch.hstack((torch.tensor(False), torch.any(batch_x[:-1, 2:32] != batch_x[1:, 2:32], dim=1))) * (self.move_transition_scale - 1)
+            move_transition_multiplier = 1 + torch.hstack((torch.tensor(self.first_obs_of_batch_had_move_transition), torch.any(batch_x[:-1, 2:32] != batch_x[1:, 2:32], dim=1))) * (self.move_transition_scale - 1)
 
             # Keep training on examples that are problematic
             while loss is None or loss > self.max_loss:
@@ -161,6 +169,7 @@ class PlayerModel:
             self.x_batch_as_list.clear()
             self.y_batch_as_list.clear()
             self.step = 0
+            self.first_obs_of_batch_had_move_transition = None
 
     def predict(
         self,
@@ -225,7 +234,6 @@ class PlayerModel:
         torch.save(self.network.state_dict(), path)
 
 
-# TODO: test with a new state variable that indicates the time since the last interaction (since we don't have memory...)
 # TODO: there are three different ways we can predict actions: primitive actions discretized, primitive actions as tuple, and moves. Are all supported?
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(
@@ -242,7 +250,7 @@ class FootsiesAgent(FootsiesAgentBase):
         hidden_layer_activation_specification: str = "LeakyReLU",
         move_transition_scale: float = 10.0,
         max_allowed_loss: float = +torch.inf,
-        optimize_frequency: int = 1000,
+        mini_batch_size: int = 1000,
         learning_rate: float = 1e-2,
     ):
         if append_time_since_last_interaction:
@@ -252,12 +260,20 @@ class FootsiesAgent(FootsiesAgentBase):
         self.by_primitive_actions = by_primitive_actions
 
         self.n_moves = action_space.n if by_primitive_actions else len(FOOTSIES_ACTION_MOVES)
+        
+        # Masks to selectively remove the portion of the observation that is not relevant (occurs if frameskipping, it is the player's move progress)
+        p1_observation_mask = torch.ones((observation_space.shape[0],), dtype=torch.bool)
+        p2_observation_mask = torch.ones((observation_space.shape[0],), dtype=torch.bool)
+        if self.frameskipping:
+            p1_observation_mask[32] = False
+            p2_observation_mask[33] = False
 
-        # Both models have the exact same structure and training regime
+        # Both models have mostly the same structure and training regime
         player_model_kwargs = {
-            "obs_size": observation_space.shape[0],
+            # We don't consider the move progress of the player themselves (e.g. if I'm modeling player 2, then I don't need to know its move progress)
+            "obs_size": observation_space.shape[0] - (1 if self.frameskipping else 0),
             "n_moves": self.n_moves,
-            "optimize_frequency": optimize_frequency,
+            "mini_batch_size": mini_batch_size,
             "use_sigmoid_output": use_sigmoid_output,
             "input_clip": input_clip,
             "input_clip_leaky_coef": input_clip_leaky_coef,
@@ -267,10 +283,18 @@ class FootsiesAgent(FootsiesAgentBase):
             "max_allowed_loss": max_allowed_loss,
             "learning_rate": learning_rate,
         }
-        self.p1_model = PlayerModel(**player_model_kwargs)
-        self.p2_model = PlayerModel(**player_model_kwargs)
+        self.p1_model = PlayerModel(
+            **player_model_kwargs,
+            obs_mask=p1_observation_mask,
+        )
+        self.p2_model = PlayerModel(
+            **player_model_kwargs,
+            obs_mask=p2_observation_mask,
+        )
 
-        self.current_observation = None
+        self.previous_observation = None
+        self.previous_p1_move_state: FootsiesMove = None
+        self.previous_p2_move_state: FootsiesMove = None
 
         self._test_observations = None
         self._test_actions = None
@@ -281,22 +305,16 @@ class FootsiesAgent(FootsiesAgentBase):
         # Set to a value such that the 1000th counter value in the past will have a weight of 1%
         self._correct_decay = 0.01 ** (1 / 1000)
 
-    def act(self, obs, p1: bool = True, deterministic: bool = False) -> "any":
-        model = self.p1_model if p1 else self.p2_model
+    def act(self, obs, info: dict, p1: bool = True, deterministic: bool = False) -> "any":
         obs = self._obs_to_tensor(obs)
-        self.current_observation = obs
-        return model.predict(obs, deterministic=deterministic).item()
+        self.previous_observation = obs
+        self.previous_p1_move_state = footsies_move_index_to_move[info["p1_move"]]
+        self.previous_p2_move_state = footsies_move_index_to_move[info["p2_move"]]
 
-    def _is_update_skippable(self, player_action: FootsiesMove, player_move_state: FootsiesMove, opponent_move_state: FootsiesMove) -> bool:
-        if not self.frameskipping:
-            return False
-        
-        return (
-            # Is the player performing an action that takes time and the opponent is not hit yet?
-            ((player_action in TEMPORAL_ACTIONS) and (opponent_move_state not in HIT_GUARD_STATES))
-            # Is the player being hit?
-            or player_move_state in HIT_GUARD_STATES
-        )
+        model = self.p1_model if p1 else self.p2_model
+        prediction = model.predict(model.mask_environment_observation(obs), deterministic=deterministic).item()
+
+        return prediction
 
     def update(
         self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict
@@ -311,19 +329,23 @@ class FootsiesAgent(FootsiesAgentBase):
         p1_move_oh = self._move_onehot(p1_move_idx)
         p2_move_oh = self._move_onehot(p2_move_idx)
 
-        p1_move = FOOTSIES_ACTION_MOVES[p1_move_idx]
-        p2_move = FOOTSIES_ACTION_MOVES[p2_move_idx]
-        if not self._is_update_skippable(p1_move, p1_move_state, p2_move_state):
-            self.p1_model.update(self.current_observation, p1_move_oh)
-        if not self._is_update_skippable(p2_move, p2_move_state, p1_move_state):
-            self.p2_model.update(self.current_observation, p2_move_oh)
+        p1_observation = self.p1_model.mask_environment_observation(self.previous_observation)
+        p2_observation = self.p2_model.mask_environment_observation(self.previous_observation)
+
+        print(f"\nUpdates at frame {info['frame']}:")
+        if not self.frameskipping or is_state_actionable_late(self.previous_p1_move_state, self.previous_observation[0, 32], next_obs[32]):
+            print(f"P1 update! Imitating {footsies_move_index_to_move[p1_move_idx].name} | Occurred transition? {self.previous_p1_move_state != p1_move_state}")
+            self.p1_model.update(p1_observation, p1_move_oh, self.previous_p1_move_state != p1_move_state)
+        if not self.frameskipping or is_state_actionable_late(self.previous_p2_move_state, self.previous_observation[0, 33], next_obs[33]):
+            print(f"P2 update! Imitating {footsies_move_index_to_move[p2_move_idx].name} | Occurred transition? {self.previous_p2_move_state != p2_move_state}")
+            self.p2_model.update(p2_observation, p2_move_oh, self.previous_p2_move_state != p2_move_state)
 
         # Update metrics
         self._p1_correct = (self._p1_correct * self._correct_decay) + (
-            self.p1_model.predict(self.current_observation) == p1_move_idx
+            self.p1_model.predict(p1_observation) == p1_move_idx
         )
         self._p2_correct = (self._p2_correct * self._correct_decay) + (
-            self.p2_model.predict(self.current_observation) == p2_move_idx
+            self.p2_model.predict(p2_observation) == p2_move_idx
         )
         self._random_correct = (self._random_correct * self._correct_decay) + (
             torch.rand((1,)).item() < 1 / self.n_moves
@@ -339,7 +361,7 @@ class FootsiesAgent(FootsiesAgentBase):
     def decision_entropy(self, obs: torch.Tensor, p1: bool) -> float:
         model = self.p1_model if p1 else self.p2_model
 
-        probs = model.probability_distribution(obs)
+        probs = model.probability_distribution(model.mask_environment_observation(obs))
 
         logs = torch.log2(1 / probs + 1)
         logs = torch.nan_to_num(logs, 0)  # in case there were 0 probabilities
@@ -390,10 +412,10 @@ class FootsiesAgent(FootsiesAgentBase):
         self._initialize_test_states(test_states)
 
         p1_predicted = self.p1_model.predict(
-            self._test_observations, deterministic=True
+            self.p1_model.mask_environment_observation(self._test_observations), deterministic=True
         )
         p2_predicted = self.p2_model.predict(
-            self._test_observations, deterministic=True
+            self.p2_model.mask_environment_observation(self._test_observations), deterministic=True
         )
 
         return torch.sum(p1_predicted == p2_predicted) / self._test_actions.size(0)
@@ -410,13 +432,14 @@ class FootsiesAgent(FootsiesAgentBase):
         self, env: Env, use_p1: bool = True
     ) -> Callable[[dict], Tuple[bool, bool, bool]]:
         model_to_use = self.p1_model if use_p1 else self.p2_model
+        obs_mask = self.p1_model.obs_mask if use_p1 else self.p2_model.obs_mask
 
         policy_network = deepcopy(model_to_use.network)
         policy_network.requires_grad_(False)
 
         def internal_policy(obs):
             obs = self._obs_to_torch(obs)
-            predicted = policy_network(obs)
+            predicted = policy_network(obs[:, obs_mask])
             return torch.argmax(predicted)
 
         return super()._extract_policy(env, internal_policy)

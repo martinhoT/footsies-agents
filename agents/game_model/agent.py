@@ -102,7 +102,7 @@ class FootsiesAgent(FootsiesAgentBase):
         opponent_action_oh = self._action_to_tensor(opponent_action, self.opponent_action_dim)
         self.state_batch_as_list.append(torch.hstack((obs, agent_action_oh, opponent_action_oh, next_obs)))
 
-    def act(self, obs: np.ndarray) -> "any":
+    def act(self, obs: np.ndarray, info: dict) -> "any":
         self.current_observation = obs
         return 0
 
@@ -156,14 +156,13 @@ class FootsiesAgent(FootsiesAgentBase):
 
         return loss.item()
 
-    def evaluate_average_loss(self, *, clear: bool) -> float:
+    def evaluate_average_loss(self) -> float:
         res = (
             self.cummulative_loss / self.cummulative_loss_n
         ) if self.cummulative_loss_n != 0 else 0
         
-        if clear:
-            self.cummulative_loss = 0
-            self.cummulative_loss_n = 0
+        self.cummulative_loss = 0
+        self.cummulative_loss_n = 0
 
         return res
 

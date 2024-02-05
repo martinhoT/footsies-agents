@@ -7,7 +7,7 @@ from agents.utils import wrap_policy
 
 class FootsiesAgentBase(ABC):
     @abstractmethod
-    def act(self, obs) -> Any:
+    def act(self, obs, info: dict) -> Any:
         """Get the chosen action for the currently observed environment state"""
 
     @abstractmethod
