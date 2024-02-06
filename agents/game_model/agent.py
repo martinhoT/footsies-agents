@@ -54,7 +54,7 @@ class FootsiesAgent(FootsiesAgentBase):
         action_space: Space,
         by_primitive_actions: bool = False,
         move_transition_scale: float = 10.0, # scale training examples where move transitions occur, since they are very important
-        optimize_frequency: int = 1000, # mini-batch size, bad name
+        mini_batch_size: int = 1000,
         learning_rate: float = 1e-2,
         hidden_layer_sizes_specification: str = "64,64",
         hidden_layer_activation_specification: str = "LeakyReLU",
@@ -67,7 +67,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.agent_action_dim = action_space.shape[0] if by_primitive_actions else ActionMap.n_simple()
         self.opponent_action_dim = self.agent_action_dim   # we assume they use the same action space
         self.move_transition_scale = move_transition_scale
-        self.optimize_frequency = optimize_frequency
+        self.mini_batch_size = mini_batch_size
         self.learning_rate = learning_rate
 
         self.game_model = GameModel(
@@ -95,7 +95,7 @@ class FootsiesAgent(FootsiesAgentBase):
     def _action_to_tensor(self, action: int, num_classes: int) -> torch.Tensor:
         return nn.functional.one_hot(torch.tensor(action), num_classes=num_classes).unsqueeze(0)
 
-    def _update_batch(self, obs: np.ndarray, agent_action: int, opponent_action: int, next_obs):
+    def _update_batch(self, obs: np.ndarray, agent_action: int, opponent_action: int, next_obs: np.ndarray):
         obs = self._obs_to_tensor(obs)
         next_obs = self._obs_to_tensor(next_obs)
         agent_action_oh = self._action_to_tensor(agent_action, self.agent_action_dim)
@@ -120,7 +120,7 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self._update_batch(self.current_observation, agent_action, opponent_action, next_obs)
 
-        if len(self.state_batch_as_list) >= self.optimize_frequency:
+        if len(self.state_batch_as_list) >= self.mini_batch_size:
             batch = torch.cat(self.state_batch_as_list)
             loss = self.train(batch)
             
@@ -140,8 +140,8 @@ class FootsiesAgent(FootsiesAgentBase):
         # Euclidean distance
         guard_distance = torch.sqrt(torch.sum((predicted[:, 0:2] - batch_y[:, 0:2])**2, dim=1))
         # Cross entropy loss
-        move_distance_p1 = -torch.sum(torch.log(predicted[:, 2:17]) * batch_y[:, 2:17], dim=1)
-        move_distance_p2 = -torch.sum(torch.log(predicted[:, 17:32]) * batch_y[:, 17:32], dim=1)
+        move_distance_p1 = -torch.sum(torch.log2(predicted[:, 2:17]) * batch_y[:, 2:17], dim=1)
+        move_distance_p2 = -torch.sum(torch.log2(predicted[:, 17:32]) * batch_y[:, 17:32], dim=1)
         # Euclidean distance
         move_progress_and_position_distance = torch.sqrt(torch.sum((predicted[:, 32:36] - batch_y[:, 32:36])**2, dim=1))
 

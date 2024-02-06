@@ -74,3 +74,19 @@ class DebugStoreRecent(nn.Module):
     def forward(self, x: torch.Tensor):
         self.stored = x
         return x
+
+
+def observation_invert_perspective_flattened(obs: torch.Tensor) -> torch.Tensor:
+    inverted = obs.clone().detach()
+    
+    #  guard
+    inverted[:, [0, 1]] = obs[:, [1, 0]]
+    #  move
+    inverted[:, 2:17] = obs[:, 17:32]
+    inverted[:, 17:32] = obs[:, 2:17]
+    #  move progress
+    inverted[:, [32, 33]] = obs[:, [33, 32]]
+    #  position
+    inverted[:, [34, 35]] = obs[:, [35, 34]]
+
+    return inverted

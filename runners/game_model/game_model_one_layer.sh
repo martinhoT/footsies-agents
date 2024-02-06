@@ -6,7 +6,7 @@ python3 main.py game_model \
     -eB by_example true \
     -mN \
         move_transition_scale 10 \
-        optimize_frequency 100000 \
+        mini_batch_size 100000 \
         learning_rate 0.1 \
     -mB \
         by_primitive_actions false \

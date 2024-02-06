@@ -1,3 +1,4 @@
+from collections import deque
 from copy import deepcopy
 import os
 import numpy as np
@@ -7,7 +8,7 @@ from agents.base import FootsiesAgentBase
 from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
 from agents.action import ActionMap
 from gymnasium import Env
-from typing import Callable, List, Tuple
+from typing import Callable, Iterable, List, Tuple
 from gymnasium import Space
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 
@@ -91,7 +92,7 @@ class PlayerModel:
             self.loss_function = lambda predicted, target: torch.mean((predicted - target)**2, dim=1)
         # Cross entropy loss
         else:
-            self.loss_function = lambda predicted, target: -torch.sum(torch.log(predicted) * target, dim=1)
+            self.loss_function = lambda predicted, target: -torch.sum(torch.log2(predicted) * target, dim=1)
 
         self.optimizer = torch.optim.SGD(params=self.network.parameters(), lr=learning_rate)
 
@@ -115,10 +116,8 @@ class PlayerModel:
 
         self.x_batch_as_list = []
         self.y_batch_as_list = []
+        self.move_transition_as_list = []
         self.step = 0
-        # Whether the first observation in the training batch corresponds to a move transition in the part of the player.
-        # Important when determining the move transtion scale for each observation
-        self.first_obs_of_batch_had_move_transition = None
         self.cummulative_loss = 0
         self.cummulative_loss_n = 0
 
@@ -128,22 +127,18 @@ class PlayerModel:
     def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False):
         self.x_batch_as_list.append(obs)
         self.y_batch_as_list.append(action)
+        self.move_transition_as_list.append(move_transition)
         self.step += 1
-        if self.first_obs_of_batch_had_move_transition is None:
-            self.first_obs_of_batch_had_move_transition = move_transition
 
         if self.step >= self.optimize_frequency:
             batch_x = torch.cat(self.x_batch_as_list, 0)
             batch_y = torch.cat(self.y_batch_as_list, 0)
             loss = None
-            base_lr = self.optimizer.param_groups[0]["lr"]
-            lr_modifier = 1
 
-            move_transition_multiplier = 1 + torch.hstack((torch.tensor(self.first_obs_of_batch_had_move_transition), torch.any(batch_x[:-1, 2:32] != batch_x[1:, 2:32], dim=1))) * (self.move_transition_scale - 1)
+            move_transition_multiplier = 1 + torch.tensor(self.move_transition_as_list) * (self.move_transition_scale - 1)
 
             # Keep training on examples that are problematic
             while loss is None or loss > self.max_loss:
-                self.optimizer.param_groups[0]["lr"] = base_lr * lr_modifier
                 self.optimizer.zero_grad()
 
                 predicted = self.network(batch_x)
@@ -165,7 +160,6 @@ class PlayerModel:
                         f"learning is dead, gradients are 0! (loss: {loss.item()})"
                     )
 
-            self.optimizer.param_groups[0]["lr"] = base_lr
             self.x_batch_as_list.clear()
             self.y_batch_as_list.clear()
             self.step = 0
@@ -241,7 +235,8 @@ class FootsiesAgent(FootsiesAgentBase):
         observation_space: Space,
         action_space: Space,
         frameskipping: bool = True,
-        append_time_since_last_interaction: bool = False,
+        append_last_actions_n: int = 0,
+        append_last_actions_distinct: bool = True,
         by_primitive_actions: bool = False,
         use_sigmoid_output: bool = False,
         input_clip: bool = False,
@@ -255,19 +250,23 @@ class FootsiesAgent(FootsiesAgentBase):
         learn_p1: bool = True,
         learn_p2: bool = True,
     ):
-        if append_time_since_last_interaction:
-            raise NotImplementedError("appending the time since the last interaction is still not supported")
-
+        if by_primitive_actions:
+            raise NotImplementedError("imitating primitive actions is not supported yet")
+        
         self.frameskipping = frameskipping
+        self.append_last_actions_n = append_last_actions_n
+        self.append_last_actions_distinct = append_last_actions_distinct
         self.by_primitive_actions = by_primitive_actions
         self.learn_p1 = learn_p1
         self.learn_p2 = learn_p2
 
+        # This full observation size doesn't consider primitive actions yet
+        full_observation_size = observation_space.shape[0] + append_last_actions_n * ActionMap.n_simple()
         self.n_moves = action_space.n if by_primitive_actions else ActionMap.n_simple()
         
         # Masks to selectively remove the portion of the observation that is not relevant (occurs if frameskipping, it is the player's move progress)
-        p1_observation_mask = torch.ones((observation_space.shape[0],), dtype=torch.bool)
-        p2_observation_mask = torch.ones((observation_space.shape[0],), dtype=torch.bool)
+        p1_observation_mask = torch.ones((full_observation_size,), dtype=torch.bool)
+        p2_observation_mask = torch.ones((full_observation_size,), dtype=torch.bool)
         if self.frameskipping:
             p1_observation_mask[32] = False
             p2_observation_mask[33] = False
@@ -275,7 +274,7 @@ class FootsiesAgent(FootsiesAgentBase):
         # Both models have mostly the same structure and training regime
         player_model_kwargs = {
             # We don't consider the move progress of the player themselves (e.g. if I'm modeling player 2, then I don't need to know its move progress)
-            "obs_size": observation_space.shape[0] - (1 if self.frameskipping else 0),
+            "obs_size": full_observation_size - (1 if self.frameskipping else 0),
             "n_moves": self.n_moves,
             "mini_batch_size": mini_batch_size,
             "use_sigmoid_output": use_sigmoid_output,
@@ -299,6 +298,11 @@ class FootsiesAgent(FootsiesAgentBase):
         self.previous_observation = None
         self.previous_p1_move_state: FootsiesMove = None
         self.previous_p2_move_state: FootsiesMove = None
+        self.previous_p1_move: int = None
+        self.previous_p2_move: int = None
+        # Fill the action history with STANDs
+        self.p1_action_history: deque[int] = deque([0] * self.append_last_actions_n, maxlen=self.append_last_actions_n)
+        self.p2_action_history: deque[int] = deque([0] * self.append_last_actions_n, maxlen=self.append_last_actions_n)
 
         self._test_observations = None
         self._test_actions = None
@@ -314,6 +318,8 @@ class FootsiesAgent(FootsiesAgentBase):
         self.previous_observation = obs
         self.previous_p1_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p1_move"]]
         self.previous_p2_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p2_move"]]
+        self.previous_p1_move = ActionMap.simple_from_move_index(info["p1_move"])
+        self.previous_p2_move = ActionMap.simple_from_move_index(info["p2_move"])
 
         if predict:
             model = self.p1_model if p1 else self.p2_model
@@ -332,16 +338,19 @@ class FootsiesAgent(FootsiesAgentBase):
         p2_move_state: FootsiesMove = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p2_" + key]]
         p1_simple = ActionMap.simple_from_move(p1_move_state)
         p2_simple = ActionMap.simple_from_move(p2_move_state)
-        p1_simple_oh = self._move_onehot(p1_simple)
-        p2_simple_oh = self._move_onehot(p2_simple)
+        p1_simple_oh = self._action_onehot(p1_simple)
+        p2_simple_oh = self._action_onehot(p2_simple)
 
-        p1_observation = self.p1_model.mask_environment_observation(self.previous_observation)
-        p2_observation = self.p2_model.mask_environment_observation(self.previous_observation)
+        p1_observation = self.craft_observation(self.previous_observation, True, True)
+        p2_observation = self.craft_observation(self.previous_observation, False, False)
 
         if self.learn_p1 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p1_move_state, self.previous_observation[0, 32], next_obs[32])):
-            self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move_state != p1_move_state)
+            self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move != p1_simple and ActionMap.is_simple_action_commital(p1_simple))
         if self.learn_p2 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p2_move_state, self.previous_observation[0, 33], next_obs[33])):
-            self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move_state != p2_move_state)
+            self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move != p2_simple and ActionMap.is_simple_action_commital(p2_simple))
+
+        self.append_to_action_history(p1_simple, True)
+        self.append_to_action_history(p2_simple, False)
 
         # Update metrics
         # self._p1_correct = (self._p1_correct * self._correct_decay) + (
@@ -357,8 +366,25 @@ class FootsiesAgent(FootsiesAgentBase):
     def _obs_to_tensor(self, obs):
         return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
 
-    def _move_onehot(self, move: int):
-        return nn.functional.one_hot(torch.tensor(move), num_classes=self.n_moves).unsqueeze(0)
+    def _action_onehot(self, action: int):
+        return nn.functional.one_hot(torch.tensor(action), num_classes=self.n_moves).unsqueeze(0)
+
+    def append_to_action_history(self, action: int, p1: bool):
+        if not self.append_last_actions_n:
+            return
+        
+        action_history = self.p1_action_history if p1 else self.p2_action_history
+
+        if not (self.append_last_actions_distinct and action_history[-1] == action):
+            action_history.append(action)
+
+    def craft_observation(self, obs: torch.Tensor, use_p1_model: bool, use_p1_action_history: bool) -> torch.Tensor:
+        model = self.p1_model if use_p1_model else self.p2_model
+        action_history = self.p1_action_history if use_p1_action_history else self.p2_action_history
+
+        full_observation = torch.hstack((obs,) + tuple(self._action_onehot(action) for action in action_history))
+        
+        return model.mask_environment_observation(full_observation)
 
     def decision_entropy(self, obs: torch.Tensor, p1: bool) -> float:
         model = self.p1_model if p1 else self.p2_model

@@ -63,6 +63,7 @@ class ActionMap:
 
     # Actions that have a set duration, and cannot be performed instantly. These actions are candidates for frame skipping
     TEMPORAL_ACTIONS = set(SIMPLE_ACTIONS) - {FootsiesMove.STAND, FootsiesMove.FORWARD, FootsiesMove.BACKWARD}
+    TEMPORAL_ACTIONS_INT: set[int] = None
     # Moves that signify a player is hit. The opponent is able to cancel into another action in these cases. Note that GUARD_PROXIMITY is not included
     HIT_GUARD_STATES = {FootsiesMove.DAMAGE, FootsiesMove.GUARD_STAND, FootsiesMove.GUARD_CROUCH, FootsiesMove.GUARD_M, FootsiesMove.GUARD_BREAK}
     # Neutral moves on which players can act, since they are instantaneous (I think guard proximity also counts?)
@@ -138,6 +139,11 @@ class ActionMap:
             # Is the player in a neutral state?
             or previous_player_move_state in ActionMap.NEUTRAL_STATES
         )
+    
+    @staticmethod
+    def is_simple_action_commital(simple: int) -> bool:
+        """Whether the simple action has a set duration and presents risks"""
+        return simple in ActionMap.TEMPORAL_ACTIONS_INT
 
 
 assert set(ActionMap.SIMPLE_ACTIONS) == set(ActionMap.SIMPLE_AS_MOVE_FROM_MOVE_MAP.values()) and len(ActionMap.SIMPLE_AS_MOVE_FROM_MOVE_MAP) == len(FootsiesMove)
@@ -161,4 +167,8 @@ ActionMap.SIMPLE_FROM_MOVE_MAP = {
 }
 ActionMap.SIMPLE_FROM_MOVE_INDEX_MAP = {
     FOOTSIES_MOVE_INDEX_TO_MOVE.index(move): ActionMap.SIMPLE_ACTIONS.index(ActionMap.SIMPLE_AS_MOVE_FROM_MOVE_MAP[move]) for move in FootsiesMove
+}
+ActionMap.TEMPORAL_ACTIONS_INT = {
+    ActionMap.SIMPLE_ACTIONS.index(simple)
+    for simple in ActionMap.TEMPORAL_ACTIONS
 }

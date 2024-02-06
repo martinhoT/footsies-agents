@@ -1,10 +1,11 @@
 import dearpygui.dearpygui as dpg
 import numpy as np
-import torch
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
+from footsies_gym.moves import FootsiesMove
+from agents.torch_utils import observation_invert_perspective_flattened
 from analysis import Analyser
 from agents.mimic.agent import FootsiesAgent as OpponentModelAgent
 from agents.action import ActionMap
@@ -77,7 +78,9 @@ class OpponentDistributionPlot:
 
 
 class MimicAnalyserManager:
-    def __init__(self):
+    def __init__(self, p1_mirror_p2: bool = False):
+        self.p1_mirror_p2 = p1_mirror_p2
+
         self.p1_plot = OpponentDistributionPlot("Player 1 move probability distribution")
         self.p2_plot = OpponentDistributionPlot("Player 2 move probability distribution")
 
@@ -106,6 +109,9 @@ class MimicAnalyserManager:
     def toggle_p2_online_learning(self):
         AGENT.learn_p2 = not AGENT.learn_p2
 
+    def toggle_p1_mirror_p2(self):
+        self.p1_mirror_p2 = not self.p1_mirror_p2
+
     def update_max_loss(self, max_loss: float):
         AGENT.p1_model.max_loss = max_loss
         AGENT.p2_model.max_loss = max_loss
@@ -114,6 +120,7 @@ class MimicAnalyserManager:
         with dpg.group(horizontal=True):
             dpg.add_checkbox(label="Enable P1 online learning", default_value=AGENT.learn_p1, callback=self.toggle_p1_online_learning)
             dpg.add_checkbox(label="Enable P2 online learning", default_value=AGENT.learn_p2, callback=self.toggle_p2_online_learning)
+            dpg.add_checkbox(label="P1 mirror P2", default_value=self.p1_mirror_p2, callback=self.toggle_p1_mirror_p2)
             dpg.add_input_float(label="Max. allowed loss", default_value=AGENT.p1_model.max_loss, width=100, callback=lambda s, a: self.update_max_loss(a))
             self.p1_frameskip = dpg.add_checkbox(label="P1 frameskip", default_value=False, enabled=False)
             self.p2_frameskip = dpg.add_checkbox(label="P2 frameskip", default_value=False, enabled=False)
@@ -168,11 +175,19 @@ class MimicAnalyserManager:
             # We need to call act so that the agent can store the current observation. Implementation detail, but whatever
             AGENT.act(analyser.previous_observation, analyser.previous_info)
             AGENT.update(analyser.current_observation, None, None, None, analyser.current_info)
+        # Update the action histories even when not performing online learning
+        else:
+            AGENT.append_to_action_history(p1_simple, True)
+            AGENT.append_to_action_history(p2_simple, False)
 
         observation_torch = AGENT._obs_to_tensor(observation)
-        p1_distribution_predicted = AGENT.p1_model.probability_distribution(AGENT.p1_model.mask_environment_observation(observation_torch)).squeeze()
-        p2_distribution_predicted = AGENT.p2_model.probability_distribution(AGENT.p2_model.mask_environment_observation(observation_torch)).squeeze()
-        p1_distribution_estimated = self.p1_action_table.probability_distribution(observation)
+        if self.p1_mirror_p2:
+            inverted = observation_invert_perspective_flattened(observation_torch)
+            p1_distribution_predicted = AGENT.p2_model.probability_distribution(AGENT.craft_observation(inverted, False, True)).squeeze()
+        else:
+            p1_distribution_predicted = AGENT.p1_model.probability_distribution(AGENT.craft_observation(observation_torch, True, True)).squeeze()
+        p1_distribution_estimated = self.p1_action_table.probability_distribution(observation) # we don't mirror this one, it's not that important
+        p2_distribution_predicted = AGENT.p2_model.probability_distribution(AGENT.craft_observation(observation_torch, False, False)).squeeze()
         p2_distribution_estimated = self.p2_action_table.probability_distribution(observation)
 
         self.p1_plot.update(p1_distribution_predicted, p1_distribution_estimated)
@@ -182,28 +197,21 @@ class MimicAnalyserManager:
         dpg.set_value(self.p2_action_table_estimator_size, str(self.p2_action_table.size()))
 
     def p2_prediction_discrete(self, obs: np.ndarray, info: dict) -> int:
+        if not self.p1_mirror_p2:
+            return 0
+        
         try:
             discrete_action = next(self.p2_predicted_action_iterator)
         except StopIteration:
             obs = AGENT._obs_to_tensor(obs)
             
-            # We need to craft the observation to be as if P1 is the one experiencing it
-            #  guard
-            obs[:, [0, 1]] = obs[:, [1, 0]]
-            #  move
-            tmp = obs[:, 2:17].clone().detach()
-            obs[:, 2:17] = obs[:, 17:32]
-            obs[:, 17:32] = tmp
-            #  move progress
-            obs[:, [32, 33]] = obs[:, [33, 32]]
-            #  position
-            obs[:, [34, 35]] = obs[:, [35, 34]]
+            # We need to craft the observation to be as if P1 is the one experiencing it (since P2 model was trained inverted)
+            obs = observation_invert_perspective_flattened(obs)
             
-            simple_action = AGENT.p2_model.predict(AGENT.p2_model.mask_environment_observation(obs), deterministic=True).item()
-            print(simple_action)
+            simple_action = AGENT.p2_model.predict(AGENT.craft_observation(obs, use_p1_model=False, use_p1_action_history=True), deterministic=True).item()
             self.p2_predicted_action_iterator = iter(ActionMap.simple_to_discrete(simple_action))
             discrete_action = next(self.p2_predicted_action_iterator)
-        
+
         return discrete_action
 
 
@@ -230,25 +238,38 @@ if __name__ == "__main__":
         observation_space=env.observation_space,
         action_space=env.action_space,
         frameskipping=True,
+        append_last_actions_n=60,
+        append_last_actions_distinct=False,
         by_primitive_actions=False,
         use_sigmoid_output=False,
-        input_clip=False,
+        input_clip=True,
         input_clip_leaky_coef=0.01,
         max_allowed_loss=float("+inf"),
-        hidden_layer_sizes_specification="",
-        hidden_layer_activation_specification="Identity",
+        hidden_layer_sizes_specification="128",
+        hidden_layer_activation_specification="LeakyReLU",
         mini_batch_size=1,
         learning_rate=0.005,
-        move_transition_scale=30,
+        move_transition_scale=100,
     )
 
     # load_agent_model(AGENT, "mimic_linear_frameskip")
 
     mimic_analyser_manager = MimicAnalyserManager()
 
+    def spammer():
+        from itertools import cycle
+        for action in cycle((
+            ActionMap.simple_to_discrete(ActionMap.SIMPLE_ACTIONS.index(FootsiesMove.N_ATTACK))[0],
+            ActionMap.simple_to_discrete(ActionMap.SIMPLE_ACTIONS.index(FootsiesMove.STAND))[0]
+        )):
+            yield action
+
+    spamming = spammer()
+
     analyser = Analyser(
         env=env,
-        p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
+        # p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
+        p1_action_source=lambda o, i: next(spamming),
         custom_elements_callback=mimic_analyser_manager.include_mimic_dpg_elements,
         custom_state_update_callback=mimic_analyser_manager.predict_next_move,
     )

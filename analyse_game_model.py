@@ -10,6 +10,9 @@ from agents.action import ActionMap
 from main import load_agent_model
 
 
+AGENT: GameModelAgent = None
+
+
 def load_predicted_battle_state(analyser: Analyser):
     analyser.p1_guard = dpg.get_value("p1_guard_predicted")
     analyser.p2_guard = dpg.get_value("p2_guard_predicted")
@@ -85,14 +88,12 @@ def predict_next_state(analyser: Analyser, agent_action: int = None, opponent_ac
     if analyser.previous_observation is None:
         return
 
-    agent: GameModelAgent = analyser.agent
-
     # Note: we need to consider the current information when determining the players' moves, but the previous observation!
     observation = analyser.previous_observation
     agent_action = ActionMap.simple_from_move(FootsiesMove[dpg.get_value("agent_action")]) if agent_action is None else agent_action
     opponent_action = ActionMap.simple_from_move(FootsiesMove[dpg.get_value("opponent_action")]) if opponent_action is None else opponent_action
     
-    update_prediction(agent, observation, agent_action, opponent_action)
+    update_prediction(AGENT, observation, agent_action, opponent_action)
 
 
 def update_info_and_predict_next_state(analyser: Analyser):
@@ -120,7 +121,7 @@ if __name__ == "__main__":
         )
     )
 
-    agent = GameModelAgent(
+    AGENT = GameModelAgent(
         observation_space=env.observation_space,
         action_space=env.action_space,
         by_primitive_actions=False,
@@ -128,11 +129,11 @@ if __name__ == "__main__":
         hidden_layer_activation_specification="LeakyReLU",
     )
 
-    load_agent_model(agent, "game_model_linear")
+    load_agent_model(AGENT, "game_model_linear_online")
 
     analyser = Analyser(
         env=env,
-        agent=lambda obs, info: 0,
+        p1_action_source=lambda obs, info: 0,
         custom_elements_callback=include_game_model_dpg_elements,
         custom_state_update_callback=update_info_and_predict_next_state,
     )
