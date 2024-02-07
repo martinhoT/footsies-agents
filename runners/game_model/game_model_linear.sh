@@ -6,14 +6,14 @@ python3 main.py game_model \
     -eB by_example true \
     -mN \
         move_transition_scale 1 \
-        mini_batch_size 1000 \
+        mini_batch_size 1 \
         learning_rate 0.01 \
     -mB \
         by_primitive_actions false \
     -mS \
         hidden_layer_sizes_specification "" \
         hidden_layer_activation_specification Identity \
-    --log-frequency 100000 \
+    --log-frequency 10000 \
     --log-dir runs/game_model_linear \
     --model-name game_model_linear \
     "$@"

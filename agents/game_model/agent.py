@@ -27,8 +27,8 @@ class GameModel(nn.Module):
         )
 
         # Different activations for different parts of the output state
-        # This is a "staircase sigmoid" for snapping to integers. It's not differentiable everywhere, but PyTorch handles this gracefully
-        self.guard_activation = lambda x: 1 / (1 + torch.exp(-15 * (torch.remainder(x, 1) - 0.5))) + torch.floor(x)
+        # This is a "staircase sigmoid" for snapping to certain values. It's not differentiable everywhere, but PyTorch handles this gracefully apparently
+        self.guard_activation = lambda x: (1 / 3) * (1 / (1 + torch.exp(-15 * (torch.remainder(3 * x, 1) - 0.5))) + torch.floor(3 * x))
         self.move_activation = nn.Softmax(dim=1)
         self.move_progress_activation = nn.Identity()
         self.position_activation = nn.Identity()
@@ -88,6 +88,11 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.cummulative_loss = 0
         self.cummulative_loss_n = 0
+        self.cummulative_loss_guard = 0
+        self.cummulative_loss_move_p1 = 0
+        self.cummulative_loss_move_p2 = 0
+        self.cummulative_loss_move_progress = 0
+        self.cummulative_loss_position = 0
 
     def _obs_to_tensor(self, obs: np.ndarray) -> torch.Tensor:
         return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
@@ -143,19 +148,33 @@ class FootsiesAgent(FootsiesAgentBase):
         move_distance_p1 = -torch.sum(torch.log2(predicted[:, 2:17]) * batch_y[:, 2:17], dim=1)
         move_distance_p2 = -torch.sum(torch.log2(predicted[:, 17:32]) * batch_y[:, 17:32], dim=1)
         # Euclidean distance
-        move_progress_and_position_distance = torch.sqrt(torch.sum((predicted[:, 32:36] - batch_y[:, 32:36])**2, dim=1))
+        move_progress_distance = torch.sqrt(torch.sum((predicted[:, 32:34] - batch_y[:, 32:34])**2, dim=1))
+        position_distance = torch.sqrt(torch.sum((predicted[:, 34:36] - batch_y[:, 34:36])**2, dim=1))
 
         # Give more weight to training examples in which a move transition occurred
         # NOTE: this assumes the state variables are placed before the agent and opponent action features
         move_transition_multiplier = 1 + torch.any(batch_x[:, 2:32] != batch_y[:, 2:32], dim=1) * (self.move_transition_scale - 1)
 
-        loss = torch.mean((guard_distance + move_distance_p1 + move_distance_p2 + move_progress_and_position_distance) * move_transition_multiplier)
+        # Increment specific losses here
+        guard_loss = torch.mean(guard_distance * move_transition_multiplier)
+        move_p1_loss = torch.mean(move_distance_p1 * move_transition_multiplier)
+        move_p2_loss = torch.mean(move_distance_p2 * move_transition_multiplier)
+        move_progress_loss = torch.mean(move_progress_distance * move_transition_multiplier)
+        position_loss = torch.mean(position_distance * move_transition_multiplier)
+        self.cummulative_loss_guard += guard_loss.item()
+        self.cummulative_loss_move_p1 += move_p1_loss.item()
+        self.cummulative_loss_move_p2 += move_p2_loss.item()
+        self.cummulative_loss_move_progress += move_progress_loss.item()
+        self.cummulative_loss_position += position_loss.item()
+
+        loss = guard_loss + move_p1_loss + move_p2_loss + move_progress_loss + position_loss
         loss.backward()
 
         self.optimizer.step()
 
         return loss.item()
 
+    # This is the only evaluation function that clears the denominator cummulative_loss_n
     def evaluate_average_loss(self) -> float:
         res = (
             self.cummulative_loss / self.cummulative_loss_n
@@ -163,6 +182,51 @@ class FootsiesAgent(FootsiesAgentBase):
         
         self.cummulative_loss = 0
         self.cummulative_loss_n = 0
+
+        return res
+    
+    def evaluate_average_loss_guard(self) -> float:
+        res = (
+            self.cummulative_loss_guard / self.cummulative_loss_n
+        ) if self.cummulative_loss_n != 0 else 0
+
+        self.cummulative_loss_guard = 0
+
+        return res
+
+    def evaluate_average_loss_move_p1(self) -> float:
+        res = (
+            self.cummulative_loss_move_p1 / self.cummulative_loss_n
+        ) if self.cummulative_loss_n != 0 else 0
+
+        self.cummulative_loss_move_p1 = 0
+
+        return res
+    
+    def evaluate_average_loss_move_p2(self) -> float:
+        res = (
+            self.cummulative_loss_move_p2 / self.cummulative_loss_n
+        ) if self.cummulative_loss_n != 0 else 0
+
+        self.cummulative_loss_move_p2 = 0
+
+        return res
+    
+    def evaluate_average_loss_move_progress(self) -> float:
+        res = (
+            self.cummulative_loss_move_progress / self.cummulative_loss_n
+        ) if self.cummulative_loss_n != 0 else 0
+
+        self.cummulative_loss_move_progress = 0
+
+        return res
+    
+    def evaluate_average_loss_position(self) -> float:
+        res = (
+            self.cummulative_loss_position / self.cummulative_loss_n
+        ) if self.cummulative_loss_n != 0 else 0
+
+        self.cummulative_loss_position = 0
 
         return res
 

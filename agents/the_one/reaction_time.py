@@ -5,6 +5,7 @@ from typing import Callable, TypeVar
 T = TypeVar("T")
 
 
+# TODO: observation history is missing!
 class ReactionTimeEmulator:
     def __init__(
         self,
