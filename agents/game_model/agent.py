@@ -53,16 +53,31 @@ class FootsiesAgent(FootsiesAgentBase):
         observation_space: Space,
         action_space: Space,
         by_primitive_actions: bool = False,
+        by_observation_differences: bool = False,
         move_transition_scale: float = 10.0, # scale training examples where move transitions occur, since they are very important
-        mini_batch_size: int = 1000,
+        mini_batch_size: int = 1,
         learning_rate: float = 1e-2,
         hidden_layer_sizes_specification: str = "64,64",
         hidden_layer_activation_specification: str = "LeakyReLU",
     ):
+        """
+        Game model agent for modeling the deterministic dynamics of the FOOTSIES environment
+
+        The input of the model is the environment observation, agent action and opponent action.
+        The actions are simplified by default.
+        The output of the model is a prediction for the next environment observation.
+
+        Parameters
+        ----------
+        - `by_primitive_actions`: consider primitive actions rather than simplified, temporally abstracted actions
+        - `by_observation_differences`: the linear variables `guard`, `move_progress` and `position` in the prediction target will be the differences between the next and current observations
+        - `move_transition_scale`: importance given to transitions between moves, which are important to model. This scale is applied to the loss of the respective example in which a transition occurred
+        """
         if by_primitive_actions:
-            raise NotImplementedError("can't train on primitive opponent actions yet")
+            raise NotImplementedError("can't train considering primitive actions yet")
 
         self.by_primitive_actions = by_primitive_actions
+        self.by_observation_differences = by_observation_differences
         self.state_dim = observation_space.shape[0]
         self.agent_action_dim = action_space.shape[0] if by_primitive_actions else ActionMap.n_simple()
         self.opponent_action_dim = self.agent_action_dim   # we assume they use the same action space
@@ -105,7 +120,14 @@ class FootsiesAgent(FootsiesAgentBase):
         next_obs = self._obs_to_tensor(next_obs)
         agent_action_oh = self._action_to_tensor(agent_action, self.agent_action_dim)
         opponent_action_oh = self._action_to_tensor(opponent_action, self.opponent_action_dim)
-        self.state_batch_as_list.append(torch.hstack((obs, agent_action_oh, opponent_action_oh, next_obs)))
+        
+        target = next_obs
+        if self.by_observation_differences:
+            target[:, 0:2] = next_obs[:, 0:2] - obs[:, 0:2]
+            target[:, 32:34] = next_obs[:, 32:34] - obs[:, 32:34]
+            target[:, 34:36] = next_obs[:, 34:36] - obs[:, 34:36]
+        
+        self.state_batch_as_list.append(torch.hstack((obs, agent_action_oh, opponent_action_oh, target)))
 
     def act(self, obs: np.ndarray, info: dict) -> "any":
         self.current_observation = obs
@@ -242,6 +264,12 @@ class FootsiesAgent(FootsiesAgentBase):
         # Get the maximum
         next_obs[:, 2:17] = 1.0 * (next_obs[:, 2:17] == torch.max(next_obs[:, 2:17]))
         next_obs[:, 17:32] = 1.0 * (next_obs[:, 17:32] == torch.max(next_obs[:, 17:32]))
+        
+        if self.by_observation_differences:
+            next_obs[:, 0:2] += obs[:, 0:2]
+            next_obs[:, 32:34] += obs[:, 32:34]
+            next_obs[:, 34:36] += obs[:, 34:36]
+        
         next_obs[:, 32] = torch.clamp(next_obs[:, 32], 0.0, 1.0)
         next_obs[:, 33] = torch.clamp(next_obs[:, 33], 0.0, 1.0)
 

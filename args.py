@@ -53,6 +53,15 @@ class SelfPlayArgs:
     mix_bot: int
 
 
+@dataclass
+class ExperimentArgs:
+    agent_name: str
+    total_episodes: int
+    study_name: str
+    direction: str
+    n_trials: int
+
+
 def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
     kwargs = {}
     if n_kwargs is not None:
@@ -104,22 +113,26 @@ def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
     return kwargs
 
 
-def parse_args() -> MainArgs:
+def add_agent_argument(parser: argparse.ArgumentParser):
     available_agents = [
         file.name
         for file in os.scandir("agents")
         if file.is_dir() and file.name != "__pycache__"
     ]
     available_agents_str = ", ".join(available_agents)
-
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
+    
     parser.add_argument(
         "agent",
         type=str,
         help=f"agent implementation to use (available: {available_agents_str}). If name is in the form 'sb3.<agent>', then the Stable-Baselines3 algorithm <agent> will be used instead",
     )
+
+
+def parse_args() -> MainArgs:
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    add_agent_argument(parser)
     parser.add_argument(
         "-e",
         "--env",
@@ -341,4 +354,26 @@ def parse_args() -> MainArgs:
             max_snapshots=args.footsies_self_play_max_snapshots,
             mix_bot=args.footsies_self_play_mix_bot,
         )
+    )
+
+
+
+def parse_args_experiment() -> ExperimentArgs:
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    add_agent_argument(parser)
+    parser.add_argument("-e", "--episodes", type=int, default=15000, help="number of episodes")
+    parser.add_argument("-s", "--study-name", type=str, default="test-experiment", help="name of the study (should be the same among processes on the same study)")
+    parser.add_argument("--maximize", action="store_true", help="maximize the objective value. If not specified, will minimize")
+    parser.add_argument("-n", "--n-trials", type=int, default=10, help="the number of trials to attempt")
+
+    args = parser.parse_args()
+
+    return ExperimentArgs(
+        agent_name=args.agent,
+        total_episodes=args.episodes,
+        study_name=args.study_name,
+        direction="maximize" if args.maximize else "minimize",
+        n_trials=args.n_trials,
     )

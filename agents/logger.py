@@ -143,9 +143,14 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
             for network in self.network_histograms:
                 for layer_name, layer in network.named_parameters():
-                    self.summary_writer.add_histogram(
-                        layer_name, layer, self.current_step
-                    )
+                    try:
+                        self.summary_writer.add_histogram(
+                            layer_name, layer, self.current_step
+                        )
+                    except ValueError as e:
+                        print(f"Oops, exception happened when adding network histogram: '{e}', here are the parameters:")
+                        print(layer)
+                        raise e
 
             for tag, evaluator in self.custom_evaluators:
                 self.summary_writer.add_scalar(tag, evaluator(), self.current_step)

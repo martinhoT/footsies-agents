@@ -1,8 +1,6 @@
-import argparse
 import os
 import importlib
 import gymnasium as gym
-import random
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.time_limit import TimeLimit
@@ -15,7 +13,6 @@ from agents.base import FootsiesAgentBase
 from tqdm import tqdm
 from itertools import count
 from typing import List, Any
-from collections import deque
 from stable_baselines3.common.base_class import BaseAlgorithm
 
 from agents.logger import TrainingLoggerWrapper
@@ -31,7 +28,6 @@ Practical considerations:
   Therefore, the policy should ideally be able to consider a history at least 60 frames long.
 """
 
-# TODO: try Optuna
 # TODO: try adding noise to some observation variables (such as position) for better generalization?
 
 
@@ -282,3 +278,5 @@ if __name__ == "__main__":
 
     if args.misc.save:
         save_agent_model(agent, args.agent.model_name)
+
+    env.close()
