@@ -122,14 +122,15 @@ if __name__ == "__main__":
     )
 
     AGENT = GameModelAgent(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
+        observation_space_size=env.observation_space.shape[0],
+        action_space_size=env.action_space.n,
         by_primitive_actions=False,
-        hidden_layer_sizes_specification="",
-        hidden_layer_activation_specification="LeakyReLU",
+        by_observation_differences=True,
+        hidden_layer_sizes_specification="128",
+        hidden_layer_activation_specification="ReLU",
     )
 
-    load_agent_model(AGENT, "game_model_linear_online")
+    load_agent_model(AGENT, "game_model_one_layer_2")
 
     analyser = Analyser(
         env=env,

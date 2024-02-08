@@ -8,8 +8,8 @@ from agents.base import FootsiesAgentBase
 from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
 from agents.action import ActionMap
 from gymnasium import Env
-from typing import Callable, Iterable, List, Tuple
-from gymnasium import Space
+from typing import Callable, List, Tuple
+from collections.abc import Generator
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 
 
@@ -66,14 +66,13 @@ class PlayerModel:
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.LeakyReLU,
         move_transition_scale: float = 10.0,
-        max_allowed_loss: float = +torch.inf,
         learning_rate: float = 1e-2,
     ):
         if obs_mask is None:
             obs_mask = torch.ones((obs_size,), dtype=torch.bool)
         
         self.obs_mask = obs_mask
-        self.optimize_frequency = mini_batch_size
+        self.mini_batch_size = mini_batch_size
         self.use_sigmoid_output = use_sigmoid_output
         self.move_transition_scale = move_transition_scale
 
@@ -97,7 +96,7 @@ class PlayerModel:
         self.optimizer = torch.optim.SGD(params=self.network.parameters(), lr=learning_rate)
 
         # Just to make training easier, know which layers actually have learnable parameters
-        self.learnable_layer = [
+        self.is_learnable_layer = [
             ("weight" in param_names and "bias" in param_names)
             for param_names in map(
                 lambda params: map(lambda t: t[0], params),
@@ -110,9 +109,6 @@ class PlayerModel:
                 )
             )
         ]
-
-        # Maximum allowed loss before proceeding with the next training examples
-        self.max_loss = max_allowed_loss
 
         self.x_batch_as_list = []
         self.y_batch_as_list = []
@@ -130,35 +126,31 @@ class PlayerModel:
         self.move_transition_as_list.append(move_transition)
         self.step += 1
 
-        if self.step >= self.optimize_frequency:
+        if self.step >= self.mini_batch_size:
             batch_x = torch.cat(self.x_batch_as_list, 0)
             batch_y = torch.cat(self.y_batch_as_list, 0)
-            loss = None
 
             move_transition_multiplier = 1 + torch.tensor(self.move_transition_as_list) * (self.move_transition_scale - 1)
 
-            # Keep training on examples that are problematic
-            while loss is None or loss > self.max_loss:
-                self.optimizer.zero_grad()
+            self.optimizer.zero_grad()
 
-                predicted = self.network(batch_x)
-                loss = torch.mean(self.loss_function(predicted, batch_y) * move_transition_multiplier)
+            predicted = self.network(batch_x)
+            loss = torch.mean(self.loss_function(predicted, batch_y) * move_transition_multiplier)
 
-                loss.backward()
-                self.optimizer.step()
+            loss.backward()
+            self.optimizer.step()
 
-                self.cummulative_loss += loss.item()
-                self.cummulative_loss_n += 1
+            self.cummulative_loss += loss.item()
+            self.cummulative_loss_n += 1
 
-                # Investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
-                if all(
-                    not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
-                    for i, layer in enumerate(self.network.layers)
-                    if self.learnable_layer[i]
-                ):
-                    raise RuntimeError(
-                        f"learning is dead, gradients are 0! (loss: {loss.item()})"
-                    )
+            # Investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
+            if all(
+                not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
+                for layer in self.learnable_layers()
+            ):
+                raise RuntimeError(
+                    f"learning is dead, gradients are 0! (loss: {loss.item()})"
+                )
 
             self.x_batch_as_list.clear()
             self.y_batch_as_list.clear()
@@ -221,6 +213,11 @@ class PlayerModel:
 
         return probs
 
+    def learnable_layers(self) -> Generator[nn.Module, None, None]:
+        for i, layer in enumerate(self.network.layers):
+            if self.is_learnable_layer[i]:
+                yield layer
+
     def load(self, path: str):
         self.network.load_state_dict(torch.load(path))
 
@@ -232,9 +229,10 @@ class PlayerModel:
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(
         self,
-        observation_space: Space,
-        action_space: Space,
+        observation_space_size: int,
+        action_space_size: int,
         frameskipping: bool = True,
+        tile_coding: bool = False,
         append_last_actions_n: int = 0,
         append_last_actions_distinct: bool = True,
         by_primitive_actions: bool = False,
@@ -244,7 +242,6 @@ class FootsiesAgent(FootsiesAgentBase):
         hidden_layer_sizes_specification: str = "64,64",
         hidden_layer_activation_specification: str = "LeakyReLU",
         move_transition_scale: float = 10.0,
-        max_allowed_loss: float = +torch.inf,
         mini_batch_size: int = 1,
         learning_rate: float = 1e-2,
         learn_p1: bool = True,
@@ -253,6 +250,9 @@ class FootsiesAgent(FootsiesAgentBase):
         if by_primitive_actions:
             raise NotImplementedError("imitating primitive actions is not supported yet")
         
+        if tile_coding:
+            raise NotImplementedError("tile coding is not supported yet")
+
         self.frameskipping = frameskipping
         self.append_last_actions_n = append_last_actions_n
         self.append_last_actions_distinct = append_last_actions_distinct
@@ -261,8 +261,8 @@ class FootsiesAgent(FootsiesAgentBase):
         self.learn_p2 = learn_p2
 
         # This full observation size doesn't consider primitive actions yet
-        full_observation_size = observation_space.shape[0] + append_last_actions_n * ActionMap.n_simple()
-        self.n_moves = action_space.n if by_primitive_actions else ActionMap.n_simple()
+        full_observation_size = observation_space_size + append_last_actions_n * ActionMap.n_simple()
+        self.n_moves = action_space_size if by_primitive_actions else ActionMap.n_simple()
         
         # Masks to selectively remove the portion of the observation that is not relevant (occurs if frameskipping, it is the player's move progress)
         p1_observation_mask = torch.ones((full_observation_size,), dtype=torch.bool)
@@ -283,7 +283,6 @@ class FootsiesAgent(FootsiesAgentBase):
             "hidden_layer_sizes": [int(n) for n in hidden_layer_sizes_specification.split(",")] if hidden_layer_sizes_specification else [],
             "hidden_layer_activation": getattr(nn, hidden_layer_activation_specification),
             "move_transition_scale": move_transition_scale,
-            "max_allowed_loss": max_allowed_loss,
             "learning_rate": learning_rate,
         }
         self.p1_model = PlayerModel(

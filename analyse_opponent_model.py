@@ -1,5 +1,12 @@
+import torch
 import dearpygui.dearpygui as dpg
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as pltanim
+from itertools import cycle
+from matplotlib.axes import Axes
+from matplotlib.container import BarContainer
+from matplotlib.figure import Figure
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
@@ -13,6 +20,7 @@ from main import load_agent_model
 
 
 AGENT: OpponentModelAgent = None
+GRADIENT_HIST_BINS: int = 10
 
 
 # It's just a glorified dictionary
@@ -83,6 +91,11 @@ class MimicAnalyserManager:
 
         self.p1_plot = OpponentDistributionPlot("Player 1 move probability distribution")
         self.p2_plot = OpponentDistributionPlot("Player 2 move probability distribution")
+        
+        self.plot_p1_gradient = False
+        self.plot_p2_gradient = False
+        self.p1_gradient_plot = None
+        self.p2_gradient_plot = None
 
         n_moves = ActionMap.n_simple()
         self.p1_action_table = ActionTableEstimator(n_moves)
@@ -109,19 +122,22 @@ class MimicAnalyserManager:
     def toggle_p2_online_learning(self):
         AGENT.learn_p2 = not AGENT.learn_p2
 
+    def toggle_plot_p1_gradient(self):
+        self.plot_p1_gradient = not self.plot_p1_gradient
+
+    def toggle_plot_p2_gradient(self):
+        self.plot_p2_gradient = not self.plot_p2_gradient
+
     def toggle_p1_mirror_p2(self):
         self.p1_mirror_p2 = not self.p1_mirror_p2
-
-    def update_max_loss(self, max_loss: float):
-        AGENT.p1_model.max_loss = max_loss
-        AGENT.p2_model.max_loss = max_loss
 
     def include_mimic_dpg_elements(self, analyser: Analyser):
         with dpg.group(horizontal=True):
             dpg.add_checkbox(label="Enable P1 online learning", default_value=AGENT.learn_p1, callback=self.toggle_p1_online_learning)
             dpg.add_checkbox(label="Enable P2 online learning", default_value=AGENT.learn_p2, callback=self.toggle_p2_online_learning)
+            dpg.add_checkbox(label="Plot P1 gradients", default_value=self.plot_p1_gradient, callback=self.toggle_plot_p1_gradient)
+            dpg.add_checkbox(label="Plot P2 gradients", default_value=self.plot_p2_gradient, callback=self.toggle_plot_p2_gradient)
             dpg.add_checkbox(label="P1 mirror P2", default_value=self.p1_mirror_p2, callback=self.toggle_p1_mirror_p2)
-            dpg.add_input_float(label="Max. allowed loss", default_value=AGENT.p1_model.max_loss, width=100, callback=lambda s, a: self.update_max_loss(a))
             self.p1_frameskip = dpg.add_checkbox(label="P1 frameskip", default_value=False, enabled=False)
             self.p2_frameskip = dpg.add_checkbox(label="P2 frameskip", default_value=False, enabled=False)
 
@@ -150,6 +166,60 @@ class MimicAnalyserManager:
             dpg.add_text("Actual move of player 2:")
             self.actual_p2_move = dpg.add_text("")
 
+    def _populate_gradient_plot(self, ax: Axes, param: torch.nn.Parameter) -> BarContainer:
+        _, _, bar_container = ax.hist(param.grad.flatten(), bins=GRADIENT_HIST_BINS)
+        return bar_container
+
+    def _update_bar_container(self, bar_container: BarContainer, param: torch.nn.Parameter):
+        n = torch.histogram(param.grad.flatten(), bins=GRADIENT_HIST_BINS).hist
+        for count, rect in zip(n, bar_container.patches):
+            rect.set_height(count)
+
+    def update_gradient_plot(self, p1: bool):
+        model = AGENT.p1_model if p1 else AGENT.p2_model
+        gradient_plot = self.p1_gradient_plot if p1 else self.p2_gradient_plot
+        learnable_layers = list(model.learnable_layers())
+        
+        if gradient_plot is None:    
+            figaxes = plt.subplots(nrows=2, ncols=len(learnable_layers))
+            
+            fig, axes = figaxes
+            fig: Figure
+            axes: list[Axes]
+            
+            bar_containers = []
+            for i, layer in enumerate(learnable_layers):
+                parameters = list(layer.parameters())
+                weight, bias = parameters
+
+                ax_weight = axes[i]
+                ax_bias = axes[i + 1]
+
+                bar_containers.append(self._populate_gradient_plot(ax_weight, weight))
+                bar_containers.append(self._populate_gradient_plot(ax_bias, bias))
+            
+            gradient_plot = (*figaxes, bar_containers)
+            if p1:
+                self.p1_gradient_plot = gradient_plot
+            else:
+                self.p2_gradient_plot = gradient_plot
+
+        else:
+            fig, axes, bar_containers = gradient_plot
+            fig: Figure
+            axes: list[Axes]
+            bar_containers: list[BarContainer]
+
+            for i, layer in enumerate(learnable_layers):
+                parameters = list(layer.parameters())
+                weight, bias = parameters
+
+                self._update_bar_container(bar_containers[i], weight)
+                self._update_bar_container(bar_containers[i + 1], bias)
+            
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+        
     def predict_next_move(self, analyser: Analyser):
         if analyser.previous_observation is None:
             return
@@ -175,6 +245,12 @@ class MimicAnalyserManager:
             # We need to call act so that the agent can store the current observation. Implementation detail, but whatever
             AGENT.act(analyser.previous_observation, analyser.previous_info)
             AGENT.update(analyser.current_observation, None, None, None, analyser.current_info)
+            
+            if self.plot_p1_gradient:
+                self.update_gradient_plot(True)
+            if self.plot_p2_gradient:
+                self.update_gradient_plot(False)
+
         # Update the action histories even when not performing online learning
         else:
             AGENT.append_to_action_history(p1_simple, True)
@@ -235,21 +311,20 @@ if __name__ == "__main__":
     )
 
     AGENT = OpponentModelAgent(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
+        observation_space_size=env.observation_space.shape[0],
+        action_space_size=env.action_space.n,
         frameskipping=True,
-        append_last_actions_n=60,
+        append_last_actions_n=0,
         append_last_actions_distinct=False,
         by_primitive_actions=False,
         use_sigmoid_output=False,
-        input_clip=True,
+        input_clip=False,
         input_clip_leaky_coef=0.01,
-        max_allowed_loss=float("+inf"),
-        hidden_layer_sizes_specification="128",
-        hidden_layer_activation_specification="LeakyReLU",
+        hidden_layer_sizes_specification="",
+        hidden_layer_activation_specification="Sigmoid",
         mini_batch_size=1,
-        learning_rate=0.005,
-        move_transition_scale=100,
+        learning_rate=0.001,
+        move_transition_scale=1000,
     )
 
     # load_agent_model(AGENT, "mimic_linear_frameskip")
@@ -264,12 +339,16 @@ if __name__ == "__main__":
         )):
             yield action
 
-    spamming = spammer()
+    def idle():
+        while True:
+            yield 0
+
+    p1 = idle()
 
     analyser = Analyser(
         env=env,
         # p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
-        p1_action_source=lambda o, i: next(spamming),
+        p1_action_source=lambda o, i: next(p1),
         custom_elements_callback=mimic_analyser_manager.include_mimic_dpg_elements,
         custom_state_update_callback=mimic_analyser_manager.predict_next_move,
     )

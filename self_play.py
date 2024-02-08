@@ -10,7 +10,7 @@ class SelfPlayManager:
         mix_bot: int = None,
     ):
         """
-        Class that manages an opponent pool for self-play.
+        Class that manages an opponent pool for self-play
 
         Parameters
         ----------

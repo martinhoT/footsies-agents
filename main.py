@@ -44,8 +44,8 @@ def import_agent(agent_name: str, env: Env, parameters: dict) -> FootsiesAgentBa
     agent_module_str = ".".join(("agents", agent_name, "agent"))
     agent_module = importlib.import_module(agent_module_str)
     return agent_module.FootsiesAgent(
-        observation_space=env.observation_space,
-        action_space=env.action_space,
+        observation_space_size=env.observation_space.shape[0],
+        action_space_size=env.action_space.n,
         **parameters,
     )
 

@@ -59,8 +59,8 @@ class Autoencoder(nn.Module):
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(
         self,
-        observation_space: Space,
-        action_space: Space,
+        observation_space_size: int,
+        action_space_size: int,
         encoded_dim: int,
         normalized: bool = False,
         encoder_hidden_layers: int = 1,
@@ -75,7 +75,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.include_sequentiality_loss = include_sequentiality_loss
 
         self.autoencoder = Autoencoder(
-            state_dim=observation_space.shape[0],
+            state_dim=observation_space_size,
             encoded_dim=encoded_dim,
             normalized=normalized,
             encoder_hidden_layers=encoder_hidden_layers,

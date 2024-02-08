@@ -50,8 +50,8 @@ class GameModel(nn.Module):
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(
         self,
-        observation_space: Space,
-        action_space: Space,
+        observation_space_size: int,
+        action_space_size: int,
         by_primitive_actions: bool = False,
         by_observation_differences: bool = False,
         move_transition_scale: float = 10.0, # scale training examples where move transitions occur, since they are very important
@@ -78,8 +78,8 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.by_primitive_actions = by_primitive_actions
         self.by_observation_differences = by_observation_differences
-        self.state_dim = observation_space.shape[0]
-        self.agent_action_dim = action_space.shape[0] if by_primitive_actions else ActionMap.n_simple()
+        self.state_dim = observation_space_size
+        self.agent_action_dim = action_space_size if by_primitive_actions else ActionMap.n_simple()
         self.opponent_action_dim = self.agent_action_dim   # we assume they use the same action space
         self.move_transition_scale = move_transition_scale
         self.mini_batch_size = mini_batch_size
@@ -192,6 +192,9 @@ class FootsiesAgent(FootsiesAgentBase):
         loss = guard_loss + move_p1_loss + move_p2_loss + move_progress_loss + position_loss
         loss.backward()
 
+        if any(torch.any(torch.isnan(param.grad)).item() for param in self.game_model.parameters()):
+            raise RuntimeError("learning is dead, there are NaN gradients")
+
         self.optimizer.step()
 
         return loss.item()
@@ -254,9 +257,11 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def predict(self, obs: np.ndarray, agent_action: int, opponent_action: int) -> np.ndarray:
         """Predict the next observation. The prediction is sanitized to contain valid values"""
+        obs = self._obs_to_tensor(obs)
+        
         with torch.no_grad():
             next_obs: torch.Tensor = self.game_model(torch.hstack((
-                self._obs_to_tensor(obs),
+                obs,
                 self._action_to_tensor(agent_action, self.agent_action_dim),
                 self._action_to_tensor(opponent_action, self.opponent_action_dim),
             )))
