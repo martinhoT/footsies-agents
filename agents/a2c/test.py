@@ -1,11 +1,88 @@
+from collections import deque
+import numpy as np
 import torch
 import gymnasium
+import matplotlib.pyplot as plt
+from typing import Any
 from torch import nn
 from gymnasium.wrappers.flatten_observation import FlattenObservation
+from gymnasium import ObservationWrapper
+from gymnasium.spaces import Box
+from tqdm import tqdm
 from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
-from itertools import count
+from agents.tile import TileCoding, Tiling
+from itertools import combinations, count
+from enum import Enum
 
-ENVIRONMENT = "CartPole-v1"
+class CartPoleAttribute(Enum):
+    CART_POSITION = 0
+    CART_VELOCITY = 1
+    POLE_ANGLE = 2
+    POLE_ANGULAR_VELOCITY = 3
+
+
+class CartPolePairs(ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+        single_tilings = [
+            Tiling({
+                CartPoleAttribute.CART_POSITION: np.linspace(-4.8, 4.8, 9)
+            }),
+            Tiling({
+                CartPoleAttribute.CART_VELOCITY: np.linspace(-3.0, 3.0, 9)
+            }),
+            Tiling({
+                CartPoleAttribute.POLE_ANGLE: np.linspace(-0.418, 0.418, 9)
+            }),
+            Tiling({
+                CartPoleAttribute.POLE_ANGULAR_VELOCITY: np.linspace(-2.0, 2.0, 9)
+            }),
+        ]
+
+        pair_tilings = [
+            Tiling({
+                **tiling1.breakpoints,
+                **tiling2.breakpoints,
+            }) for tiling1, tiling2 in combinations(single_tilings, 2)
+        ]
+
+        self.coding = TileCoding([
+            # Singles
+            *single_tilings,
+            *(tiling + 0.5 for tiling in single_tilings),
+            *(tiling - 0.5 for tiling in single_tilings),
+
+            # Pairs
+            *pair_tilings,
+            *(tiling + 0.5 for tiling in pair_tilings),
+            *(tiling - 0.5 for tiling in pair_tilings),
+
+            # Triples
+            # *(
+            #     Tiling({
+            #         **tiling1.breakpoints,
+            #         **tiling2.breakpoints,
+            #         **tiling3.breakpoints,
+            #     }) for tiling1, tiling2, tiling3 in combinations(single_tilings, 3)
+            # ),
+
+            # All
+            # Tiling({
+            #     **single_tilings[0].breakpoints,
+            #     **single_tilings[1].breakpoints,
+            #     **single_tilings[2].breakpoints,
+            #     **single_tilings[3].breakpoints,
+            # })
+        ])
+
+        self.observation_space = Box(low=0.0, high=1.0, shape=(self.coding.size,))
+
+    def observation(self, observation: np.ndarray) -> torch.Tensor:
+        return 1.0 * self.coding.transform(observation)
+
+
+ENVIRONMENT = "FrozenLake-v1"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -15,7 +92,15 @@ if ENVIRONMENT == "FrozenLake-v1":
 else:
     kwargs = {}
 
-env = FlattenObservation(
+env_generator = lambda e: (
+    # CartPolePairs(
+        FlattenObservation(
+            e
+        )
+    # )
+)
+
+env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,
@@ -31,52 +116,78 @@ model = A2CModule(
         obs_dim=obs_dim,
         action_dim=action_dim,
         hidden_layer_sizes=[],
-        hidden_layer_activation=nn.Identity,
+        hidden_layer_activation=nn.ReLU,
     ),
     critic=CriticNetwork(
         obs_dim=obs_dim,
         hidden_layer_sizes=[],
-        hidden_layer_activation=nn.Identity,
+        hidden_layer_activation=nn.ReLU,
     ),
     discount=0.99,
-    actor_learning_rate=1e-3,
-    critic_learning_rate=1e-3,
+    actor_learning_rate=1e-2,
+    critic_learning_rate=1e-2,
+    actor_eligibility_traces_decay=0.0,
+    critic_eligibility_traces_decay=0.0,
 )
 
 try:
     terminated, truncated = True, True
 
+    # episode_iterator = count()
+    episode_iterator = range(1000)
+    step = 0
+    scores = []
+    scores_avg = []
+    recent_scores = deque([], maxlen=100)
+    deltas = []
+    # for i in tqdm(episode_iterator):
     for i in count():
+        score = 0
         while not (terminated or truncated):
             action = model.act(obs)
             next_obs, reward, terminated, truncated, info = env.step(action)
             model.update(obs, next_obs, reward, terminated)
+            
             obs = next_obs
+            step += 1
+            score += reward
+            deltas.append(model.delta)
 
         obs, info = env.reset()
         terminated, truncated = False, False
+        scores.append(score)
+        recent_scores.append(score)
+        scores_avg.append(sum(recent_scores) / len(recent_scores))
 
         if ENVIRONMENT == "FrozenLake-v1":
             print(model.value(torch.eye(16)).reshape(4, 4), "\x1B[4A", sep="")
-        else:
-            print(i, end="\r")
 
 except KeyboardInterrupt:
-    print("Value function:")
-    if ENVIRONMENT == "FrozenLake-v1":
-        print(model.value(torch.eye(16)).reshape(4, 4))
-    else:
-        print(None)
+    pass
 
-    print("Policy:")
-    if ENVIRONMENT == "FrozenLake-v1":
-        print(model.policy(torch.eye(16)).reshape(4, 4, 4))
-    else:
-        print(None)
+print("Value function:")
+if ENVIRONMENT == "FrozenLake-v1":
+    print(model.value(torch.eye(16)).reshape(4, 4))
+else:
+    print(None)
+
+print("Policy:")
+if ENVIRONMENT == "FrozenLake-v1":
+    print(model.policy(torch.eye(16)).reshape(4, 4, 4))
+else:
+    print(None)
+
+plt.plot(deltas)
+plt.savefig("a2c_test_deltas")
+plt.clf()
+
+plt.plot(scores)
+plt.plot(scores_avg)
+plt.savefig("a2c_test_scores")
 
 env.close()
 
-env = FlattenObservation(
+env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,

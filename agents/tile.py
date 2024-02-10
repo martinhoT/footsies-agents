@@ -25,23 +25,23 @@ Result has size 3 + 2 + 3 * 4 = 17
 """
 
 
-class Attribute(Enum):
-    GUARD_P1 = lambda o: o["guard"][0]
-    GUARD_P2 = lambda o: o["guard"][1]
-    MOVE_P1 = lambda o: o["move"][0]
-    MOVE_P2 = lambda o: o["move"][1]
-    MOVE_PROGRESS_P1 = lambda o: o["move_frame"][0]
-    MOVE_PROGRESS_P2 = lambda o: o["move_frame"][1]
-    POSITION_P1 = lambda o: o["position"][0]
-    POSITION_P2 = lambda o: o["position"][1]
+class FootsiesFlattenedAttribute(Enum):
+    GUARD_P1 = 0
+    GUARD_P2 = 1
+    MOVE_P1 = slice(2, 17)
+    MOVE_P2 = slice(17, 32)
+    MOVE_PROGRESS_P1 = 32
+    MOVE_PROGRESS_P2 = 33
+    POSITION_P1 = 34
+    POSITION_P2 = 35
 
 
 @dataclass
 class Tiling:
-    breakpoints:    dict[Attribute, np.ndarray[float]]
+    breakpoints:    dict[Enum, np.ndarray[float]]
 
     @property
-    def attributes(self) -> list[Attribute]:
+    def attributes(self) -> list[Enum]:
         return list(self.breakpoints)
 
     @property
@@ -52,8 +52,17 @@ class Tiling:
     def tiles(self) -> int:
         return reduce(int.__mul__, map(self.tiles_of_attribute, self.breakpoints))
 
-    def tiles_of_attribute(self, attribute: Attribute) -> int:
+    def tiles_of_attribute(self, attribute: Enum) -> int:
         return len(self.breakpoints[attribute]) + 1
+
+    def __add__(self, offset: int | float) -> "Tiling":
+        return Tiling({
+            attribute: value + offset
+            for attribute, value in self.breakpoints.items()
+        })
+
+    def __sub__(self, offset: int | float) -> "Tiling":
+        return self + (-offset)
 
 
 class TileCoding:
@@ -63,7 +72,6 @@ class TileCoding:
     ):
         self.tilings = tilings
 
-    
     def craft_tiling(self, observation: np.ndarray | torch.Tensor, tiling: Tiling) -> torch.Tensor:
         res = torch.zeros((1, tiling.tiles), dtype=torch.bool)
         
@@ -71,19 +79,22 @@ class TileCoding:
         offset = 1
 
         for attribute, breakpoints in tiling.breakpoints.items():
-            presence += offset * np.sum(breakpoints <= observation[:, attribute.value])
+            presence += offset * np.sum(breakpoints <= observation[attribute.value])
             offset *= tiling.tiles_of_attribute(attribute)
         
         res[0, presence] = True
 
         return res
 
-
     def transform(self, observation: np.ndarray | torch.Tensor) -> torch.Tensor:
         return torch.hstack([
             self.craft_tiling(observation, tiling)
             for tiling in self.tilings
         ])
+
+    @property
+    def size(self) -> int:
+        return sum(tiling.tiles for tiling in self.tilings)
 
 
 
