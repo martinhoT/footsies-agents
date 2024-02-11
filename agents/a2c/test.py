@@ -82,7 +82,19 @@ class CartPolePairs(ObservationWrapper):
         return 1.0 * self.coding.transform(observation)
 
 
-ENVIRONMENT = "FrozenLake-v1"
+"""Good sets of parameters
+FrozenLake:
+    Actor LR: 1.0e-1
+    Critic LR: 2.0e-2
+    Linear
+CartPole:
+    Actor LR: 1.0e-3
+    Critic LR: 1.0e-3
+    1 hidden layer of size 128 with ReLU activations
+"""
+
+
+ENVIRONMENT = "CartPole-v1"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -115,19 +127,20 @@ model = A2CModule(
     actor=ActorNetwork(
         obs_dim=obs_dim,
         action_dim=action_dim,
-        hidden_layer_sizes=[],
+        hidden_layer_sizes=[128],
         hidden_layer_activation=nn.ReLU,
     ),
     critic=CriticNetwork(
         obs_dim=obs_dim,
-        hidden_layer_sizes=[],
+        hidden_layer_sizes=[128],
         hidden_layer_activation=nn.ReLU,
     ),
     discount=0.99,
-    actor_learning_rate=1e-2,
-    critic_learning_rate=1e-2,
-    actor_eligibility_traces_decay=0.0,
-    critic_eligibility_traces_decay=0.0,
+    actor_learning_rate=1e-3,
+    critic_learning_rate=1e-3,
+    actor_eligibility_traces_decay=0.8,
+    critic_eligibility_traces_decay=0.8,
+    optimizer=torch.optim.Adam
 )
 
 try:
@@ -140,8 +153,8 @@ try:
     scores_avg = []
     recent_scores = deque([], maxlen=100)
     deltas = []
-    # for i in tqdm(episode_iterator):
-    for i in count():
+    for i in tqdm(episode_iterator):
+    # for i in count():
         score = 0
         while not (terminated or truncated):
             action = model.act(obs)

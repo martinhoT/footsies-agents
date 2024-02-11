@@ -51,6 +51,7 @@ class A2CModule:
         critic_learning_rate: float = 1e-2,
         actor_eligibility_traces_decay: float = 0.0,
         critic_eligibility_traces_decay: float = 0.0,
+        optimizer: torch.optim.Optimizer = torch.optim.SGD,
     ):
         self.discount = discount
         self.actor_eligibility_traces_decay = actor_eligibility_traces_decay
@@ -69,8 +70,8 @@ class A2CModule:
         ]
 
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients unchanged)
-        self.actor_optimizer = torch.optim.SGD(self.actor.parameters(), lr=actor_learning_rate, maximize=True)
-        self.critic_optimizer = torch.optim.SGD(self.critic.parameters(), lr=critic_learning_rate, maximize=True)
+        self.actor_optimizer = optimizer(self.actor.parameters(), lr=actor_learning_rate, maximize=True)
+        self.critic_optimizer = optimizer(self.critic.parameters(), lr=critic_learning_rate, maximize=True)
 
         self.action_distribution = None
         self.action = None
@@ -116,17 +117,12 @@ class A2CModule:
 
         self.delta = delta
 
-        # NOTE: when training the critic we define the target as a function of the critic itself, but we don't take it into account when calculating the gradient.
-        #       Relevant Sutton & Barto: page 202, second to last paragraph
         critic_score = self.critic(obs)
         critic_score.backward()
         with torch.no_grad():
             for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
                 critic_trace.copy_(self.discount * self.critic_eligibility_traces_decay * critic_trace + parameter.grad)
                 parameter.grad.copy_(delta * critic_trace)
-        for parameter in self.critic.parameters():
-            if torch.any(parameter.grad > 10.0):
-                pass
         self.critic_optimizer.step()
 
         actor_score = self.action_distribution.log_prob(self.action)
@@ -135,12 +131,9 @@ class A2CModule:
             for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
                 actor_trace.copy_(self.discount * self.critic_eligibility_traces_decay * actor_trace + self.cumulative_discount * parameter.grad)
                 parameter.grad.copy_(delta * actor_trace)
-        for parameter in self.actor.parameters():
-            if torch.any(parameter.grad > 10.0):
-                pass
         self.actor_optimizer.step()
 
-        self.cumulative_discount *= self.discount
+        self.cumulative_discount = 1.0 if terminated else (self.cumulative_discount * self.discount)
 
     def value(self, obs: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
