@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import gymnasium
 import matplotlib.pyplot as plt
+import optuna
 from typing import Any
 from torch import nn
 from gymnasium.wrappers.flatten_observation import FlattenObservation
@@ -82,27 +83,6 @@ class CartPolePairs(ObservationWrapper):
         return 1.0 * self.coding.transform(observation)
 
 
-"""Good sets of parameters
-FrozenLake:
-    Actor LR: 1.0e-1
-    Critic LR: 2.0e-2
-    Linear
-CartPole:
-    Actor LR: 1.0e-4
-    Critic LR: 1.0e-3
-    Traces: 0.8 for both
-    1 hidden layer of size 128 with ReLU activations
-    Adam optimizer
-MountainCar:
-    Actor LR: 0.475
-    Critic LR: 0.469
-    Actor ET: 0.41
-    Critic ET: 0.89
-    Discount: 0.295
-    1 hidden layer of size (128, 256) with ReLU activations (actor, critic)
-"""
-
-
 ENVIRONMENT = "LunarLander-v2"
 
 if ENVIRONMENT == "FrozenLake-v1":
@@ -138,97 +118,74 @@ env = env_generator(
 obs_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-model = A2CModule(
-    actor=ActorNetwork(
-        obs_dim=obs_dim,
-        action_dim=action_dim,
-        hidden_layer_sizes=[128],
-        hidden_layer_activation=nn.ReLU,
-    ),
-    critic=CriticNetwork(
-        obs_dim=obs_dim,
-        hidden_layer_sizes=[128],
-        hidden_layer_activation=nn.ReLU,
-    ),
-    discount=0.99,
-    actor_learning_rate=5e-4,
-    critic_learning_rate=5e-4,
-    actor_eligibility_traces_decay=0.5,
-    critic_eligibility_traces_decay=0.5,
-    optimizer=torch.optim.Adam
-)
+def define_model(trial: optuna.Trial) -> A2CModule:
+    return A2CModule(
+        actor=ActorNetwork(
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            hidden_layer_sizes=[2**trial.suggest_int("actor_neurons", 4, 8)],
+            hidden_layer_activation=nn.ReLU,
+        ),
+        critic=CriticNetwork(
+            obs_dim=obs_dim,
+            hidden_layer_sizes=[2**trial.suggest_int("critic_neurons", 4, 8)],
+            hidden_layer_activation=nn.ReLU,
+        ),
+        discount=trial.suggest_float("discount", 0.0, 1.0),
+        actor_learning_rate=trial.suggest_float("actor_lr", 1e-5, 5e-1),
+        critic_learning_rate=trial.suggest_float("critic_lr", 1e-5, 5e-1),
+        actor_eligibility_traces_decay=trial.suggest_float("actor_et", 0.0, 1.0),
+        critic_eligibility_traces_decay=trial.suggest_float("critic_et", 0.0, 1.0),
+        optimizer=torch.optim.Adam
+    )
 
-try:
-    terminated, truncated = True, True
+def optimize(trial: optuna.Trial, n_episodes: int = 1000) -> float:
+    model = define_model(trial)
+    
+    episode_iterator = range(n_episodes)
+    total_score = 0
+    for _ in tqdm(episode_iterator):
+        obs, _ = env.reset()
+        terminated, truncated = False, False
 
-    # episode_iterator = count()
-    episode_iterator = range(1000)
-    step = 0
-    scores = []
-    scores_avg = []
-    recent_scores = deque([], maxlen=100)
-    deltas = []
-    for i in tqdm(episode_iterator):
-    # for i in count():
-        score = 0
         while not (terminated or truncated):
             action = model.act(obs)
-            next_obs, reward, terminated, truncated, info = env.step(action)
+            next_obs, reward, terminated, truncated, _ = env.step(action)
             model.update(obs, next_obs, reward, terminated)
             
             obs = next_obs
-            step += 1
-            score += reward
-            deltas.append(model.delta)
+            total_score += reward
 
-        obs, info = env.reset()
-        terminated, truncated = False, False
-        scores.append(score)
-        recent_scores.append(score)
-        scores_avg.append(sum(recent_scores) / len(recent_scores))
+    return total_score / n_episodes
 
-        if ENVIRONMENT == "FrozenLake-v1":
-            print(model.value(torch.eye(16)).reshape(4, 4), "\x1B[4A", sep="")
 
-except KeyboardInterrupt:
-    pass
-
-print("Value function:")
-if ENVIRONMENT == "FrozenLake-v1":
-    print(model.value(torch.eye(16)).reshape(4, 4))
-else:
-    print(None)
-
-print("Policy:")
-if ENVIRONMENT == "FrozenLake-v1":
-    print(model.policy(torch.eye(16)).reshape(4, 4, 4))
-else:
-    print(None)
-
-plt.plot(deltas)
-plt.savefig("a2c_test_deltas")
-plt.clf()
-
-plt.plot(scores)
-plt.plot(scores_avg)
-plt.savefig("a2c_test_scores")
-
-env.close()
-
-env = env_generator(
-    gymnasium.make(
-        ENVIRONMENT,
-        **kwargs,
-        render_mode="human",
+if __name__ == "__main__":
+    study = optuna.create_study(
+        storage="sqlite:///a2c_lunar_lander.db",
+        sampler=None,
+        pruner=None,
+        study_name="lunar_lander",
+        direction="maximize",
+        load_if_exists=True,
     )
-)
+    study.optimize(optimize, n_trials=100, show_progress_bar=True)
 
-terminated, truncated = True, True
+    env.close()
 
-while True:
-    while not (terminated or truncated):
-        action = model.act(obs)
-        obs, reward, terminated, truncated, info = env.step(action)
+    # Copied straight from https://github.com/optuna/optuna-examples/blob/main/pytorch/pytorch_simple.py
+    pruned_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.PRUNED])
+    complete_trials = study.get_trials(deepcopy=False, states=[optuna.trial.TrialState.COMPLETE])
 
-    obs, info = env.reset()
-    terminated, truncated = False, False
+    print("Study statistics: ")
+    print("  Number of finished trials: ", len(study.trials))
+    print("  Number of pruned trials: ", len(pruned_trials))
+    print("  Number of complete trials: ", len(complete_trials))
+
+    print("Best trial:")
+    trial = study.best_trial
+
+    print("  Value: ", trial.value)
+
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print("    {}: {}".format(key, value))
