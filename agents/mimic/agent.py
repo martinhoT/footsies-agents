@@ -39,7 +39,7 @@ class PlayerModelNetwork(nn.Module):
         self.debug_stores = []
 
         if input_clip:
-            self.layers.append(InputClip(leaky_coef=input_clip_leaky_coef))
+            self.layers.append(InputClip(-1, 1, leaky_coef=input_clip_leaky_coef))
             if self.DEBUG:
                 debug_store = DebugStoreRecent()
                 self.debug_stores.append(debug_store)
@@ -67,6 +67,8 @@ class PlayerModel:
         hidden_layer_activation: nn.Module = nn.LeakyReLU,
         move_transition_scale: float = 10.0,
         learning_rate: float = 1e-2,
+        reinforce_max_loss: float = float("+inf"),
+        reinforce_max_iters: int = float("+inf"),
     ):
         if obs_mask is None:
             obs_mask = torch.ones((obs_size,), dtype=torch.bool)
@@ -75,6 +77,8 @@ class PlayerModel:
         self.mini_batch_size = mini_batch_size
         self.use_sigmoid_output = use_sigmoid_output
         self.move_transition_scale = move_transition_scale
+        self.reinforce_max_loss = reinforce_max_loss
+        self.reinforce_max_iters = reinforce_max_iters
 
         self.network = PlayerModelNetwork(
             input_dim=obs_size,
@@ -121,6 +125,10 @@ class PlayerModel:
         return obs[:, self.obs_mask]
 
     def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False):
+        # TODO: debug
+        if not move_transition:
+            return
+    
         self.x_batch_as_list.append(obs)
         self.y_batch_as_list.append(action)
         self.move_transition_as_list.append(move_transition)
@@ -132,25 +140,33 @@ class PlayerModel:
 
             move_transition_multiplier = 1 + torch.tensor(self.move_transition_as_list) * (self.move_transition_scale - 1)
 
-            self.optimizer.zero_grad()
+            i = 0
+            loss = float("+inf")
+            while i < self.reinforce_max_iters and loss > self.reinforce_max_loss:
+                self.optimizer.zero_grad()
 
-            predicted = self.network(batch_x)
-            loss = torch.mean(self.loss_function(predicted, batch_y) * move_transition_multiplier)
+                predicted = self.network(batch_x)
+                loss = torch.mean(self.loss_function(predicted, batch_y) * move_transition_multiplier)
 
-            loss.backward()
-            self.optimizer.step()
+                print(batch_x)
+                print(batch_y)
+                print(loss)
+                loss.backward()
+                self.optimizer.step()
 
-            self.cummulative_loss += loss.item()
-            self.cummulative_loss_n += 1
+                self.cummulative_loss += loss.item()
+                self.cummulative_loss_n += 1
 
-            # Investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
-            if all(
-                not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
-                for layer in self.learnable_layers()
-            ):
-                raise RuntimeError(
-                    f"learning is dead, gradients are 0! (loss: {loss.item()})"
-                )
+                # Investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
+                if all(
+                    not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
+                    for layer in self.learnable_layers()
+                ):
+                    raise RuntimeError(
+                        f"learning is dead, gradients are 0! (loss: {loss.item()})"
+                    )
+
+                i += 1
 
             self.x_batch_as_list.clear()
             self.y_batch_as_list.clear()
@@ -244,6 +260,8 @@ class FootsiesAgent(FootsiesAgentBase):
         move_transition_scale: float = 10.0,
         mini_batch_size: int = 1,
         learning_rate: float = 1e-2,
+        reinforce_max_loss: float = float("+inf"),
+        reinforce_max_iters: int = float("+inf"),
         learn_p1: bool = True,
         learn_p2: bool = True,
     ):
@@ -284,6 +302,8 @@ class FootsiesAgent(FootsiesAgentBase):
             "hidden_layer_activation": getattr(nn, hidden_layer_activation_specification),
             "move_transition_scale": move_transition_scale,
             "learning_rate": learning_rate,
+            "reinforce_max_loss": reinforce_max_loss,
+            "reinforce_max_iters": reinforce_max_iters,
         }
         self.p1_model = PlayerModel(
             **player_model_kwargs,

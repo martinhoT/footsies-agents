@@ -1,3 +1,4 @@
+from typing import Iterable
 import torch
 import dearpygui.dearpygui as dpg
 import numpy as np
@@ -64,15 +65,15 @@ class OpponentDistributionPlot:
         self.predicted_series = None
         self.estimated_series = None
     
-    def setup(self):
+    def setup(self, width: int = 1200):
         y = np.zeros((ActionMap.n_simple(),))
 
-        with dpg.plot(label=self.title, width=1200):
+        with dpg.plot(label=self.title, width=width):
             dpg.add_plot_legend()
             
             self.x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Move")
             dpg.set_axis_ticks(self.x_axis, tuple([(move.name, i + 1) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS)]))
-            dpg.set_axis_limits(self.x_axis, 0.0, ActionMap.n_simple() + 2) # the + 2 is padding
+            dpg.set_axis_limits(self.x_axis, 0.0, ActionMap.n_simple() + 1) # the + 1 is padding
 
             self.y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Probability")
             dpg.set_axis_limits(self.y_axis, 0.0, 1.0)
@@ -85,6 +86,47 @@ class OpponentDistributionPlot:
         dpg.set_value(self.estimated_series, [list(self.x + 1.0 + self.bar_width), list(distribution_estimated)])
 
 
+class GradientHistogramPlot:
+    def __init__(
+        self,
+        title: str,
+        bins: int = 10,
+        start: float = -3.0,
+        stop = 3.0,
+    ):
+        self.title = title
+        
+        step = (stop - start) / bins
+        self.x = np.arange(start, stop, step)
+        self.bins_edges = np.hstack((self.x, self.x[-1] + step))
+
+        self.step = step
+        self.start = start
+        self.stop = stop
+
+        # DPG items
+        self.x_axis = None
+        self.y_axis = None
+        self.histogram = None
+    
+    def setup(self, width: int = 1200):
+        with dpg.plot(label=self.title, width=width):
+            self.x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Gradient")
+
+            self.y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Density")
+            dpg.set_axis_limits(self.y_axis, 0.0, 1.5)
+        
+            self.histogram = dpg.add_bar_series(self.x + self.step / 2, [0.0] * len(self.x), weight=self.step, parent=self.y_axis)
+
+    def update(self, parameters: Iterable[torch.nn.Parameter]):
+        grads = [param.grad.flatten() for param in parameters if param.grad is not None]
+        if not grads:
+            return
+        
+        hist, _ = np.histogram(torch.hstack(grads), bins=self.bins_edges, range=(self.start, self.stop), density=True)
+        dpg.set_value(self.histogram, [self.x + self.step / 2, list(hist)])
+
+
 class MimicAnalyserManager:
     def __init__(self, p1_mirror_p2: bool = False):
         self.p1_mirror_p2 = p1_mirror_p2
@@ -92,10 +134,9 @@ class MimicAnalyserManager:
         self.p1_plot = OpponentDistributionPlot("Player 1 move probability distribution")
         self.p2_plot = OpponentDistributionPlot("Player 2 move probability distribution")
         
-        self.plot_p1_gradient = False
-        self.plot_p2_gradient = False
-        self.p1_gradient_plot = None
-        self.p2_gradient_plot = None
+        # NOTE: Recommended to use odd bins so that one bin catches values around 0
+        self.p1_gradient_plot = GradientHistogramPlot("Player 1 learning gradients", 101, -1, 1)
+        self.p2_gradient_plot = GradientHistogramPlot("Player 2 learning gradients", 101, -1, 1)
 
         n_moves = ActionMap.n_simple()
         self.p1_action_table = ActionTableEstimator(n_moves)
@@ -111,6 +152,8 @@ class MimicAnalyserManager:
         self.p2_action_table_estimator_size = None
         self.p1_frameskip = None
         self.p2_frameskip = None
+        self.p1_loss_value = None
+        self.p2_loss_value = None
 
     @property
     def online_learning(self) -> bool:
@@ -135,8 +178,6 @@ class MimicAnalyserManager:
         with dpg.group(horizontal=True):
             dpg.add_checkbox(label="Enable P1 online learning", default_value=AGENT.learn_p1, callback=self.toggle_p1_online_learning)
             dpg.add_checkbox(label="Enable P2 online learning", default_value=AGENT.learn_p2, callback=self.toggle_p2_online_learning)
-            dpg.add_checkbox(label="Plot P1 gradients", default_value=self.plot_p1_gradient, callback=self.toggle_plot_p1_gradient)
-            dpg.add_checkbox(label="Plot P2 gradients", default_value=self.plot_p2_gradient, callback=self.toggle_plot_p2_gradient)
             dpg.add_checkbox(label="P1 mirror P2", default_value=self.p1_mirror_p2, callback=self.toggle_p1_mirror_p2)
             self.p1_frameskip = dpg.add_checkbox(label="P1 frameskip", default_value=False, enabled=False)
             self.p2_frameskip = dpg.add_checkbox(label="P2 frameskip", default_value=False, enabled=False)
@@ -145,8 +186,8 @@ class MimicAnalyserManager:
 
         dpg.add_text("Opponent model estimations on the previous observation")
         
-        self.p1_plot.setup()
-        self.p2_plot.setup()
+        self.p1_plot.setup(width=1050)
+        self.p2_plot.setup(width=1050)
 
         dpg.add_separator()
 
@@ -165,60 +206,16 @@ class MimicAnalyserManager:
         with dpg.group(horizontal=True):
             dpg.add_text("Actual move of player 2:")
             self.actual_p2_move = dpg.add_text("")
-
-    def _populate_gradient_plot(self, ax: Axes, param: torch.nn.Parameter) -> BarContainer:
-        _, _, bar_container = ax.hist(param.grad.flatten(), bins=GRADIENT_HIST_BINS)
-        return bar_container
-
-    def _update_bar_container(self, bar_container: BarContainer, param: torch.nn.Parameter):
-        n = torch.histogram(param.grad.flatten(), bins=GRADIENT_HIST_BINS).hist
-        for count, rect in zip(n, bar_container.patches):
-            rect.set_height(count)
-
-    def update_gradient_plot(self, p1: bool):
-        model = AGENT.p1_model if p1 else AGENT.p2_model
-        gradient_plot = self.p1_gradient_plot if p1 else self.p2_gradient_plot
-        learnable_layers = list(model.learnable_layers())
         
-        if gradient_plot is None:    
-            figaxes = plt.subplots(nrows=2, ncols=len(learnable_layers))
-            
-            fig, axes = figaxes
-            fig: Figure
-            axes: list[Axes]
-            
-            bar_containers = []
-            for i, layer in enumerate(learnable_layers):
-                parameters = list(layer.parameters())
-                weight, bias = parameters
+        dpg.add_separator()
 
-                ax_weight = axes[i]
-                ax_bias = axes[i + 1]
+        dpg.add_text("Learning gradients")
 
-                bar_containers.append(self._populate_gradient_plot(ax_weight, weight))
-                bar_containers.append(self._populate_gradient_plot(ax_bias, bias))
-            
-            gradient_plot = (*figaxes, bar_containers)
-            if p1:
-                self.p1_gradient_plot = gradient_plot
-            else:
-                self.p2_gradient_plot = gradient_plot
-
-        else:
-            fig, axes, bar_containers = gradient_plot
-            fig: Figure
-            axes: list[Axes]
-            bar_containers: list[BarContainer]
-
-            for i, layer in enumerate(learnable_layers):
-                parameters = list(layer.parameters())
-                weight, bias = parameters
-
-                self._update_bar_container(bar_containers[i], weight)
-                self._update_bar_container(bar_containers[i + 1], bias)
-            
-            fig.canvas.draw()
-            fig.canvas.flush_events()
+        with dpg.group(horizontal=True):
+            self.p1_gradient_plot.setup(500)
+            self.p1_loss_value = dpg.add_slider_float(default_value=0.0, vertical=True, min_value=0.0, max_value=100.0, height=300)
+            self.p2_gradient_plot.setup(500)
+            self.p2_loss_value = dpg.add_slider_float(default_value=0.0, vertical=True, min_value=0.0, max_value=100.0, height=300)
         
     def predict_next_move(self, analyser: Analyser):
         if analyser.previous_observation is None:
@@ -246,10 +243,12 @@ class MimicAnalyserManager:
             AGENT.act(analyser.previous_observation, analyser.previous_info)
             AGENT.update(analyser.current_observation, None, None, None, analyser.current_info)
             
-            if self.plot_p1_gradient:
-                self.update_gradient_plot(True)
-            if self.plot_p2_gradient:
-                self.update_gradient_plot(False)
+            if AGENT.learn_p1:
+                self.p1_gradient_plot.update(AGENT.p1_model.network.parameters())
+                dpg.set_value(self.p1_loss_value, AGENT.evaluate_average_loss_and_clear(True))
+            if AGENT.learn_p2:
+                self.p2_gradient_plot.update(AGENT.p2_model.network.parameters())
+                dpg.set_value(self.p2_loss_value, AGENT.evaluate_average_loss_and_clear(False))
 
         # Update the action histories even when not performing online learning
         else:
@@ -318,13 +317,15 @@ if __name__ == "__main__":
         append_last_actions_distinct=False,
         by_primitive_actions=False,
         use_sigmoid_output=False,
-        input_clip=False,
+        input_clip=True,
         input_clip_leaky_coef=0.01,
         hidden_layer_sizes_specification="",
-        hidden_layer_activation_specification="Sigmoid",
+        hidden_layer_activation_specification="LeakyReLU",
         mini_batch_size=1,
-        learning_rate=0.001,
-        move_transition_scale=1000,
+        learning_rate=0.01,
+        move_transition_scale=1,
+        reinforce_max_loss=1.0,
+        reinforce_max_iters=float("+inf"),
     )
 
     # load_agent_model(AGENT, "mimic_linear_frameskip")
