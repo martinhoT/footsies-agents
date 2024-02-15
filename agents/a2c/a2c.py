@@ -32,12 +32,10 @@ class ActorNetwork(nn.Module):
 
         self.layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
         self.softmax = nn.Softmax(dim=1)
-        # self.layers.append(nn.Softmax(dim=1))
 
     def forward(self, x: torch.Tensor):
         y = self.layers(x)
         return self.softmax(y)
-        # return self.layers(x)
 
 
 class A2CModule:

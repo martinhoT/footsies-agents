@@ -13,6 +13,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
+from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.torch_utils import observation_invert_perspective_flattened
 from analysis import Analyser
 from agents.mimic.agent import FootsiesAgent as OpponentModelAgent
@@ -345,6 +346,13 @@ if __name__ == "__main__":
             yield 0
 
     p1 = idle()
+
+    reaction_time_emulator = ReactionTimeEmulator(
+        inaction_probability=0.0,
+        multiplier=1.0,
+        additive=0.0,
+        history_size=30,
+    )
 
     analyser = Analyser(
         env=env,

@@ -143,7 +143,7 @@ class ReactionTimeEmulator:
         agent_distribution_source: Callable[[T], np.ndarray],
         opponent_distribution_source: Callable[[T], np.ndarray],
         environment_model: Callable[[T, int, int], T],
-    ) -> T:
+    ) -> tuple[T, int]:
         """
         Perform registration and perception of a delayed observation all in a single method, for convenience. This is the primary method that should be used at every environment step
         
@@ -168,7 +168,7 @@ class ReactionTimeEmulator:
 
         self._previous_reaction_time = reaction_time
 
-        return perceived_observation
+        return perceived_observation, reaction_time
 
     def fill_history(self, observation: T):
         """Fill the observation history with a single observation. Should be done initially, immediately after an environment reset"""
