@@ -103,7 +103,7 @@ MountainCar:
 """
 
 
-ENVIRONMENT = "LunarLander-v2"
+ENVIRONMENT = "CartPole-v1"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -151,10 +151,10 @@ model = A2CModule(
         hidden_layer_activation=nn.ReLU,
     ),
     discount=0.99,
-    actor_learning_rate=5e-4,
-    critic_learning_rate=5e-4,
-    actor_eligibility_traces_decay=0.5,
-    critic_eligibility_traces_decay=0.5,
+    actor_learning_rate=1e-4,
+    critic_learning_rate=1e-3,
+    actor_eligibility_traces_decay=0.8,
+    critic_eligibility_traces_decay=0.8,
     optimizer=torch.optim.Adam
 )
 
