@@ -29,7 +29,7 @@ class ReactionTimeEmulator:
         self._additive = additive
         self._history_size = history_size
 
-        self._observations = deque([], maxlen=self.history_size)
+        self._observations = deque([], maxlen=history_size)
         self._previous_reaction_time = float("+inf")
 
         # Pre-made values that are useful for computation

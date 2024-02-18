@@ -62,12 +62,12 @@ class ExperimentArgs:
     n_trials: int
 
 
-def extract_kwargs(n_kwargs: dict, s_kwargs: dict, b_kwargs: dict) -> dict:
+def extract_kwargs(n_kwargs: list[str], s_kwargs: list[str], b_kwargs: list[str]) -> dict:
     kwargs = {}
     if n_kwargs is not None:
         if len(n_kwargs) % 2 != 0:
             raise ValueError(
-                "the values passed to '--[...]-F-kwargs' should be a list of key-value pairs"
+                "the values passed to '--[...]-N-kwargs' should be a list of key-value pairs"
             )
 
         def convert_to_int_or_float(number):

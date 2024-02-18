@@ -1,9 +1,17 @@
 from agents.base import FootsiesAgentBase
-from gymnasium import Env
+from gymnasium import Env, Space
 from typing import Callable, Tuple
 
 
 class FootsiesAgent(FootsiesAgentBase):
+    def __init__(
+        self,
+        observation_space_size: int,
+        action_space_size: int,
+        _: ...
+    ):
+        ...
+
     def act(self, obs) -> "any":
         ...
 

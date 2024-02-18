@@ -285,6 +285,7 @@ class MimicAnalyserManager:
             obs = observation_invert_perspective_flattened(obs)
             
             simple_action = AGENT.p2_model.predict(AGENT.craft_observation(obs, use_p1_model=False, use_p1_action_history=True), deterministic=True).item()
+            print(simple_action)
             self.p2_predicted_action_iterator = iter(ActionMap.simple_to_discrete(simple_action))
             discrete_action = next(self.p2_predicted_action_iterator)
 
@@ -315,18 +316,18 @@ if __name__ == "__main__":
         action_space_size=env.action_space.n,
         frameskipping=True,
         append_last_actions_n=0,
-        append_last_actions_distinct=False,
+        append_last_actions_distinct=True,
         by_primitive_actions=False,
         use_sigmoid_output=False,
-        input_clip=True,
+        input_clip=False,
         input_clip_leaky_coef=0.01,
         hidden_layer_sizes_specification="",
         hidden_layer_activation_specification="LeakyReLU",
         mini_batch_size=1,
-        learning_rate=0.01,
-        move_transition_scale=1,
-        reinforce_max_loss=1.0,
-        reinforce_max_iters=float("+inf"),
+        learning_rate=3e-3,
+        move_transition_scale=100,
+        reinforce_max_loss=0.0,
+        reinforce_max_iters=1,
     )
 
     # load_agent_model(AGENT, "mimic_linear_frameskip")
@@ -347,17 +348,10 @@ if __name__ == "__main__":
 
     p1 = idle()
 
-    reaction_time_emulator = ReactionTimeEmulator(
-        inaction_probability=0.0,
-        multiplier=1.0,
-        additive=0.0,
-        history_size=30,
-    )
-
     analyser = Analyser(
         env=env,
-        # p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
-        p1_action_source=lambda o, i: next(p1),
+        p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
+        # p1_action_source=lambda o, i: next(p1),
         custom_elements_callback=mimic_analyser_manager.include_mimic_dpg_elements,
         custom_state_update_callback=mimic_analyser_manager.predict_next_move,
     )

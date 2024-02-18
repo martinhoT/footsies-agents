@@ -95,11 +95,9 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.optimizer = torch.optim.SGD(params=self.game_model.parameters(), lr=learning_rate)
 
+        # For training
         self.state_batch_as_list = []
-
         self.current_observation = None
-        self.current_opponent_action = None
-        self.current_agent_action = None
 
         self.cummulative_loss = 0
         self.cummulative_loss_n = 0

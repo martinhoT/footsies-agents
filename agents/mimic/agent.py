@@ -125,10 +125,9 @@ class PlayerModel:
         return obs[:, self.obs_mask]
 
     def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False):
-        # TODO: debug
         if not move_transition:
             return
-    
+        
         self.x_batch_as_list.append(obs)
         self.y_batch_as_list.append(action)
         self.move_transition_as_list.append(move_transition)
@@ -148,16 +147,13 @@ class PlayerModel:
                 predicted = self.network(batch_x)
                 loss = torch.mean(self.loss_function(predicted, batch_y) * move_transition_multiplier)
 
-                print(batch_x)
-                print(batch_y)
-                print(loss)
                 loss.backward()
                 self.optimizer.step()
 
                 self.cummulative_loss += loss.item()
                 self.cummulative_loss_n += 1
 
-                # Investigate learning is dead problem which is occurring with current mimic model (even with leaky net)
+                # Check whether learning is dead
                 if all(
                     not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
                     for layer in self.learnable_layers()
@@ -168,8 +164,10 @@ class PlayerModel:
 
                 i += 1
 
+            # TODO: maintain examples that were move transitions, so that we can keep reinforcing them
             self.x_batch_as_list.clear()
             self.y_batch_as_list.clear()
+            self.move_transition_as_list.clear()
             self.step = 0
             self.first_obs_of_batch_had_move_transition = None
 
@@ -258,6 +256,8 @@ class FootsiesAgent(FootsiesAgentBase):
         hidden_layer_sizes_specification: str = "64,64",
         hidden_layer_activation_specification: str = "LeakyReLU",
         move_transition_scale: float = 10.0,
+        # TODO:
+        move_transition_importance_decay = 0.0,
         mini_batch_size: int = 1,
         learning_rate: float = 1e-2,
         reinforce_max_loss: float = float("+inf"),
@@ -364,9 +364,9 @@ class FootsiesAgent(FootsiesAgentBase):
         p2_observation = self.craft_observation(self.previous_observation, False, False)
 
         if self.learn_p1 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p1_move_state, self.previous_observation[0, 32], next_obs[32])):
-            self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move != p1_simple and ActionMap.is_simple_action_commital(p1_simple))
+            self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move != p1_simple)# and ActionMap.is_simple_action_commital(p1_simple))
         if self.learn_p2 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p2_move_state, self.previous_observation[0, 33], next_obs[33])):
-            self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move != p2_simple and ActionMap.is_simple_action_commital(p2_simple))
+            self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move != p2_simple)# and ActionMap.is_simple_action_commital(p2_simple))
 
         self.append_to_action_history(p1_simple, True)
         self.append_to_action_history(p2_simple, False)

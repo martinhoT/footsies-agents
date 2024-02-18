@@ -38,7 +38,7 @@ class ActorNetwork(nn.Module):
         return self.softmax(y)
 
 
-class A2CModule:
+class A2CModule(nn.Module):
     """Training module implementing the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
     def __init__(
         self,
@@ -49,11 +49,15 @@ class A2CModule:
         critic_learning_rate: float = 1e-2,
         actor_eligibility_traces_decay: float = 0.0,
         critic_eligibility_traces_decay: float = 0.0,
+        actor_entropy_loss_coef: float = 0.0,
         optimizer: torch.optim.Optimizer = torch.optim.SGD,
     ):
+        super().__init__()
+
         self.discount = discount
         self.actor_eligibility_traces_decay = actor_eligibility_traces_decay
         self.critic_eligibility_traces_decay = critic_eligibility_traces_decay
+        self.actor_entropy_loss_coef = actor_entropy_loss_coef
 
         self.actor = actor
         self.critic = critic
@@ -101,7 +105,6 @@ class A2CModule:
     def update(self, obs: np.ndarray, next_obs: np.ndarray, reward: float, terminated: bool):
         """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `act()`"""
         obs = self._obs_to_torch(obs)
-        next_obs = self._obs_to_torch(next_obs)
 
         with torch.no_grad():
             # NOTE: watch out for when the episode ends, since bootstraping is not performed we don't have an equalizer in case the critic's values are exploding, which should translate in large loss/score and thus large gradients
@@ -109,6 +112,7 @@ class A2CModule:
             if terminated:
                 target = reward
             else:
+                next_obs = self._obs_to_torch(next_obs)
                 target = reward + self.discount * self.critic(next_obs)
             
             delta = (target - self.critic(obs)).item()
@@ -123,7 +127,7 @@ class A2CModule:
                 parameter.grad.copy_(delta * critic_trace)
         self.critic_optimizer.step()
 
-        actor_score = self.action_distribution.log_prob(self.action)
+        actor_score = self.action_distribution.log_prob(self.action) - self.actor_entropy_loss_coef * self.action_distribution.entropy()
         actor_score.backward()
         with torch.no_grad():
             for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
@@ -140,3 +144,8 @@ class A2CModule:
     def policy(self, obs: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             return self.actor(obs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        policy = self.actor(x)
+        value = self.critic(x)
+        return policy, value
