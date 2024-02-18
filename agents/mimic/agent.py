@@ -59,16 +59,31 @@ class PlayerModel:
         obs_size: int,
         n_moves: int,
         obs_mask: torch.Tensor = None,
-        mini_batch_size: int = 1000,
+        mini_batch_size: int = 1,
         use_sigmoid_output: bool = False,
         input_clip: bool = False,
         input_clip_leaky_coef: float = 0,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.LeakyReLU,
-        move_transition_scale: float = 10.0,
+        move_transition_scale: float = 1.0,
         learning_rate: float = 1e-2,
+        # Reinforcement: keep training on problematic examples.
+        # It's bad because it has the potential to stall the opponent model.
         reinforce_max_loss: float = float("+inf"),
         reinforce_max_iters: int = float("+inf"),
+        # Scar: training example that had a very large loss, which we should keep in mind and keep training on in the future.
+        # Contrary to the previous idea, scarring just executes one training step per update, but does so in a batch including scars.
+        # This should come as a replacement for the move transition scale.
+        # - `scar_max_size` is the maximum number of scars we keep track of.
+        # - `scar_loss_coef` is a coefficient signifying how much importance we give to the prediction loss.
+        # - `scar_recency_coef` is a recency metric indicating how much importance we give to the recency of the training example.
+        #   The larger the value, the more negatively low recency impacts the importance of the training example.
+        # - `scar_detection_threshold` is the threshold beyond which we detect a training example as being a scar.
+        # An exponentially weighted average of the loss is kept over time
+        scar_max_size: int = 1000,
+        scar_loss_coef: float = 1.0,
+        scar_recency_coef: float = 0.0,
+        scar_detection_threshold: float = 0.0,
     ):
         if obs_mask is None:
             obs_mask = torch.ones((obs_size,), dtype=torch.bool)
@@ -117,6 +132,7 @@ class PlayerModel:
         self.x_batch_as_list = []
         self.y_batch_as_list = []
         self.move_transition_as_list = []
+        self.scars = []
         self.step = 0
         self.cummulative_loss = 0
         self.cummulative_loss_n = 0
@@ -125,9 +141,6 @@ class PlayerModel:
         return obs[:, self.obs_mask]
 
     def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False):
-        if not move_transition:
-            return
-        
         self.x_batch_as_list.append(obs)
         self.y_batch_as_list.append(action)
         self.move_transition_as_list.append(move_transition)
@@ -256,8 +269,6 @@ class FootsiesAgent(FootsiesAgentBase):
         hidden_layer_sizes_specification: str = "64,64",
         hidden_layer_activation_specification: str = "LeakyReLU",
         move_transition_scale: float = 10.0,
-        # TODO:
-        move_transition_importance_decay = 0.0,
         mini_batch_size: int = 1,
         learning_rate: float = 1e-2,
         reinforce_max_loss: float = float("+inf"),

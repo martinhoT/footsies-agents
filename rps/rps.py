@@ -111,6 +111,7 @@ class RPS:
                 return -1.0
             else:
                 return 0.0
+
         return 0.0
 
     @staticmethod
@@ -146,6 +147,9 @@ class RPS:
         self.current_observation = self.observation(p1_play, p2_play)
         self.current_info = self.info(p1_play, p2_play, p1_action, p2_action)
         return self.current_observation, reward, terminated, False, self.current_info
+
+    def set_opponent(self, opponent: Callable[[RPSObservation], int]):
+        self.opponent = opponent
 
     @property
     def play_dim(self) -> int:

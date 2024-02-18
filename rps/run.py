@@ -40,12 +40,12 @@ def print_results(game: RPS, agent: A2CModule):
     print("Value function:")
     for obs, (value, _) in results.items():
         print(f"{obs}: {value:.2f}")
-
     print()
 
     print("Policy:")
     for obs, (_, distribution) in results.items():
         print(f"{obs}: {distribution}")
+    print()
 
 
 def train(game: RPS, agent: A2CModule, episodes: int = None) -> Generator[tuple, None, None]:
@@ -92,7 +92,10 @@ def exponential_moving_average(x: tuple[float], factor: float) -> list[float]:
         return np.sum(e[::-1].reshape((-1, 1)) * c, axis=1)
 
 
-def main(plot: bool = False):
+def main(
+    plot: bool = False,
+    self_play: bool = False
+):
     torch.set_printoptions(precision=2, sci_mode=False)
 
     game = RPS(
@@ -120,8 +123,12 @@ def main(plot: bool = False):
         critic_learning_rate=1e-2,
         actor_eligibility_traces_decay=0.0,
         critic_eligibility_traces_decay=0.0,
+        actor_entropy_loss_coef=0.9,
         optimizer=torch.optim.SGD,
     )
+
+    if self_play:
+        game.set_opponent(lambda o, i: agent.act(o))
 
     training_loop = train(game, agent)
 
@@ -146,8 +153,33 @@ def main(plot: bool = False):
 
     print_results(game, agent)
 
+    ans = input("Rollout? ")
+    while ans != "quit":
+        obs, info = game.reset()
+        print("Observation:", obs)
+        print("Info:", info)
+        print()
+
+        terminated, truncated = False, False
+
+        while not (terminated or truncated):
+            action = agent.act(obs)
+            print("Agent action:", action)
+            print()
+
+            obs, reward, terminated, truncated, info = game.step(action)
+            print("Observation:", obs)
+            print("Info:", info)
+            print("Reward:", reward)
+            print()
+
+        print("Episode terminated\n")
+
+        ans = input("Rollout? ")
+
 
 if __name__ == "__main__":
     main(
-        plot=False
+        plot=False,
+        self_play=True,
     )
