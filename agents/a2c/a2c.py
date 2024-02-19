@@ -127,15 +127,25 @@ class A2CModule(nn.Module):
                 parameter.grad.copy_(delta * critic_trace)
         self.critic_optimizer.step()
 
-        actor_score = (1 - self.actor_entropy_loss_coef) * self.cumulative_discount * self.action_distribution.log_prob(self.action) + self.actor_entropy_loss_coef * self.action_distribution.entropy()
-        actor_score.backward()
+        actor_score = self.cumulative_discount * self.action_distribution.log_prob(self.action)
+        actor_score.backward(retain_graph=True)
         with torch.no_grad():
             for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
-                actor_trace.copy_(self.discount * self.critic_eligibility_traces_decay * actor_trace + parameter.grad)
-                parameter.grad.copy_(delta * actor_trace)
+                actor_trace.copy_(self.discount * self.actor_eligibility_traces_decay * actor_trace + parameter.grad)
+                parameter.grad.copy_(delta * actor_trace * (1 - self.actor_entropy_loss_coef))
+        # Add the entropy score gradient
+        entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
+        entropy_score.backward()
         self.actor_optimizer.step()
 
-        self.cumulative_discount = 1.0 if terminated else (self.cumulative_discount * self.discount)
+        self.cumulative_discount *= self.discount
+
+        if terminated:
+            self.cumulative_discount = 1.0
+            for actor_trace in self.actor_traces:
+                actor_trace.zero_()
+            for critic_trace in self.critic_traces:
+                critic_trace.zero_()
 
     def value(self, obs: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
