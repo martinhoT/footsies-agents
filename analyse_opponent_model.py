@@ -128,6 +128,62 @@ class GradientHistogramPlot:
         dpg.set_value(self.histogram, [self.x + self.step / 2, list(hist)])
 
 
+class LossPlot:
+    def __init__(
+        self,
+        title: str,
+        max_view_steps: int = 50,
+        threshold: int = 0.0,
+    ):
+        self.title = title
+        self.max_view_steps = max_view_steps
+        self.threshold = threshold
+
+        self.x = list(range(max_view_steps))
+        self.y_current_loss = [0.0] * max_view_steps
+        self.y_smoothed_loss = [0.0] * max_view_steps
+        self.y_threshold = [0.0] * max_view_steps
+        self.current_step = 0
+
+        self.y_max = float("-inf")
+        self.y_min = float("+inf")
+
+        # DPG items
+        self.x_axis = None
+        self.y_axis = None
+    
+    def setup(self, width: int = 1200):
+        with dpg.plot(label=self.title, width=width):
+            dpg.add_plot_legend()
+
+            self.x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Episode")
+            dpg.set_axis_limits(self.x_axis, 0, self.max_view_steps - 1)
+
+            self.y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Loss")
+            dpg.set_axis_limits_auto(self.y_axis)
+
+            self.current_loss_plot = dpg.add_line_series(self.x, self.y_current_loss, label="Loss at this example", parent=self.y_axis)
+            self.smoothed_loss_plot = dpg.add_line_series(self.x, self.y_smoothed_loss, label="Smoothed loss", parent=self.y_axis)
+            self.threshold_plot = dpg.add_line_series(self.x, self.y_threshold, label="Threshold", parent=self.y_axis)
+    
+    def update(self, new_loss: float, smoothed_loss: float, new_threshold: float = None):
+        if new_threshold is not None:
+            self.threshold = new_threshold
+        y_threshold = (1 + self.threshold) * smoothed_loss
+
+        self.y_max = max(self.y_max, new_loss, y_threshold, smoothed_loss)
+        self.y_min = min(self.y_min, new_loss, y_threshold, smoothed_loss)
+        self.y_current_loss[self.current_step] = new_loss
+        self.y_smoothed_loss[self.current_step] = smoothed_loss
+        self.y_threshold[self.current_step] = y_threshold
+        self.current_step = (self.current_step + 1) % self.max_view_steps
+
+        dpg.set_value(self.current_loss_plot, [list(self.x), list(self.y_current_loss)])
+        dpg.set_value(self.smoothed_loss_plot, [list(self.x), list(self.y_smoothed_loss)])
+        dpg.set_value(self.threshold_plot, [list(self.x), list(self.y_threshold)])
+        dpg.set_axis_limits(self.y_axis, self.y_min, self.y_max)
+
+
 class MimicAnalyserManager:
     def __init__(self, p1_mirror_p2: bool = False):
         self.p1_mirror_p2 = p1_mirror_p2
@@ -138,6 +194,9 @@ class MimicAnalyserManager:
         # NOTE: Recommended to use odd bins so that one bin catches values around 0
         self.p1_gradient_plot = GradientHistogramPlot("Player 1 learning gradients", 101, -1, 1)
         self.p2_gradient_plot = GradientHistogramPlot("Player 2 learning gradients", 101, -1, 1)
+
+        self.p1_loss_plot = LossPlot("Player 1 learning loss", 50, AGENT.p1_model.scar_detection_threshold)
+        self.p2_loss_plot = LossPlot("Player 2 learning loss", 50, AGENT.p2_model.scar_detection_threshold)
 
         n_moves = ActionMap.n_simple()
         self.p1_action_table = ActionTableEstimator(n_moves)
@@ -153,8 +212,9 @@ class MimicAnalyserManager:
         self.p2_action_table_estimator_size = None
         self.p1_frameskip = None
         self.p2_frameskip = None
-        self.p1_loss_value = None
-        self.p2_loss_value = None
+        self.p1_scar_size = None
+        self.p2_scar_size = None
+        self.attribute_modifier_window = None
 
     @property
     def online_learning(self) -> bool:
@@ -210,13 +270,32 @@ class MimicAnalyserManager:
         
         dpg.add_separator()
 
-        dpg.add_text("Learning gradients")
+        with dpg.window(label="Attribute modifier", show=False) as self.attribute_modifier_window:
+            dpg.add_text("Player 1")
+            dpg.add_slider_float(label="Scar detection threshold", default_value=AGENT.p1_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p1_model, "scar_detection_threshold", a))
+            dpg.add_slider_float(label="Smoothed loss coef", default_value=AGENT.p1_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p1_model, "smoothed_loss_coef", a))
 
-        with dpg.group(horizontal=True):
-            self.p1_gradient_plot.setup(500)
-            self.p1_loss_value = dpg.add_slider_float(default_value=0.0, vertical=True, min_value=0.0, max_value=100.0, height=300)
-            self.p2_gradient_plot.setup(500)
-            self.p2_loss_value = dpg.add_slider_float(default_value=0.0, vertical=True, min_value=0.0, max_value=100.0, height=300)
+            dpg.add_separator()
+
+            dpg.add_text("Player 2")
+            dpg.add_slider_float(label="Scar detection threshold", default_value=AGENT.p2_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p2_model, "scar_detection_threshold", a))
+            dpg.add_slider_float(label="Smoothed loss coef", default_value=AGENT.p2_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p2_model, "smoothed_loss_coef", a))
+
+        dpg.add_button(label="Open attribute modifier", callback=lambda: dpg.show_item(self.attribute_modifier_window))
+
+        with dpg.collapsing_header(label="Loss plots"):
+            with dpg.group(horizontal=True):
+                with dpg.group():
+                    self.p1_loss_plot.setup(525)
+                    self.p1_scar_size = dpg.add_slider_float(label="Player 1 scar size", default_value=len(AGENT.p1_model.x_batch_as_list), max_value=100, min_value=0, width=100, enabled=False)
+                with dpg.group():
+                    self.p2_loss_plot.setup(525)
+                    self.p2_scar_size = dpg.add_slider_float(label="Player 2 scar size", default_value=len(AGENT.p2_model.x_batch_as_list), max_value=100, min_value=0, width=100, enabled=False)
+            
+        with dpg.collapsing_header(label="Gradient plots"):
+            with dpg.group(horizontal=True):
+                self.p1_gradient_plot.setup(525)
+                self.p2_gradient_plot.setup(525)
         
     def predict_next_move(self, analyser: Analyser):
         if analyser.previous_observation is None:
@@ -246,10 +325,13 @@ class MimicAnalyserManager:
             
             if AGENT.learn_p1:
                 self.p1_gradient_plot.update(AGENT.p1_model.network.parameters())
-                dpg.set_value(self.p1_loss_value, AGENT.evaluate_average_loss_and_clear(True))
+                self.p1_loss_plot.update(AGENT.p1_model.most_recent_loss, AGENT.p1_model.smoothed_loss, AGENT.p1_model.scar_detection_threshold)
+                dpg.set_value(self.p1_scar_size, len(AGENT.p1_model.x_batch_as_list))
+                
             if AGENT.learn_p2:
                 self.p2_gradient_plot.update(AGENT.p2_model.network.parameters())
-                dpg.set_value(self.p2_loss_value, AGENT.evaluate_average_loss_and_clear(False))
+                self.p2_loss_plot.update(AGENT.p2_model.most_recent_loss, AGENT.p2_model.smoothed_loss, AGENT.p2_model.scar_detection_threshold)
+                dpg.set_value(self.p2_scar_size, len(AGENT.p2_model.x_batch_as_list))
 
         # Update the action histories even when not performing online learning
         else:
@@ -302,7 +384,7 @@ if __name__ == "__main__":
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=False,
-        vs_player=True,
+        # vs_player=True,
     )
 
     env = FootsiesActionCombinationsDiscretized(
@@ -325,9 +407,11 @@ if __name__ == "__main__":
         hidden_layer_activation_specification="LeakyReLU",
         mini_batch_size=1,
         learning_rate=3e-3,
-        move_transition_scale=100,
+        move_transition_scale=1,
         reinforce_max_loss=0.0,
         reinforce_max_iters=1,
+        scar_detection_threshold=0.1,
+        smoothed_loss_coef=0.8,
     )
 
     # load_agent_model(AGENT, "mimic_linear_frameskip")

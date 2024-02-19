@@ -71,19 +71,21 @@ class PlayerModel:
         # It's bad because it has the potential to stall the opponent model.
         reinforce_max_loss: float = float("+inf"),
         reinforce_max_iters: int = float("+inf"),
-        # Scar: training example that had a very large loss, which we should keep in mind and keep training on in the future.
+        # Scar: training example that had a loss spike, which we should keep in mind and keep training on in the future.
         # Contrary to the previous idea, scarring just executes one training step per update, but does so in a batch including scars.
         # This should come as a replacement for the move transition scale.
         # - `scar_max_size` is the maximum number of scars we keep track of.
         # - `scar_loss_coef` is a coefficient signifying how much importance we give to the prediction loss.
         # - `scar_recency_coef` is a recency metric indicating how much importance we give to the recency of the training example.
         #   The larger the value, the more negatively low recency impacts the importance of the training example.
-        # - `scar_detection_threshold` is the threshold beyond which we detect a training example as being a scar.
-        # An exponentially weighted average of the loss is kept over time
+        # - `scar_detection_threshold` is the multiplicative threshold beyond which we detect a training example as being a scar
+        #   (e.g., 0.5 stands for 50% higher than the average loss)
+        # An exponentially weighted average of the loss is kept over time, for the purpose of detecting scars using the threshold.
         scar_max_size: int = 1000,
         scar_loss_coef: float = 1.0,
         scar_recency_coef: float = 0.0,
-        scar_detection_threshold: float = 0.0,
+        scar_detection_threshold: float = float("+inf"),
+        smoothed_loss_coef: float = 0.0,
     ):
         if obs_mask is None:
             obs_mask = torch.ones((obs_size,), dtype=torch.bool)
@@ -132,10 +134,20 @@ class PlayerModel:
         self.x_batch_as_list = []
         self.y_batch_as_list = []
         self.move_transition_as_list = []
-        self.scars = []
         self.step = 0
-        self.cummulative_loss = 0
-        self.cummulative_loss_n = 0
+        self.cumulative_loss = 0
+        self.cumulative_loss_n = 0
+        
+        # Exponentially averaged loss for scar detection
+        self.smoothed_loss = 0
+        self.smoothed_loss_coef = smoothed_loss_coef
+        self.scar_detection_threshold = scar_detection_threshold
+
+        # For tracking purposes
+        self.most_recent_loss = 0.0
+
+    def _scar_update(self, loss: float):
+        self.smoothed_loss = self.smoothed_loss_coef * self.smoothed_loss + (1 - self.smoothed_loss_coef) * loss
 
     def mask_environment_observation(self, obs: torch.Tensor) -> torch.Tensor:
         return obs[:, self.obs_mask]
@@ -158,13 +170,14 @@ class PlayerModel:
                 self.optimizer.zero_grad()
 
                 predicted = self.network(batch_x)
-                loss = torch.mean(self.loss_function(predicted, batch_y) * move_transition_multiplier)
+                individual_loss = self.loss_function(predicted, batch_y) * move_transition_multiplier
+                loss = torch.mean(individual_loss)
 
                 loss.backward()
                 self.optimizer.step()
 
-                self.cummulative_loss += loss.item()
-                self.cummulative_loss_n += 1
+                self.cumulative_loss += loss.item()
+                self.cumulative_loss_n += 1
 
                 # Check whether learning is dead
                 if all(
@@ -177,10 +190,14 @@ class PlayerModel:
 
                 i += 1
 
-            # TODO: maintain examples that were move transitions, so that we can keep reinforcing them
-            self.x_batch_as_list.clear()
-            self.y_batch_as_list.clear()
-            self.move_transition_as_list.clear()
+            self._scar_update(loss.item())
+            self.most_recent_loss = individual_loss[-1].item()
+
+            # Check which of the current training examples classify as scars
+            is_scar = individual_loss > (1 + self.scar_detection_threshold) * self.smoothed_loss
+            self.x_batch_as_list = [x for x, scar in zip(self.x_batch_as_list, is_scar) if scar]
+            self.y_batch_as_list = [y for y, scar in zip(self.y_batch_as_list, is_scar) if scar]
+            self.move_transition_as_list = [t for t, scar in zip(self.move_transition_as_list, is_scar) if scar]
             self.step = 0
             self.first_obs_of_batch_had_move_transition = None
 
@@ -196,11 +213,11 @@ class PlayerModel:
             if deterministic:
                 return torch.argmax(probs, axis=1)
             else:
-                probs_cummulative = torch.cumsum(probs, 1)
+                probs_cumulative = torch.cumsum(probs, 1)
                 # Contrary to what the docs say, torch.rand can return 1..., so we multiply by 0.99 to compensate for that
-                sampled = torch.rand(probs_cummulative.shape[0], 1) * 0.99
-                # I just want to know the index of the first time sampled < probs_cummulative on each row, but it's convoluted
-                nonzeros = torch.nonzero(sampled <= probs_cummulative)
+                sampled = torch.rand(probs_cumulative.shape[0], 1) * 0.99
+                # I just want to know the index of the first time sampled < probs_cumulative on each row, but it's convoluted
+                nonzeros = torch.nonzero(sampled <= probs_cumulative)
                 # Information across all rows is in a single dimension, so we need to determine the points in which we transition from one row to the next
                 i = torch.squeeze(
                     torch.nonzero((nonzeros[:-1] - nonzeros[1:])[:, 0]) + 1, dim=1
@@ -216,7 +233,7 @@ class PlayerModel:
                     print(" obs:", obs)
                     print(" probs:", probs)
                     print(" sampled:", sampled)
-                    print(" probs_cummulative:", probs_cummulative)
+                    print(" probs_cumulative:", probs_cumulative)
                     raise e
 
     # TODO: if over primitive actions, the model is prone to having great uncertainty (why, past me?)
@@ -273,6 +290,11 @@ class FootsiesAgent(FootsiesAgentBase):
         learning_rate: float = 1e-2,
         reinforce_max_loss: float = float("+inf"),
         reinforce_max_iters: int = float("+inf"),
+        scar_max_size: int = 1000,
+        scar_loss_coef: float = 1.0,
+        scar_recency_coef: float = 0.0,
+        scar_detection_threshold: float = float("+inf"),
+        smoothed_loss_coef: float = 0.0,
         learn_p1: bool = True,
         learn_p2: bool = True,
     ):
@@ -315,6 +337,11 @@ class FootsiesAgent(FootsiesAgentBase):
             "learning_rate": learning_rate,
             "reinforce_max_loss": reinforce_max_loss,
             "reinforce_max_iters": reinforce_max_iters,
+            "scar_max_size": scar_max_size,
+            "scar_loss_coef": scar_loss_coef,
+            "scar_recency_coef": scar_recency_coef,
+            "scar_detection_threshold": scar_detection_threshold,
+            "smoothed_loss_coef": smoothed_loss_coef,
         }
         self.p1_model = PlayerModel(
             **player_model_kwargs,
@@ -439,13 +466,13 @@ class FootsiesAgent(FootsiesAgentBase):
         model = self.p1_model if p1 else self.p2_model
 
         res = (
-            (model.cummulative_loss / model.cummulative_loss_n)
-            if model.cummulative_loss_n != 0
+            (model.cumulative_loss / model.cumulative_loss_n)
+            if model.cumulative_loss_n != 0
             else 0
         )
 
-        model.cummulative_loss = 0
-        model.cummulative_loss_n = 0
+        model.cumulative_loss = 0
+        model.cumulative_loss_n = 0
         return res
 
     def evaluate_performance(self, p1: bool) -> float:
