@@ -119,11 +119,11 @@ def main(
             hidden_layer_sizes=[],
             hidden_layer_activation=nn.Identity,
         ),
-        actor_learning_rate=1e-2,
-        critic_learning_rate=1e-2,
+        actor_learning_rate=1e-4,
+        critic_learning_rate=1e-4,
         actor_eligibility_traces_decay=0.0,
         critic_eligibility_traces_decay=0.0,
-        actor_entropy_loss_coef=0.9,
+        actor_entropy_loss_coef=0.0,
         optimizer=torch.optim.SGD,
     )
 
@@ -181,5 +181,5 @@ def main(
 if __name__ == "__main__":
     main(
         plot=False,
-        self_play=True,
+        self_play=False,
     )

@@ -1,5 +1,7 @@
 import torch
 from typing import Any, Callable
+from collections import namedtuple
+from dataclasses import dataclass, field
 
 
 RPSObservation = tuple | torch.Tensor
@@ -9,6 +11,58 @@ RPSObservation = tuple | torch.Tensor
 #  0: rock
 #  1: paper
 #  2: scissors
+# TODO: test
+# Temporally extended actions
+#  0: .         2 [attack]   ..     5 steps
+#  1: ..          [throw]    ...    6 steps
+#  2:           3 [dodge]    .      4 steps
+#   
+#   attack wins against throw
+#   throw wins against dodge
+#   dodge wins against attack
+
+@dataclass
+class TemporalAction:
+    name:           str
+    startup:        int
+    active:         int
+    recovery:       int
+    wins_against:   set[str] = field(default_factory=set)
+    current_step:   int = 0
+
+    def terminated(self) -> bool:
+        return self.current_step >= self.startup + self.active + self.recovery
+
+    def active(self) -> bool:
+        return self.startup <= self.current_step < self.startup + self.active
+
+    def advance(self):
+        self.current_step += 1
+    
+    @classmethod
+    def resolve(cls, p1: "TemporalAction", p2: "TemporalAction") -> int:
+        if p1.active() and p2.active():
+            if p1.name in p2.wins_against:
+                return 1
+            elif p2.name in p1.wins_against:
+                return -1
+            return 0
+        elif p1.active():
+            return 1
+        elif p2.active():
+            return -1
+        return 0
+
+
+DEFAULT_TEMPORAL_ACTIONS: list[TemporalAction] = [
+    TemporalAction("rock", 1, 1, 4, {"scissors"}),
+    TemporalAction("paper", 2, 1, 3, {"rock"}),
+    TemporalAction("scissors", 4, 2, 1, {"paper"}),
+    TemporalAction("guard", 0, 1, 0, {"rock", "paper", "scissors"}),
+    TemporalAction("break", 0, 1, 3, {"guard", "rock", "paper", "scissors"}),
+]
+
+
 class RPS:
     def __init__(
         self,
@@ -16,19 +70,28 @@ class RPS:
         dense_reward: bool = False,
         health: int = 2, # a health of 2 is equivalent to a best-of-3 match
         flattened: bool = True,
+        use_temporal_actions: bool = False,
         observation_include_play: bool = False,
+        observation_include_move_progress: bool = False,
         observation_transformer: Callable[[RPSObservation], Any] = lambda o: o,
+        temporal_actions: list[TemporalAction] = DEFAULT_TEMPORAL_ACTIONS,
     ):
         self.opponent = opponent
         self.dense_reward = dense_reward
         self.health = health
         self.flattened = flattened
+        self.use_temporal_actions = use_temporal_actions
         self.observation_include_play = observation_include_play
+        self.observation_include_move_progress = observation_include_move_progress
         self.transform_observation = observation_transformer
+        self.temporal_actions = temporal_actions
 
         self.current_observation = 0
         self.p1_health = 0
         self.p2_health = 0
+        # For temporal actions only
+        self.p1_current_temporal_action: TemporalAction = None
+        self.p2_current_temporal_action: TemporalAction = None
 
         self.current_step = 0
         # For calculating dense reward
@@ -114,11 +177,31 @@ class RPS:
 
         return 0.0
 
-    @staticmethod
-    def resolve(p1_action: int, p2_action: int) -> int:
-        offset = 1 - p1_action
-        reward = ((p1_action + offset) % 3) - ((p2_action + offset) % 3)
-        return reward
+    def resolve(self, p1_action: int, p2_action: int) -> int:
+        if self.use_temporal_actions:
+            p1_temporal_action = self.temporal_actions[p1_action]()
+            p2_temporal_action = self.temporal_actions[p2_action]()
+
+            # If we are using temporal actions, then we need to keep track of the performed actions, and ignore those that were made while another was still being performed
+            if self.p1_current_temporal_action is None:
+                self.p1_current_temporal_action = p1_temporal_action
+            if self.p2_current_temporal_action is None:
+                self.p2_current_temporal_action = p2_temporal_action
+            
+            TemporalAction.resolve(self.p1_current_temporal_action, self.p2_current_temporal_action)
+
+            p1_temporal_action.advance()
+            p2_temporal_action.advance()
+
+            if p1_temporal_action.terminated():
+                self.p1_current_temporal_action = None
+            if p2_temporal_action.terminated():
+                self.p2_current_temporal_action = None
+
+        else:
+            offset = 1 - p1_action
+            reward = ((p1_action + offset) % 3) - ((p2_action + offset) % 3)
+            return reward
 
     # NOTE: we decouple 'action' and 'play': 'action' is what the agents do on the environment, the 'play' is the observed result of that action.
     #       This might be useful for introducing complexity in the future
@@ -164,3 +247,25 @@ class RPS:
         if self.flattened:
             return 2 * self.health + 2 * self.play_dim * self.observation_include_play
         return 2 + 2 * self.observation_include_play
+    
+
+class RPSTemporalActionResolver:
+    def __init__(
+        self,
+        temporal_actions: dict[str, TemporalAction] = DEFAULT_TEMPORAL_ACTIONS,
+    ):
+        self.temporal_actions = temporal_actions
+
+        self.current_p1_action = None
+        self.current_p2_action = None
+
+    def p1_action(self, action: int):
+        self.current_p1_action = action
+        return action
+    
+    def p2_action(self, action: int):
+        self.current_p2_action = action
+        return action
+
+    def action_dim(self) -> int:
+        return len(self.temporal_actions)

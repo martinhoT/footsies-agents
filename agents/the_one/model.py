@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from torch_utils import create_layered_network
+from agents.torch_utils import create_layered_network
 
 
 # NOTE: I don't think a recurrent architecture is needed for the FOOTSIES environment, there is no more useful information by considering history
@@ -43,6 +43,8 @@ class RepresentationModule(nn.Module):
 class AbstractGameModel(nn.Module):
     def __init__(
         self,
+        action_dim: int,
+        opponent_action_dim: int,
         representation_dim: int,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.Identity,
@@ -52,13 +54,15 @@ class AbstractGameModel(nn.Module):
 
         Parameters
         ----------
+        - `action_dim`: size of the agent's action space
+        - `opponent_action_dim`: size of the opponent's action space
         - `representation_dim`: size of the hidden representation
         - `hidden_layer_sizes`: list of the sizes of the hidden layers. If None, no hidden layers will be created
         - `hidden_layer_activation`: the activation function that will be used on all hidden layers
         """
         super().__init__()
 
-        self.layers = create_layered_network(representation_dim, representation_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.layers = create_layered_network(action_dim + opponent_action_dim + representation_dim, representation_dim, hidden_layer_sizes, hidden_layer_activation)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.layers(x)

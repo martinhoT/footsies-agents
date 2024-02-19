@@ -12,7 +12,7 @@ class FootsiesAgent(FootsiesAgentBase):
     ):
         ...
 
-    def act(self, obs) -> "any":
+    def act(self, obs, info: dict) -> "any":
         ...
 
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
