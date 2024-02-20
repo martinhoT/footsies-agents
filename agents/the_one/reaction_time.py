@@ -37,9 +37,9 @@ class ReactionTimeEmulator:
         self._inaction_entropy = self.entropy(inaction_distribution)
 
     @staticmethod
-    def entropy(distribution: np.ndarray) -> float:
+    def entropy(distribution: np.ndarray, safety: float = 1e-8) -> float:
         """Get entropy of a probability distribution, measured in bits"""
-        return -np.nansum(distribution * np.log2(distribution))
+        return -np.nansum((distribution + safety) * np.log2(distribution + safety))
     
     @staticmethod
     def bernoulli_distribution(probability: float) -> np.ndarray:
@@ -57,7 +57,7 @@ class ReactionTimeEmulator:
         inaction_distribution = self.bernoulli_distribution(self._inaction_probability)
         self._inaction_entropy = self.entropy(inaction_distribution)
 
-    def confine_to_range(self, minimum: float, maximum: float, agent_n_actions: int):
+    def confine_to_range(self, minimum: int, maximum: int, agent_n_actions: int):
         """
         Define the multiplier and additive parameters to confine the reaction time to a defined range.
         Make sure to apply this operation after other parameters of the emulator, such as the inaction probability, are set

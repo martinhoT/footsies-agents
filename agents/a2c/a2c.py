@@ -5,16 +5,21 @@ from torch.distributions import Categorical
 from agents.torch_utils import create_layered_network
 
 
+# NOTE: it's useful to include the representation module into the actor and critic networks so that the parameters of the representation network can be included in the eligibility traces
+
 class CriticNetwork(nn.Module):
     def __init__(
         self,
         obs_dim: int,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.Identity,
+        representation: nn.Module = None,
     ):
         super().__init__()
 
         self.layers = create_layered_network(obs_dim, 1, hidden_layer_sizes, hidden_layer_activation)
+        if representation is not None:
+            self.layers.insert(0, representation)
 
     def forward(self, x: torch.Tensor):
         return self.layers(x)
@@ -27,15 +32,17 @@ class ActorNetwork(nn.Module):
         action_dim: int,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.Identity,
+        representation: nn.Module = None,
     ):
         super().__init__()
 
         self.layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
-        self.softmax = nn.Softmax(dim=1)
+        self.layers.append(nn.Softmax(dim=1))
+        if representation is not None:
+            self.layers.insert(0, representation)
 
     def forward(self, x: torch.Tensor):
-        y = self.layers(x)
-        return self.softmax(y)
+        return self.layers(x)
 
 
 class A2CModule(nn.Module):
@@ -63,11 +70,11 @@ class A2CModule(nn.Module):
         self.critic = critic
 
         self.actor_traces = [
-            torch.zeros(parameter.shape)
+            torch.zeros_like(parameter)
             for parameter in actor.parameters()
         ]
         self.critic_traces = [
-            torch.zeros(parameter.shape)
+            torch.zeros_like(parameter)
             for parameter in critic.parameters()
         ]
 
@@ -102,13 +109,13 @@ class A2CModule(nn.Module):
         
         return self.action.item()
 
+    # TODO: if this is linear, could I do True Online TD(lambda)?
     def update(self, obs: np.ndarray, next_obs: np.ndarray, reward: float, terminated: bool):
         """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `act()`"""
         obs = self._obs_to_torch(obs)
 
         with torch.no_grad():
             # NOTE: watch out for when the episode ends, since bootstraping is not performed we don't have an equalizer in case the critic's values are exploding, which should translate in large loss/score and thus large gradients
-            # TODO: if this is simplified (a single statement), then does it affect grad?
             if terminated:
                 target = reward
             else:
@@ -119,14 +126,7 @@ class A2CModule(nn.Module):
 
         self.delta = delta
 
-        critic_score = self.critic(obs)
-        critic_score.backward()
-        with torch.no_grad():
-            for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
-                critic_trace.copy_(self.discount * self.critic_eligibility_traces_decay * critic_trace + parameter.grad)
-                parameter.grad.copy_(delta * critic_trace)
-        self.critic_optimizer.step()
-
+        # The actor should be updated first, since it already started training in act()
         actor_score = self.cumulative_discount * self.action_distribution.log_prob(self.action)
         actor_score.backward(retain_graph=True)
         with torch.no_grad():
@@ -136,7 +136,16 @@ class A2CModule(nn.Module):
         # Add the entropy score gradient
         entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
         entropy_score.backward()
+        # TODO: try only optimizing after the critic backwarded
         self.actor_optimizer.step()
+
+        critic_score = self.critic(obs)
+        critic_score.backward()
+        with torch.no_grad():
+            for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
+                critic_trace.copy_(self.discount * self.critic_eligibility_traces_decay * critic_trace + parameter.grad)
+                parameter.grad.copy_(delta * critic_trace)
+        self.critic_optimizer.step()
 
         self.cumulative_discount *= self.discount
 

@@ -3,7 +3,7 @@ from torch import nn
 from agents.torch_utils import create_layered_network
 
 
-# NOTE: I don't think a recurrent architecture is needed for the FOOTSIES environment, there is no more useful information by considering history
+# A recurrent architecture might be needed for the FOOTSIES environment, as there is useful information by considering history (e.g. determining whether a dash/backdash will occur)
 class RepresentationModule(nn.Module):
     def __init__(
         self,
@@ -36,8 +36,8 @@ class RepresentationModule(nn.Module):
 
         self.layers = create_layered_network(obs_dim + action_dim + opponent_action_dim, representation_dim, hidden_layer_sizes, hidden_layer_activation)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.layers(x)
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.layers(obs)
     
 
 class AbstractGameModel(nn.Module):
@@ -45,9 +45,10 @@ class AbstractGameModel(nn.Module):
         self,
         action_dim: int,
         opponent_action_dim: int,
-        representation_dim: int,
+        obs_dim: int,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.Identity,
+        representation: nn.Module = None,
     ):
         """
         Module for predicting the next abstract environment representation from the current representation.
@@ -59,22 +60,29 @@ class AbstractGameModel(nn.Module):
         - `representation_dim`: size of the hidden representation
         - `hidden_layer_sizes`: list of the sizes of the hidden layers. If None, no hidden layers will be created
         - `hidden_layer_activation`: the activation function that will be used on all hidden layers
+        - `representation`: representation module that will be used to convert the input into a hidden representation. If None, no such module is inserted
         """
         super().__init__()
 
-        self.layers = create_layered_network(action_dim + opponent_action_dim + representation_dim, representation_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.layers = create_layered_network(action_dim + opponent_action_dim + obs_dim, obs_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.representation = nn.Identity() if representation is None else representation
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action: torch.Tensor) -> torch.Tensor:
+        obs_representation = self.representation(obs)
+
+        x = torch.hstack((obs_representation, agent_action_onehot, opponent_action))
+
         return self.layers(x)
 
 
 class AbstractOpponentModel(nn.Module):
     def __init__(
         self,
-        representation_dim: int,
+        obs_dim: int,
         opponent_action_dim: int,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.Identity,
+        representation: nn.Module = None,
     ):
         """
         Module for predicting the opponent's action given the current abstract environment representation.
@@ -84,11 +92,14 @@ class AbstractOpponentModel(nn.Module):
         - `representation_dim`: size of the hidden representation
         - `hidden_layer_sizes`: list of the sizes of the hidden layers. If None, no hidden layers will be created
         - `hidden_layer_activation`: the activation function that will be used on all hidden layers
+        - `representation`: representation module that will be used to convert the input into a hidden representation. If None, no such module is inserted
         """
         super().__init__()
 
-        self.layers = create_layered_network(representation_dim, opponent_action_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.layers = create_layered_network(obs_dim, opponent_action_dim, hidden_layer_sizes, hidden_layer_activation)
         self.layers.append(nn.Softmax(dim=1))
+        if representation is not None:
+            self.layers.insert(0, representation)
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.layers(x)
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.layers(obs)
