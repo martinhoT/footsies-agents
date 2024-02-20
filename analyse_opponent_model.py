@@ -274,12 +274,16 @@ class MimicAnalyserManager:
             dpg.add_text("Player 1")
             dpg.add_slider_float(label="Scar detection threshold", default_value=AGENT.p1_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p1_model, "scar_detection_threshold", a))
             dpg.add_slider_float(label="Smoothed loss coef", default_value=AGENT.p1_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p1_model, "smoothed_loss_coef", a))
+            dpg.add_slider_float(label="Move transition scale", default_value=AGENT.p1_model.move_transition_scale, max_value=1000.0, min_value=1.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p1_model, "move_transition_scale", a))
+            dpg.add_slider_float(label="Learning rate", default_value=AGENT.p1_model.optimizer.param_groups[0]["lr"], max_value=1e-2, min_value=1e-6, width=200, enabled=True, callback=lambda s, a: AGENT.p1_model.set_learning_rate(a))
 
             dpg.add_separator()
 
             dpg.add_text("Player 2")
             dpg.add_slider_float(label="Scar detection threshold", default_value=AGENT.p2_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p2_model, "scar_detection_threshold", a))
             dpg.add_slider_float(label="Smoothed loss coef", default_value=AGENT.p2_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p2_model, "smoothed_loss_coef", a))
+            dpg.add_slider_float(label="Move transition scale", default_value=AGENT.p2_model.move_transition_scale, max_value=1000.0, min_value=1.0, width=200, enabled=True, callback=lambda s, a: setattr(AGENT.p2_model, "move_transition_scale", a))
+            dpg.add_slider_float(label="Learning rate", default_value=AGENT.p2_model.optimizer.param_groups[0]["lr"], max_value=1e-2, min_value=1e-6, width=200, enabled=True, callback=lambda s, a: AGENT.p2_model.set_learning_rate(a))
 
         dpg.add_button(label="Open attribute modifier", callback=lambda: dpg.show_item(self.attribute_modifier_window))
 
@@ -367,7 +371,6 @@ class MimicAnalyserManager:
             obs = observation_invert_perspective_flattened(obs)
             
             simple_action = AGENT.p2_model.predict(AGENT.craft_observation(obs, use_p1_model=False, use_p1_action_history=True), deterministic=True).item()
-            print(simple_action)
             self.p2_predicted_action_iterator = iter(ActionMap.simple_to_discrete(simple_action))
             discrete_action = next(self.p2_predicted_action_iterator)
 
@@ -384,7 +387,7 @@ if __name__ == "__main__":
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=False,
-        # vs_player=True,
+        vs_player=True,
     )
 
     env = FootsiesActionCombinationsDiscretized(

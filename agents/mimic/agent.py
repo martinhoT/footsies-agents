@@ -81,6 +81,7 @@ class PlayerModel:
         # - `scar_detection_threshold` is the multiplicative threshold beyond which we detect a training example as being a scar
         #   (e.g., 0.5 stands for 50% higher than the average loss)
         # An exponentially weighted average of the loss is kept over time, for the purpose of detecting scars using the threshold.
+        # TODO: not being used yet
         scar_max_size: int = 1000,
         scar_loss_coef: float = 1.0,
         scar_recency_coef: float = 0.0,
@@ -114,7 +115,7 @@ class PlayerModel:
         else:
             self.loss_function = lambda predicted, target: -torch.sum(torch.log2(predicted) * target, dim=1)
 
-        self.optimizer = torch.optim.SGD(params=self.network.parameters(), lr=learning_rate)
+        self.optimizer = torch.optim.Adam(params=self.network.parameters(), lr=learning_rate)
 
         # Just to make training easier, know which layers actually have learnable parameters
         self.is_learnable_layer = [
@@ -267,6 +268,9 @@ class PlayerModel:
 
     def save(self, path: str):
         torch.save(self.network.state_dict(), path)
+
+    def set_learning_rate(self, learning_rate: float):
+        self.optimizer.param_groups[0]["lr"] = learning_rate
 
 
 # TODO: there are three different ways we can predict actions: primitive actions discretized, primitive actions as tuple, and moves. Are all supported?

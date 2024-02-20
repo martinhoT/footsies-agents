@@ -226,6 +226,8 @@ if __name__ == "__main__":
             log_dir=args.misc.log_dir,
             step_start_value=args.misc.log_step_start,
             cummulative_reward=True,
+            average_reward=True,
+            average_reward_coef=0.99,
             win_rate=True,
             truncation=True,
             episode_length=True,

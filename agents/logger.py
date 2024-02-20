@@ -14,7 +14,9 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         agent: FootsiesAgentBase,
         log_frequency: int,
         log_dir: str = None,
-        cummulative_reward: bool = False,
+        cumulative_reward: bool = False,
+        average_reward: bool = False,
+        average_reward_coef: float = 0.99,
         win_rate: bool = False,
         truncation: bool = False,
         episode_length: bool = False,
@@ -38,8 +40,12 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         log_dir: str
             to which directory will logs be written
 
-        cummulative_reward: bool
+        cumulative_reward: bool
             the total accumulated reward since training started
+        average_reward: bool
+            the exponentially weighted average of the reward
+        average_reward_coef: float
+            the coefficient of the exponentially weighted average of the reward
         win_rate: bool
             the agent's win rate. Only makes sense for the FOOTSIES environment
         truncation: bool
@@ -62,10 +68,12 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         """
         self.agent = agent
         self.log_frequency = log_frequency
-        self.cummulative_reward = cummulative_reward
-        self.win_rate = win_rate
-        self.truncation = truncation
-        self.episode_length = episode_length
+        self.cumulative_reward_enabled = cumulative_reward
+        self.average_reward_enabled = average_reward
+        self.average_reward_coef = average_reward_coef
+        self.win_rate_enabled = win_rate
+        self.truncation_enabled = truncation
+        self.episode_length_enabled = episode_length
         self.network_histograms = (
             [] if network_histograms is None else network_histograms
         )
@@ -81,7 +89,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.test_states_number = test_states_number
 
         self.summary_writer = SummaryWriter(log_dir=log_dir)
-        self.cummulative_reward = 0
+        self.cumulative_reward = 0
+        self.average_reward = 0 # exponentially weighted average
         self.total_wins = 0
         self.total_truncated_episodes = 0
         self.total_terminated_episodes = 0
@@ -96,7 +105,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
         self.agent.update(next_obs, reward, terminated, truncated, info)
 
-        self.cummulative_reward += reward
+        self.cumulative_reward += reward
+        self.average_reward = self.average_reward_coef * self.average_reward + (1 - self.average_reward_coef) * reward
         self.current_step += 1
         self.current_episode_length += 1
 
@@ -115,25 +125,31 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
         # Write logs
         if self.current_step % self.log_frequency == 0:
-            if self.cummulative_reward:
+            if self.cumulative_reward_enabled:
                 self.summary_writer.add_scalar(
-                    "Performance/Cummulative reward",
-                    self.cummulative_reward,
+                    "Performance/Cumulative reward",
+                    self.cumulative_reward,
                     self.current_step,
                 )
-            if self.win_rate:
+            if self.average_reward_enabled:
+                self.summary_writer.add_scalar(
+                    "Performance/Average reward",
+                    self.average_reward,
+                    self.current_step,
+                )
+            if self.win_rate_enabled:
                 self.summary_writer.add_scalar(
                     "Performance/Win rate",
                     self.total_wins / self.total_terminated_episodes,
                     self.current_step,
                 )
-            if self.truncation:
+            if self.truncation_enabled:
                 self.summary_writer.add_scalar(
                     "Training/Truncated episodes",
                     self.total_truncated_episodes,
                     self.current_step,
                 )
-            if self.episode_length:
+            if self.episode_length_enabled:
                 self.summary_writer.add_scalar(
                     "Training/Episode length",
                     sum(self.episode_lengths) / len(self.episode_lengths),
