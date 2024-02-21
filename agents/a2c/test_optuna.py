@@ -11,6 +11,7 @@ from gymnasium import ObservationWrapper
 from gymnasium.spaces import Box
 from tqdm import tqdm
 from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
+from agents.a2c.icm import IntrinsicCuriosityModule, AbstractEnvironmentEncoder, InverseEnvironmentModel, ForwardEnvironmentModel
 from agents.tile import TileCoding, Tiling
 from itertools import combinations, count
 from enum import Enum
@@ -83,7 +84,7 @@ class CartPolePairs(ObservationWrapper):
         return 1.0 * self.coding.transform(observation)
 
 
-ENVIRONMENT = "LunarLander-v2"
+ENVIRONMENT = "MountainCar-v0"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -119,24 +120,51 @@ obs_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
 def define_model(trial: optuna.Trial) -> A2CModule:
+    encoded_dim = trial.suggest_int("encoded_dim", 4, 32)
+
+    icm_encoder = AbstractEnvironmentEncoder(
+        obs_dim=obs_dim,
+        encoded_dim=encoded_dim,
+        hidden_layer_sizes=[2**trial.suggest_int("encoder_hidden_layer_size", 1, 5)],
+        hidden_layer_activation=nn.ReLU,
+    )
+
     return A2CModule(
         actor=ActorNetwork(
             obs_dim=obs_dim,
             action_dim=action_dim,
-            hidden_layer_sizes=[2**trial.suggest_int("actor_neurons", 4, 8)],
+            hidden_layer_sizes=[4],
             hidden_layer_activation=nn.ReLU,
         ),
         critic=CriticNetwork(
             obs_dim=obs_dim,
-            hidden_layer_sizes=[2**trial.suggest_int("critic_neurons", 4, 8)],
+            hidden_layer_sizes=[4],
             hidden_layer_activation=nn.ReLU,
         ),
-        discount=trial.suggest_float("discount", 0.0, 1.0),
+        discount=0.99,
         actor_learning_rate=trial.suggest_float("actor_lr", 1e-5, 5e-1),
         critic_learning_rate=trial.suggest_float("critic_lr", 1e-5, 5e-1),
-        actor_eligibility_traces_decay=trial.suggest_float("actor_et", 0.0, 1.0),
-        critic_eligibility_traces_decay=trial.suggest_float("critic_et", 0.0, 1.0),
-        optimizer=torch.optim.Adam
+        actor_eligibility_traces_decay=0.8,
+        critic_eligibility_traces_decay=0.8,
+        optimizer=torch.optim.Adam,
+            curiosity=IntrinsicCuriosityModule(
+            encoder=icm_encoder,
+            inverse_model=InverseEnvironmentModel(
+                encoded_dim=encoded_dim,
+                action_dim=action_dim,
+                encoder=icm_encoder,
+                hidden_layer_sizes=[2**trial.suggest_int("inverse_model_hidden_layer_size", 1, 5)],
+                hidden_layer_activation=nn.ReLU,
+            ),
+            forward_model=ForwardEnvironmentModel(
+                encoded_dim=encoded_dim,
+                action_dim=action_dim,
+                encoder=icm_encoder,
+                hidden_layer_sizes=[2**trial.suggest_int("forward_model_hidden_layer_size", 1, 5)],
+                hidden_layer_activation=nn.ReLU,
+            ),
+            reward_scale=1e4,
+        ),
     )
 
 def optimize(trial: optuna.Trial, n_episodes: int = 1000) -> float:
@@ -154,17 +182,18 @@ def optimize(trial: optuna.Trial, n_episodes: int = 1000) -> float:
             model.update(obs, next_obs, reward, terminated)
             
             obs = next_obs
-            total_score += reward
+            # Use intrinsic reward as well, or else it's too sparse for Optuna I'd guess
+            total_score += reward + model.intrinsic_reward
 
     return total_score / n_episodes
 
 
 if __name__ == "__main__":
     study = optuna.create_study(
-        storage="sqlite:///a2c_lunar_lander.db",
+        storage="sqlite:///a2c_icm_mountain_car.db",
         sampler=None,
         pruner=None,
-        study_name="lunar_lander",
+        study_name="icm_mountain_car",
         direction="maximize",
         load_if_exists=True,
     )

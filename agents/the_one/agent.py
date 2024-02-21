@@ -170,11 +170,11 @@ class FootsiesAgent(FootsiesAgentBase):
 
         The final step is computed as `mtx @ obs + bias`
         """
-        if len(self.game_model.layers) > 1:
+        if len(self.game_model.game_model_layers) > 1:
             raise ValueError("the game model must be linear to use this method")
-        if len(self.opponent_model.layers) > 1:
+        if len(self.opponent_model.opponent_model_layers) > 1:
             raise ValueError("the opponent model must be linear to use this method")
-        if len(self.actor_critic.actor.layers) > 1:
+        if len(self.actor_critic.actor.actor_layers) > 1:
             raise ValueError("the actor must be linear to use this method")
 
         obs_dim = self.representation_dim
@@ -192,15 +192,15 @@ class FootsiesAgent(FootsiesAgentBase):
 
         # Game model, opponent model and agent policy parameters.
         # Make the bias vectors column vectors to make sure operations are done correctly.
-        game_model_parameters = dict(self.game_model.layers[0].named_parameters())
+        game_model_parameters = dict(self.game_model.game_model_layers[0].named_parameters())
         W_g = game_model_parameters["weight"].data
         b_g = game_model_parameters["bias"].data.unsqueeze(1)
         
-        opponent_model_parameters = dict(self.opponent_model.layers[0].named_parameters())
+        opponent_model_parameters = dict(self.opponent_model.opponent_model_layers[0].named_parameters())
         W_o = opponent_model_parameters["weight"].data
         b_o = opponent_model_parameters["bias"].data.unsqueeze(1)
         
-        policy_parameters = dict(self.actor_critic.actor.layers[0].named_parameters())
+        policy_parameters = dict(self.actor_critic.actor.actor_layers[0].named_parameters())
         W_a = policy_parameters["weight"].data
         b_a = policy_parameters["bias"].data.unsqueeze(1)
         

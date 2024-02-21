@@ -34,10 +34,10 @@ class RepresentationModule(nn.Module):
         if recurrent:
             raise ValueError("a recurrent architecture is not supported")
 
-        self.layers = create_layered_network(obs_dim + action_dim + opponent_action_dim, representation_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.representation_layers = create_layered_network(obs_dim + action_dim + opponent_action_dim, representation_dim, hidden_layer_sizes, hidden_layer_activation)
     
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.layers(obs)
+        return self.representation_layers(obs)
     
 
 class AbstractGameModel(nn.Module):
@@ -64,7 +64,7 @@ class AbstractGameModel(nn.Module):
         """
         super().__init__()
 
-        self.layers = create_layered_network(action_dim + opponent_action_dim + obs_dim, obs_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.game_model_layers = create_layered_network(action_dim + opponent_action_dim + obs_dim, obs_dim, hidden_layer_sizes, hidden_layer_activation)
         self.representation = nn.Identity() if representation is None else representation
     
     def forward(self, obs: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action_onehot: torch.Tensor) -> torch.Tensor:
@@ -72,12 +72,12 @@ class AbstractGameModel(nn.Module):
 
         x = torch.hstack((obs_representation, agent_action_onehot, opponent_action_onehot))
 
-        return self.layers(x)
+        return self.game_model_layers(x)
 
     def from_representation(self, rep: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action_onehot: torch.Tensor) -> torch.Tensor:
         x = torch.hstack((rep, agent_action_onehot, opponent_action_onehot))
         
-        return self.layers(x)
+        return self.game_model_layers(x)
 
 
 class AbstractOpponentModel(nn.Module):
@@ -101,13 +101,13 @@ class AbstractOpponentModel(nn.Module):
         """
         super().__init__()
 
-        self.layers = create_layered_network(obs_dim, opponent_action_dim, hidden_layer_sizes, hidden_layer_activation)
-        self.layers.append(nn.Softmax(dim=1))
+        self.opponent_model_layers = create_layered_network(obs_dim, opponent_action_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.opponent_model_layers.append(nn.Softmax(dim=1))
         self.representation = nn.Identity() if representation is None else representation
     
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         rep = self.representation(obs)
-        return self.layers(rep)
+        return self.opponent_model_layers(rep)
 
     def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
-        return self.layers(rep)
+        return self.opponent_model_layers(rep)

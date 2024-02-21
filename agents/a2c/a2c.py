@@ -3,6 +3,7 @@ import numpy as np
 from torch import nn
 from torch.distributions import Categorical
 from agents.torch_utils import create_layered_network
+from agents.a2c.icm import IntrinsicCuriosityModule, IntrinsicCuriosityTrainer
 
 
 # NOTE: it's useful to include the representation module into the actor and critic networks so that the parameters of the representation network can be included in the eligibility traces
@@ -17,16 +18,16 @@ class CriticNetwork(nn.Module):
     ):
         super().__init__()
 
-        self.layers = create_layered_network(obs_dim, 1, hidden_layer_sizes, hidden_layer_activation)
+        self.critic_layers = create_layered_network(obs_dim, 1, hidden_layer_sizes, hidden_layer_activation)
         self.representation = nn.Identity() if representation is None else representation
 
     def forward(self, obs: torch.Tensor):
         rep = self.representation(obs)
 
-        return self.layers(rep)
+        return self.critic_layers(rep)
 
     def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
-        return self.layers(rep)
+        return self.critic_layers(rep)
 
 
 class ActorNetwork(nn.Module):
@@ -40,32 +41,33 @@ class ActorNetwork(nn.Module):
     ):
         super().__init__()
 
-        self.layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
-        self.layers.append(nn.Softmax(dim=1))
+        self.actor_layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
+        self.actor_layers.append(nn.Softmax(dim=1))
         self.representation = nn.Identity() if representation is None else representation
 
     def forward(self, obs: torch.Tensor):
         rep = self.representation(obs)
 
-        return self.layers(rep)
+        return self.actor_layers(rep)
     
     def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
-        return self.layers(rep)
+        return self.actor_layers(rep)
 
 
 class A2CModule(nn.Module):
-    """Training module implementing the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
+    """Training class implementing the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
     def __init__(
         self,
-        actor: nn.Module,
-        critic: nn.Module,
+        actor: ActorNetwork,
+        critic: CriticNetwork,
         discount: float = 1.0,
         actor_learning_rate: float = 1e-2,
         critic_learning_rate: float = 1e-2,
         actor_eligibility_traces_decay: float = 0.0,
         critic_eligibility_traces_decay: float = 0.0,
         actor_entropy_loss_coef: float = 0.0,
-        optimizer: torch.optim.Optimizer = torch.optim.SGD,
+        optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        curiosity: IntrinsicCuriosityModule = None,
     ):
         super().__init__()
 
@@ -73,6 +75,8 @@ class A2CModule(nn.Module):
         self.actor_eligibility_traces_decay = actor_eligibility_traces_decay
         self.critic_eligibility_traces_decay = critic_eligibility_traces_decay
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
+        self.curiosity = curiosity
+        self.curiosity_trainer = None if curiosity is None else IntrinsicCuriosityTrainer(curiosity)
 
         self.actor = actor
         self.critic = critic
@@ -98,6 +102,7 @@ class A2CModule(nn.Module):
         
         # Track values
         self.delta = 0.0
+        self.intrinsic_reward = 0.0
 
     def _obs_to_torch(self, obs: np.ndarray) -> torch.Tensor:
         if not isinstance(obs, torch.Tensor):
@@ -122,13 +127,26 @@ class A2CModule(nn.Module):
         """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `act()`"""
         obs = self._obs_to_torch(obs)
 
+        # If curiosity is used, then update it first
+        if self.curiosity is not None:
+            next_obs = self._obs_to_torch(next_obs)
+            self.curiosity_trainer.train(obs, self.action.detach(), next_obs)
+
+        # Compute the TD delta
         with torch.no_grad():
+            # Compute the intrinsic reward first
+            intrinsic_reward = 0.0
+            if self.curiosity is not None:
+                next_obs = self._obs_to_torch(next_obs)
+                intrinsic_reward = self.curiosity.intrinsic_reward(obs, self.action.detach(), next_obs)
+                self.intrinsic_reward = intrinsic_reward
+            
             # NOTE: watch out for when the episode ends, since bootstraping is not performed we don't have an equalizer in case the critic's values are exploding, which should translate in large loss/score and thus large gradients
             if terminated:
-                target = reward
+                target = reward + intrinsic_reward
             else:
                 next_obs = self._obs_to_torch(next_obs)
-                target = reward + self.discount * self.critic(next_obs)
+                target = reward + intrinsic_reward + self.discount * self.critic(next_obs)
             
             delta = (target - self.critic(obs)).item()
 
@@ -172,7 +190,7 @@ class A2CModule(nn.Module):
         with torch.no_grad():
             return self.actor(obs)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        policy = self.actor(x)
-        value = self.critic(x)
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        policy = self.actor(obs)
+        value = self.critic(obs)
         return policy, value
