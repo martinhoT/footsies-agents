@@ -18,11 +18,15 @@ class CriticNetwork(nn.Module):
         super().__init__()
 
         self.layers = create_layered_network(obs_dim, 1, hidden_layer_sizes, hidden_layer_activation)
-        if representation is not None:
-            self.layers.insert(0, representation)
+        self.representation = nn.Identity() if representation is None else representation
 
-    def forward(self, x: torch.Tensor):
-        return self.layers(x)
+    def forward(self, obs: torch.Tensor):
+        rep = self.representation(obs)
+
+        return self.layers(rep)
+
+    def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
+        return self.layers(rep)
 
 
 class ActorNetwork(nn.Module):
@@ -38,11 +42,15 @@ class ActorNetwork(nn.Module):
 
         self.layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
         self.layers.append(nn.Softmax(dim=1))
-        if representation is not None:
-            self.layers.insert(0, representation)
+        self.representation = nn.Identity() if representation is None else representation
 
-    def forward(self, x: torch.Tensor):
-        return self.layers(x)
+    def forward(self, obs: torch.Tensor):
+        rep = self.representation(obs)
+
+        return self.layers(rep)
+    
+    def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
+        return self.layers(rep)
 
 
 class A2CModule(nn.Module):

@@ -10,7 +10,7 @@ def create_layered_network(
     hidden_layer_activation: nn.Module,
 ):
     if hidden_layer_sizes is None:
-            hidden_layer_sizes = [64, 64]
+        hidden_layer_sizes = []
 
     if len(hidden_layer_sizes) == 0:
         layers = nn.Sequential(nn.Linear(input_dim, output_dim))

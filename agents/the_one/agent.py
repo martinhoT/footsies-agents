@@ -154,7 +154,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.cumulative_loss_opponent_model = 0
         self.cumulative_loss_opponent_model_n = 0
 
-    def env_concat(self, n: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def env_concat(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Obtain the concatenated weights that calculate the next environment observation `n` steps into the future.
         Only works if the game model, opponent model and agent policy are linear.
@@ -165,64 +165,56 @@ class FootsiesAgent(FootsiesAgentBase):
 
         Returns
         -------
-        - `s_mtx`: the matrix to multiply with the observation `s`
-        - `a_mtx`: the matrix to multiply with the agent action `a`
-        - `o_mtx`: the matrix to multiply with the opponent action `o`
-        - `bias`: the bias
+        - `mtx`: the weight matrix to multiply with the observation `obs` (or the representation if one is used)
+        - `bias`: the bias to add
 
-        The final step is computed as `s_mtx @ s + a_mtx @ a + o_mtx @ o + bias`
+        The final step is computed as `mtx @ obs + bias`
         """
+        if len(self.game_model.layers) > 1:
+            raise ValueError("the game model must be linear to use this method")
+        if len(self.opponent_model.layers) > 1:
+            raise ValueError("the opponent model must be linear to use this method")
+        if len(self.actor_critic.actor.layers) > 1:
+            raise ValueError("the actor must be linear to use this method")
+
+        obs_dim = self.representation_dim
+        action_dim = self.action_dim
+        opponent_action_dim = self.opponent_action_dim
+
         # Matrices for implementing the concatenation of input vectors
-        C_s = np.zeros((self.obs_dim + self.action_dim + self.opponent_action_dim, self.obs_dim))
-        C_a = np.zeros((self.obs_dim + self.action_dim + self.opponent_action_dim, self.action_dim))
-        C_o = np.zeros((self.obs_dim + self.action_dim + self.opponent_action_dim, self.opponent_action_dim))
+        C_s = torch.zeros((obs_dim + action_dim + opponent_action_dim, obs_dim), dtype=torch.float32)
+        C_a = torch.zeros((obs_dim + action_dim + opponent_action_dim, action_dim), dtype=torch.float32)
+        C_o = torch.zeros((obs_dim + action_dim + opponent_action_dim, opponent_action_dim), dtype=torch.float32)
 
-        C_s[:self.obs_dim, :] = np.eye(self.obs_dim)
-        C_a[self.obs_dim:self.action_dim, :] = np.eye(self.action_dim)
-        C_o[:self.obs_dim + self.action_dim:self.opponent_action_dim, :] = np.eye(self.opponent_action_dim)
+        C_s[:obs_dim, :] = torch.eye(obs_dim)
+        C_a[obs_dim:(obs_dim + action_dim), :] = torch.eye(action_dim)
+        C_o[(obs_dim + action_dim):(obs_dim + action_dim + opponent_action_dim), :] = torch.eye(opponent_action_dim)
 
-        # Game model, opponent model and agent policy parameters
-        game_model_parameters = dict.fromkeys(self.game_model.named_parameters())
-        W_g = game_model_parameters["weight"]
-        b_g = game_model_parameters["bias"]
+        # Game model, opponent model and agent policy parameters.
+        # Make the bias vectors column vectors to make sure operations are done correctly.
+        game_model_parameters = dict(self.game_model.layers[0].named_parameters())
+        W_g = game_model_parameters["weight"].data
+        b_g = game_model_parameters["bias"].data.unsqueeze(1)
         
-        opponent_model_parameters = dict.fromkeys(self.opponent_model.named_parameters())
-        W_o = opponent_model_parameters["weight"]
-        b_o = opponent_model_parameters["bias"]
+        opponent_model_parameters = dict(self.opponent_model.layers[0].named_parameters())
+        W_o = opponent_model_parameters["weight"].data
+        b_o = opponent_model_parameters["bias"].data.unsqueeze(1)
         
-        policy_parameters = dict.fromkeys(self.actor_critic.actor.named_parameters())
-        W_a = policy_parameters["weight"]
-        b_a = policy_parameters["bias"]
-
-        # NOTE: may be wrong, haven't thoroughly checked because I'm tired
-        """
-        s_n = ((W_g @ C_s) ^ n + (W_g @ C_a) ^ (n - 1) @ W_a + (W_g @ C_o) ^ (n - 1) @ W_o) @ s_0 
-            + (W_g @ C_s) ^ (n - 1) @ W_g @ C_a @ a_0
-            + (W_g @ C_s) ^ (n - 1) @ W_g @ C_o @ o_0
-            + (W_g @ C_s) ^ (n - 1) @ b_g
-            + (W_g @ C_a) ^ (n - 1) @ b_a
-            + (W_g @ C_o) ^ (n - 1) @ b_o
-            + b_g
-        """ 
+        policy_parameters = dict(self.actor_critic.actor.layers[0].named_parameters())
+        W_a = policy_parameters["weight"].data
+        b_a = policy_parameters["bias"].data.unsqueeze(1)
         
-        s_mtx = (
-            + np.linalg.matrix_power(W_g @ C_s, n)
-            + np.linalg.matrix_power(W_g @ C_a, n - 1) @ W_a
-            + np.linalg.matrix_power(W_g @ C_o, n - 1) @ W_o
-        )
+        X = W_g @ C_s + W_g @ C_a @ W_a + W_g @ C_o @ W_o
 
-        a_mtx = np.linalg.matrix_power(W_g @ C_s, n - 1) @ W_g @ C_a
-
-        o_mtx = np.linalg.matrix_power(W_g @ C_s, n - 1) @ W_g @ C_o
+        mtx = torch.linalg.matrix_power(X, n)
 
         bias = (
-            + np.linalg.matrix_power(W_g @ C_s, n - 1) @ b_g
-            + np.linalg.matrix_power(W_g @ C_a, n - 1) @ b_a
-            + np.linalg.matrix_power(W_g @ C_o, n - 1) @ b_o
-            + b_g
+              sum(torch.linalg.matrix_power(X, i) for i in range(n)) @ W_g @ C_a @ b_a
+            + sum(torch.linalg.matrix_power(X, i) for i in range(n)) @ W_g @ C_o @ b_o
+            + sum(torch.linalg.matrix_power(X, i) for i in range(n)) @ b_g
         )
 
-        return s_mtx, a_mtx, o_mtx, bias
+        return mtx, bias
 
     # It's in this function that the current observation and representation variables are updated
     def act(self, obs: np.ndarray, info: dict) -> int:
@@ -319,7 +311,6 @@ class FootsiesAgent(FootsiesAgentBase):
             self.cumulative_delta += self.actor_critic.delta
             self.cumulative_delta_n += 1
 
-    # TODO: does this load the same representation module into the different models? If not, then we can't continue training from an imported model
     def load(self, folder_path: str):
         representation_module_path = path.join(folder_path, "representation")
         game_model_path = path.join(folder_path, "game_model")

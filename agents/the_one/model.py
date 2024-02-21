@@ -57,7 +57,7 @@ class AbstractGameModel(nn.Module):
         ----------
         - `action_dim`: size of the agent's action space
         - `opponent_action_dim`: size of the opponent's action space
-        - `representation_dim`: size of the hidden representation
+        - `obs_dim`: size of the observation, or the hidden representation if one is used
         - `hidden_layer_sizes`: list of the sizes of the hidden layers. If None, no hidden layers will be created
         - `hidden_layer_activation`: the activation function that will be used on all hidden layers
         - `representation`: representation module that will be used to convert the input into a hidden representation. If None, no such module is inserted
@@ -67,11 +67,16 @@ class AbstractGameModel(nn.Module):
         self.layers = create_layered_network(action_dim + opponent_action_dim + obs_dim, obs_dim, hidden_layer_sizes, hidden_layer_activation)
         self.representation = nn.Identity() if representation is None else representation
     
-    def forward(self, obs: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action_onehot: torch.Tensor) -> torch.Tensor:
         obs_representation = self.representation(obs)
 
-        x = torch.hstack((obs_representation, agent_action_onehot, opponent_action))
+        x = torch.hstack((obs_representation, agent_action_onehot, opponent_action_onehot))
 
+        return self.layers(x)
+
+    def from_representation(self, rep: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action_onehot: torch.Tensor) -> torch.Tensor:
+        x = torch.hstack((rep, agent_action_onehot, opponent_action_onehot))
+        
         return self.layers(x)
 
 
@@ -89,7 +94,7 @@ class AbstractOpponentModel(nn.Module):
 
         Parameters
         ----------
-        - `representation_dim`: size of the hidden representation
+        - `obs_dim`: size of the observation, or the hidden representation if one is used
         - `hidden_layer_sizes`: list of the sizes of the hidden layers. If None, no hidden layers will be created
         - `hidden_layer_activation`: the activation function that will be used on all hidden layers
         - `representation`: representation module that will be used to convert the input into a hidden representation. If None, no such module is inserted
@@ -98,8 +103,11 @@ class AbstractOpponentModel(nn.Module):
 
         self.layers = create_layered_network(obs_dim, opponent_action_dim, hidden_layer_sizes, hidden_layer_activation)
         self.layers.append(nn.Softmax(dim=1))
-        if representation is not None:
-            self.layers.insert(0, representation)
+        self.representation = nn.Identity() if representation is None else representation
     
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.layers(obs)
+        rep = self.representation(obs)
+        return self.layers(rep)
+
+    def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
+        return self.layers(rep)
