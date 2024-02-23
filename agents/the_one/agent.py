@@ -1,7 +1,9 @@
 import numpy as np
 import torch
 from torch import nn
+from torch.distributions import Categorical
 from os import path
+from copy import deepcopy
 from agents.action import ActionMap
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
@@ -334,8 +336,17 @@ class FootsiesAgent(FootsiesAgentTorch):
         torch.save(self.game_model.state_dict(), game_model_path)
         torch.save(self.actor_critic.state_dict(), actor_critic_path)
 
+    # NOTE: literally extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        raise NotImplementedError("policy extraction is not yet supported")
+        model = deepcopy(self.actor_critic)
+
+        def internal_policy(obs):
+            obs = torch.from_numpy(obs).float().unsqueeze(0)
+            probs = model(obs)
+
+            return Categorical(probs=probs).sample().item()
+
+        return super()._extract_policy(env, internal_policy)
 
     @property
     def model(self) -> nn.Module:

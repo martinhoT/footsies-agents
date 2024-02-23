@@ -132,6 +132,8 @@ def hogwild(
                 game_port=ports[0],
                 opponent_port=ports[1],
                 remote_control_port=ports[2],
+                log_file="out.log" if rank == 0 else None,
+                log_file_overwrite=True,
             )
         
         else:

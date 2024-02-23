@@ -143,7 +143,8 @@ def train(
 
             # Set a new opponent from the opponent pool
             if self_play_manager is not None:
-                if self_play_manager.update_at_episode():
+                should_change = self_play_manager.update_at_episode()
+                if should_change:
                     env.unwrapped.set_opponent(self_play_manager.current_opponent)
             
             episode_finished_callback(episode)
@@ -151,8 +152,8 @@ def train(
     except KeyboardInterrupt:
         print("Training manually interrupted")
 
-    except FootsiesGameClosedError:
-        print("Game closed manually, quitting training")
+    except FootsiesGameClosedError as e:
+        print(f"Quitting training since game closed: '{e}'")
 
     except Exception as e:
         print(
@@ -163,16 +164,18 @@ def train(
         print_exception(e)
 
 
-def create_env(args: EnvArgs) -> Env:
+def create_env(args: EnvArgs, print_: bool = False) -> Env:
     if args.is_footsies:
         env = FootsiesEnv(**args.kwargs)
 
         if args.footsies_wrapper_norm:
-            print(" Adding FootsiesNormalized wrapper")
+            if print_:
+                print(" Adding FootsiesNormalized wrapper")
             env = FootsiesNormalized(env)
 
         if args.footsies_wrapper_fs:
-            print(" Adding FootsiesFrameSkipped wrapper")
+            if print_:
+                print(" Adding FootsiesFrameSkipped wrapper")
             env = FootsiesFrameSkipped(env)
 
         if args.wrapper_time_limit > 0:
@@ -181,7 +184,8 @@ def create_env(args: EnvArgs) -> Env:
         env = FlattenObservation(env)
 
         if args.footsies_wrapper_acd:
-            print(" Adding FootsiesActionCombinationsDiscretized wrapper")
+            if print_:
+                print(" Adding FootsiesActionCombinationsDiscretized wrapper")
             env = FootsiesActionCombinationsDiscretized(env)
     
     else:
@@ -196,7 +200,7 @@ if __name__ == "__main__":
     # Prepare environment
 
     print(f"Initializing {'FOOTSIES' if args.env.is_footsies else ('environment' + args.env.name)}")
-    env = create_env(args.env)
+    env = create_env(args.env, print_=True)
 
     print(" Environment arguments:")
     for k, v in args.env.kwargs.items():
@@ -291,6 +295,8 @@ if __name__ == "__main__":
         }
 
         if args.misc.hogwild:
+            if args.episodes is None:
+                raise NotImplementedError("indefinite training using Hogwild! is not supported (KeyboardInterrupt signal not handled by the main process), please set a fixed number of episodes for each worker to perform")
             if not isinstance(agent, FootsiesAgentTorch):
                 raise ValueError("Hogwild! is only supported for PyTorch-based agents")
             
