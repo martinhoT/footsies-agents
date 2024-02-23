@@ -10,7 +10,7 @@ from gymnasium import ObservationWrapper
 from gymnasium.spaces import Box
 from tqdm import tqdm
 from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
-from agents.a2c.icm import IntrinsicCuriosityModule, AbstractEnvironmentEncoder, InverseEnvironmentModel, ForwardEnvironmentModel
+from agents.a2c.icm import IntrinsicCuriosityModule, AbstractEnvironmentEncoder, InverseEnvironmentModel, ForwardEnvironmentModel, NoveltyTable
 from agents.tile import TileCoding, Tiling
 from itertools import combinations, count
 from enum import Enum
@@ -22,7 +22,12 @@ class CartPoleAttribute(Enum):
     POLE_ANGULAR_VELOCITY = 3
 
 
-class CartPolePairs(ObservationWrapper):
+class MountainCarAttribute(Enum):
+    POSITION = 0
+    VELOCITY = 1
+
+
+class CartPoleCoding(ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
 
@@ -83,6 +88,37 @@ class CartPolePairs(ObservationWrapper):
         return 1.0 * self.coding.transform(observation)
 
 
+class MountainCarCoding(ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+        single_tilings = [
+            Tiling({
+                MountainCarAttribute.POSITION: np.linspace(-1.2, 0.6, 20)
+            }),
+            Tiling({
+                MountainCarAttribute.VELOCITY: np.linspace(-0.07, 0.07, 20)
+            }),
+        ]
+
+        self.coding = TileCoding([
+            *single_tilings,
+            *(t + 0.05 for t in single_tilings),
+            *(t - 0.05 for t in single_tilings),
+            Tiling({
+                MountainCarAttribute.POSITION: np.linspace(-1.2, 0.6, 20),
+                MountainCarAttribute.VELOCITY: np.linspace(-0.07, 0.07, 20),
+            })
+        ])
+
+        self.observation_space = Box(low=0.0, high=1.0, shape=(self.coding.size,))
+
+        print("Using coding with size ", self.coding.size)
+
+    def observation(self, observation: np.ndarray) -> torch.Tensor:
+        return 1.0 * self.coding.transform(observation)
+
+
 """Good sets of parameters
 FrozenLake:
     Actor LR: 1.0e-1
@@ -121,7 +157,8 @@ else:
     kwargs = {}
 
 env_generator = lambda e: (
-    # CartPolePairs(
+    # MountainCarCoding(
+    # CartPoleCoding(
         FlattenObservation(
             e
         )
@@ -141,7 +178,7 @@ action_dim = env.action_space.n
 
 icm_encoder = AbstractEnvironmentEncoder(
     obs_dim=obs_dim,
-    encoded_dim=8,
+    encoded_dim=12,
     hidden_layer_sizes=[32],
     hidden_layer_activation=nn.ReLU,
 )
@@ -157,31 +194,53 @@ model = A2CModule(
         hidden_layer_sizes=[],
         hidden_layer_activation=nn.ReLU,
     ),
-    discount=0.99,
-    actor_learning_rate=1e-1,
-    critic_learning_rate=1e-1,
-    actor_eligibility_traces_decay=0.8,
-    critic_eligibility_traces_decay=0.8,
-    optimizer=torch.optim.Adam,
-    curiosity=IntrinsicCuriosityModule(
-        encoder=icm_encoder,
-        inverse_model=InverseEnvironmentModel(
-            encoded_dim=8,
-            action_dim=action_dim,
-            encoder=icm_encoder,
-            hidden_layer_sizes=[32],
-            hidden_layer_activation=nn.ReLU,
-        ),
-        forward_model=ForwardEnvironmentModel(
-            encoded_dim=8,
-            action_dim=action_dim,
-            encoder=icm_encoder,
-            hidden_layer_sizes=[32],
-            hidden_layer_activation=nn.ReLU,
-        ),
-        reward_scale=1e4,
-    ),
+    discount=1.0,
+    actor_learning_rate=5e-3,
+    critic_learning_rate=1e-4,
+    actor_eligibility_traces_decay=0.0,
+    critic_eligibility_traces_decay=0.0,
+    actor_entropy_loss_coef=0.2,
+    optimizer=torch.optim.SGD,
+    curiosity=None,
+    # curiosity=IntrinsicCuriosityModule(
+    #     encoder=icm_encoder,
+    #     inverse_model=InverseEnvironmentModel(
+    #         encoded_dim=12,
+    #         action_dim=action_dim,
+    #         encoder=icm_encoder,
+    #         hidden_layer_sizes=[32],
+    #         hidden_layer_activation=nn.ReLU,
+    #     ),
+    #     forward_model=ForwardEnvironmentModel(
+    #         encoded_dim=12,
+    #         action_dim=action_dim,
+    #         encoder=icm_encoder,
+    #         hidden_layer_sizes=[32],
+    #         hidden_layer_activation=nn.ReLU,
+    #     ),
+    #     reward_scale=1e3,
+    # ),
 )
+
+# Novelty-based intrinsic reward
+novelty_table = NoveltyTable(reward_scale=1)
+single_tilings = [
+    Tiling({
+        MountainCarAttribute.POSITION: np.linspace(-1.2, 0.6, 20)
+    }),
+    Tiling({
+        MountainCarAttribute.VELOCITY: np.linspace(-0.07, 0.07, 20)
+    }),
+]
+mountain_car_tile_coding = TileCoding([
+    *single_tilings,
+    *(t + 0.05 for t in single_tilings),
+    *(t - 0.05 for t in single_tilings),
+    Tiling({
+        MountainCarAttribute.POSITION: np.linspace(-1.2, 0.6, 20),
+        MountainCarAttribute.VELOCITY: np.linspace(-0.07, 0.07, 20),
+    })
+])
 
 try:
     terminated, truncated = True, True
@@ -203,14 +262,20 @@ try:
         while not (terminated or truncated):
             action = model.act(obs)
             next_obs, reward, terminated, truncated, info = env.step(action)
+            # Augment reward with novelty-based curiosity
+            t = mountain_car_tile_coding.transform(next_obs)
+            novelty_table.register(t)
+            reward += novelty_table.intrinsic_reward(t)
+            # Update agent
             model.update(obs, next_obs, reward, terminated)
             
             obs = next_obs
             step += 1
             score += reward + model.intrinsic_reward
             deltas.append(model.delta)
-            inv_loss_exp_avg = 0.99 * inv_loss_exp_avg + 0.01 * model.curiosity_trainer.inverse_model_loss
-            fwd_loss_exp_avg = 0.99 * fwd_loss_exp_avg + 0.01 * model.curiosity_trainer.forward_model_loss
+            if model.curiosity_trainer is not None:
+                inv_loss_exp_avg = 0.99 * inv_loss_exp_avg + 0.01 * model.curiosity_trainer.inverse_model_loss
+                fwd_loss_exp_avg = 0.99 * fwd_loss_exp_avg + 0.01 * model.curiosity_trainer.forward_model_loss
 
             if ENVIRONMENT == "MountainCar-v0" and terminated:
                 print("VICTORY!!!")
@@ -220,8 +285,9 @@ try:
         scores.append(score)
         recent_scores.append(score)
         scores_avg.append(sum(recent_scores) / len(recent_scores))
-        inv_losses.append(inv_loss_exp_avg)
-        fwd_losses.append(fwd_loss_exp_avg)
+        if model.curiosity_trainer is not None:
+            inv_losses.append(inv_loss_exp_avg)
+            fwd_losses.append(fwd_loss_exp_avg)
 
         if ENVIRONMENT == "FrozenLake-v1":
             print(model.value(torch.eye(16)).reshape(4, 4), "\x1B[4A", sep="")
@@ -250,13 +316,14 @@ plt.plot(scores_avg)
 plt.savefig("a2c_test_scores")
 plt.clf()
 
-plt.plot(inv_losses)
-plt.savefig("a2c_test_curio_inv_losses")
-plt.clf()
+if model.curiosity_trainer is not None:
+    plt.plot(inv_losses)
+    plt.savefig("a2c_test_curio_inv_losses")
+    plt.clf()
 
-plt.plot(fwd_losses)
-plt.savefig("a2c_test_curio_fwd_losses")
-plt.clf()
+    plt.plot(fwd_losses)
+    plt.savefig("a2c_test_curio_fwd_losses")
+    plt.clf()
 
 env.close()
 
@@ -264,7 +331,7 @@ env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,
-        render_mode="human",
+        render_mode=None,
     )
 )
 
@@ -273,8 +340,15 @@ terminated, truncated = True, True
 while True:
     while not (terminated or truncated):
         action = model.act(obs)
-        obs, reward, terminated, truncated, info = env.step(action)
-        print(model.value(model._obs_to_torch(obs)).item())
+        next_obs, reward, terminated, truncated, info = env.step(action)
+        # Augment reward with novelty-based curiosity
+        t = mountain_car_tile_coding.transform(next_obs)
+        novelty_table.register(t)
+        reward += novelty_table.intrinsic_reward(t)
+        # Update agent
+        model.update(obs, next_obs, reward, terminated)
+        obs = next_obs
+        print(model.value(model._obs_to_torch(next_obs)).item())
 
     obs, info = env.reset()
     terminated, truncated = False, False

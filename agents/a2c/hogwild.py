@@ -5,6 +5,7 @@ import gymnasium
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from torch import nn
 from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
+from agents.base import FootsiesAgentBase
 from typing import Callable
 from math import floor
 
@@ -12,6 +13,7 @@ from math import floor
 EnvGenerator = Callable[[], gymnasium.Env]
 
 
+# Training method to test hogwild in isolation
 def train(model: A2CModule, rank: int, env_generator: EnvGenerator, n_episodes: int, n_threads: int, log_interval: int = 100, base_seed: int = 1):
     # Set up process
     torch.manual_seed(base_seed + rank)
@@ -23,12 +25,12 @@ def train(model: A2CModule, rank: int, env_generator: EnvGenerator, n_episodes: 
 
     # Train on environment until termination
     for episode in range(n_episodes):
-        obs, _ = env.reset()
+        obs, info = env.reset()
         terminated, truncated = False, False
 
         while not (terminated or truncated):
-            action = model.act(obs)
-            next_obs, reward, terminated, truncated, _ = env.step(action)
+            action = model.act(obs, info)
+            next_obs, reward, terminated, truncated, info = env.step(action)
             model.update(obs, next_obs, reward, terminated)
             
             obs = next_obs
@@ -100,7 +102,6 @@ if __name__ == "__main__":
     observation_size = dummy_env.observation_space.shape[0]
     action_size = dummy_env.action_space.n
 
-    # Hardcoded env parameters!
     model = A2CModule(
         actor=ActorNetwork(
             obs_dim=observation_size,

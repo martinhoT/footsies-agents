@@ -9,16 +9,19 @@ from footsies_gym.envs.exceptions import FootsiesGameClosedError
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
-from agents.base import FootsiesAgentBase
 from tqdm import tqdm
 from itertools import count
-from typing import List, Any
+from copy import deepcopy
+from functools import partial
+from typing import List, Any, Callable
 from stable_baselines3.common.base_class import BaseAlgorithm
-
+from agents.base import FootsiesAgentBase, FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import snapshot_sb3_policy, wrap_policy
-from args import parse_args
+from agents.torch_utils import hogwild
+from args import parse_args, EnvArgs
 from self_play import SelfPlayManager
+
 
 
 """
@@ -94,24 +97,22 @@ def train(
     n_episodes: int = None,
     penalize_truncation: float = None,
     self_play_manager: SelfPlayManager = None,
+    episode_finished_callback: Callable[[int], None] = lambda episode: None,
+    progress_bar: bool = True,
 ):
     """
-    Train an `agent` on the given Gymnasium environment `env`
+    Train an `agent` on the given Gymnasium environment `env`.
 
     Parameters
     ----------
-    agent: FootsiesAgentBase
-        implementation of the FootsiesAgentBase, representing the agent
-    env: Env
-        the Gymnasium environment to train on
-    n_episodes: int
-        if specified, the number of training episodes
-    penalize_truncation: float
-        penalize the agent if the time limit was exceeded, to discourage lengthening the episode
-    self_play_manager: SelfPlayManager
-        opponent pool manager for self-play. If None, self-play will not be performed
+    - `agent`: implementation of FootsiesAgentBase, representing the agent
+    - `env`: the Gymnasium environment to train on
+    - `n_episodes`: if specified, the number of training episodes
+    - `penalize_truncation`: penalize the agent if the time limit was exceeded, to discourage lengthening the episode
+    - `self_play_manager`: opponent pool manager for self-play. If None, self-play will not be performed
+    - `episode_finished_callback`: function that will be called after each episode is finished
+    - `progress_bar`: whether to display a progress bar (with `tqdm`)
     """
-
     print("Preprocessing...", end=" ", flush=True)
     agent.preprocess(env)
     print("done!")
@@ -122,8 +123,11 @@ def train(
     if self_play_manager is not None:
         self_play_manager._add_opponent(env.unwrapped.opponent)
 
+    if progress_bar:
+        training_iterator = tqdm(training_iterator)
+
     try:
-        for _ in tqdm(training_iterator):
+        for episode in training_iterator:
             obs, info = env.reset()
 
             terminated = False
@@ -141,6 +145,8 @@ def train(
             if self_play_manager is not None:
                 if self_play_manager.update_at_episode():
                     env.unwrapped.set_opponent(self_play_manager.current_opponent)
+            
+            episode_finished_callback(episode)
 
     except KeyboardInterrupt:
         print("Training manually interrupted")
@@ -157,36 +163,40 @@ def train(
         print_exception(e)
 
 
+def create_env(args: EnvArgs) -> Env:
+    if args.is_footsies:
+        env = FootsiesEnv(**args.kwargs)
+
+        if args.footsies_wrapper_norm:
+            print(" Adding FootsiesNormalized wrapper")
+            env = FootsiesNormalized(env)
+
+        if args.footsies_wrapper_fs:
+            print(" Adding FootsiesFrameSkipped wrapper")
+            env = FootsiesFrameSkipped(env)
+
+        if args.wrapper_time_limit > 0:
+            env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
+
+        env = FlattenObservation(env)
+
+        if args.footsies_wrapper_acd:
+            print(" Adding FootsiesActionCombinationsDiscretized wrapper")
+            env = FootsiesActionCombinationsDiscretized(env)
+    
+    else:
+        env = gym.make(args.name, **args.kwargs)
+
+    return env
+
+
 if __name__ == "__main__":
     args = parse_args()
 
     # Prepare environment
 
-    if args.env.is_footsies:
-        print("Initializing FOOTSIES")
-
-        env = FootsiesEnv(**args.env.kwargs)
-
-        if args.env.footsies_wrapper_norm:
-            print(" Adding FootsiesNormalized wrapper")
-            env = FootsiesNormalized(env)
-
-        if args.env.footsies_wrapper_fs:
-            print(" Adding FootsiesFrameSkipped wrapper")
-            env = FootsiesFrameSkipped(env)
-
-        if args.env.wrapper_time_limit > 0:
-            env = TimeLimit(env, max_episode_steps=args.env.wrapper_time_limit)
-
-        env = FlattenObservation(env)
-
-        if args.env.footsies_wrapper_acd:
-            print(" Adding FootsiesActionCombinationsDiscretized wrapper")
-            env = FootsiesActionCombinationsDiscretized(env)
-
-    else:
-        print(f"Initializing environment {args.env.name}")
-        env = gym.make(args.env.name, **args.env.kwargs)
+    print(f"Initializing {'FOOTSIES' if args.env.is_footsies else ('environment' + args.env.name)}")
+    env = create_env(args.env)
 
     print(" Environment arguments:")
     for k, v in args.env.kwargs.items():
@@ -216,12 +226,14 @@ if __name__ == "__main__":
         else:
             footsies_env.set_opponent(agent.extract_policy(env))
 
+    # Identity function, used when logging is disabled
+    agent_logging_wrapper = lambda a: a
     if args.misc.log and not args.agent.is_sb3:
         print("Logging enabled")
         loggables = import_loggables(args.agent.name, agent)
 
-        agent = TrainingLoggerWrapper(
-            agent,
+        agent_logging_wrapper = lambda a: TrainingLoggerWrapper(
+            a,
             log_frequency=args.misc.log_frequency,
             log_dir=args.misc.log_dir,
             step_start_value=args.misc.log_step_start,
@@ -265,18 +277,55 @@ if __name__ == "__main__":
             print_exception(e)
 
     else:
-        train(
-            agent,
-            env,
-            args.episodes,
-            args.penalize_truncation,
-            self_play_manager=SelfPlayManager(
-                snapshot_method=(lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env)),
-                snapshot_frequency=args.self_play.snapshot_freq,
-                max_snapshots=args.self_play.max_snapshots,
-                mix_bot=args.self_play.mix_bot,
-            ) if args.self_play.enabled else None,
-        )
+        self_play_manager = SelfPlayManager(
+            snapshot_method=(lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env)),
+            snapshot_frequency=args.self_play.snapshot_freq,
+            max_snapshots=args.self_play.max_snapshots,
+            mix_bot=args.self_play.mix_bot,
+        ) if args.self_play.enabled else None
+
+        train_kwargs = {
+            "n_episodes": args.episodes,
+            "penalize_truncation": args.penalize_truncation,
+            "self_play_manager": self_play_manager,
+        }
+
+        if args.misc.hogwild:
+            if not isinstance(agent, FootsiesAgentTorch):
+                raise ValueError("Hogwild! is only supported for PyTorch-based agents")
+            
+            # Close the dummy environment above, which was useful for setting up the agent.
+            # However, each worker will have its own instance of the environment.
+            env.close()
+
+            # Define a wrapper on create_env, which instantiates a Gymnasium environment with the provided kwargs
+            def create_env_with_args(env_args: EnvArgs, **kwargs):
+                # I'm likely being paranoid with multiprocessing... just making sure *nothing* is shared
+                env_args = deepcopy(env_args)
+
+                # Indicate whether there are conflicting arguments before updating
+                conflicting_kwargs = env_args.kwargs.keys() & kwargs.keys()
+                if conflicting_kwargs:
+                    print(f"Will overwrite environment kwargs: {conflicting_kwargs}")
+                
+                env_args.kwargs.update(kwargs)
+
+                return create_env(env_args)
+
+            hogwild(
+                agent,
+                partial(create_env_with_args, env_args=args.env),
+                train,
+                n_workers=args.misc.hogwild_n_workers,
+                cpus_to_use=args.misc.hogwild_cpus,
+                is_footsies=args.env.is_footsies,
+                logging_wrapper=agent_logging_wrapper,
+                **train_kwargs,
+            )
+        
+        else:
+            agent = agent_logging_wrapper(agent)
+            train(agent, env, **train_kwargs)
 
     if args.misc.save:
         save_agent_model(agent, args.agent.model_name)

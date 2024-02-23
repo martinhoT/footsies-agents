@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Tuple
 from gymnasium import Env
+from torch import nn
 
 from agents.utils import wrap_policy
 
@@ -42,3 +43,10 @@ class FootsiesAgentBase(ABC):
         self, env: Env, internal_policy: Callable
     ) -> Callable[[dict], Tuple[bool, bool, bool]]:
         return wrap_policy(env, internal_policy)
+
+
+class FootsiesAgentTorch(FootsiesAgentBase):
+    @property
+    @abstractmethod
+    def model(self) -> nn.Module:
+        """The PyTorch model used by the agent"""

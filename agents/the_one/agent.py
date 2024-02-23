@@ -3,17 +3,17 @@ import torch
 from torch import nn
 from os import path
 from agents.action import ActionMap
-from agents.base import FootsiesAgentBase
+from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Callable, Tuple
-from agents.the_one.model import RepresentationModule, AbstractGameModel, AbstractOpponentModel
+from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel, AbstractOpponentModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
 from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
 
 
 # TODO: use reaction time emulator
-class FootsiesAgent(FootsiesAgentBase):
+class FootsiesAgent(FootsiesAgentTorch):
     def __init__(
         self,
         # Dimensions
@@ -134,6 +134,13 @@ class FootsiesAgent(FootsiesAgentBase):
             ),
             optimizer=optimizer,
             **actor_critic_kwargs,
+        )
+
+        # To report in the `model` property
+        self.full_model = FullModel(
+            game_model=self.game_model,
+            opponent_model=self.opponent_model,
+            actor_critic=self.actor_critic,
         )
 
         # Optimizers. The actor-critic module already takes care of its own optimizers.
@@ -329,6 +336,10 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         raise NotImplementedError("policy extraction is not yet supported")
+
+    @property
+    def model(self) -> nn.Module:
+        return self.full_model
 
     def evaluate_average_delta(self) -> float:
         res = (

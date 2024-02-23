@@ -117,7 +117,7 @@ class A2CModule(nn.Module):
         self.critic_optimizer.zero_grad()
         
         action_probabilities = self.actor(obs)
-        self.action_distribution = Categorical(action_probabilities)
+        self.action_distribution = Categorical(probs=action_probabilities)
         self.action = self.action_distribution.sample()
         
         return self.action.item()

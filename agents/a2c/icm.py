@@ -149,3 +149,23 @@ class IntrinsicCuriosityTrainer:
         
         self.inverse_model_loss = inverse_model_loss.item()
         self.forward_model_loss = forward_model_loss.item()
+
+
+class NoveltyTable:
+    def __init__(
+        self,
+        reward_scale: float = 1.0
+    ):
+        self.table = {}
+        self.reward_scale = reward_scale
+    
+    def register(self, obs: torch.Tensor):
+        o = obs.numpy().tobytes()
+        self.table[o] = self.table.get(o, 0) + 1
+    
+    def query(self, obs: torch.Tensor) -> int:
+        o = obs.numpy().tobytes()
+        return self.table.get(o, 0)
+
+    def intrinsic_reward(self, obs: torch.Tensor) -> float:
+        return self.reward_scale / self.query(obs)

@@ -1,7 +1,9 @@
+import psutil
 from copy import copy
 from typing import Callable
 from gymnasium import Env, ObservationWrapper, ActionWrapper
 from stable_baselines3.common.base_class import BaseAlgorithm
+from itertools import count
 
 # Some wrappers need to be handled in a special manner when extracting a policy for the FOOTSIES environment
 from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
