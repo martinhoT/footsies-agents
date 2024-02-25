@@ -10,8 +10,11 @@ from gymnasium import Env
 from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel, AbstractOpponentModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
-from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
+from agents.utils import extract_sub_kwargs
+from agents.torch_utils import AggregateModule
 from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
+from data import FootsiesDataset
 
 
 # TODO: use reaction time emulator
@@ -41,9 +44,6 @@ class FootsiesAgent(FootsiesAgentTorch):
         #  these will only be applied if the `reaction_time_emulator` argument is None
         reaction_time_emulator_minimum: int = 15,
         reaction_time_emulator_maximum: int = 29,
-        # Keyword arguments for modules. Accepts:
-        # - `actor_critic.{kwarg}`
-        # - `reaction_time_emulator.{kwarg}`
         **kwargs,
     ):
         # Validate arguments
@@ -53,26 +53,19 @@ class FootsiesAgent(FootsiesAgentTorch):
         if game_model_double_grad:
             raise NotImplementedError("backpropagation through targets for the game model is not (yet?) supported")
 
-        unknown_kwargs = {k for k in kwargs.keys() if (".") not in k}
-        if unknown_kwargs:
-            raise ValueError(f"module keyword arguments must be prefixed with the module name, e.g. `actor_critic.` or `reaction_time_emulator.`, unknown: {unknown_kwargs}")
-
-        actor_critic_kwargs = {k.split(".")[1]: v for k, v in kwargs.items() if k.startswith("actor_critic.")}
-        reaction_time_emulator_kwargs = {k.split(".")[1]: v for k, v in kwargs.items() if k.startswith("reaction_time_emulator.")}
-        unknown_module_kwargs = {k.split(".")[0] for k in kwargs.keys()} - {"actor_critic", "reaction_time_emulator"}
- 
-        if unknown_module_kwargs:
-            raise ValueError(f"unknown module keyword arguments: {unknown_module_kwargs}")
+        a2c_kwargs, actor_kwargs, critic_kwargs, reaction_time_emulator_kwargs = (
+            extract_sub_kwargs(kwargs, ("a2c", "actor", "critic", "reaction_time_emulator"))
+        )
         
         # Populate kwargs with default values
-        actor_critic_kwargs = {
+        a2c_kwargs = {
             "discount": 1.0,
             "actor_learning_rate": 1e-4,
             "critic_learning_rate": 1e-4,
             "actor_eligibility_traces_decay": 0.0,
             "critic_eligibility_traces_decay": 0.0,
             "actor_entropy_loss_coef": 0.0,
-            **actor_critic_kwargs,
+            **a2c_kwargs,
         }
 
         reaction_time_emulator_kwargs = {
@@ -124,25 +117,30 @@ class FootsiesAgent(FootsiesAgentTorch):
             representation=self.representation_module,
         )
 
-        self.actor_critic = A2CModule(
-            actor=ActorNetwork(
-                obs_dim=representation_dim,
-                action_dim=action_dim,
-                representation=self.representation_module,
-            ),
-            critic=CriticNetwork(
-                obs_dim=representation_dim,
-                representation=self.representation_module,
-            ),
-            optimizer=optimizer,
-            **actor_critic_kwargs,
+        self.actor = ActorNetwork(
+            obs_dim=representation_dim,
+            action_dim=action_dim,
+            representation=self.representation_module,
+        )
+        self.critic = CriticNetwork(
+            obs_dim=representation_dim,
+            representation=self.representation_module,
+        )
+
+        A2CLambdaLearner(
+            actor=self.actor,
+            critic=self.critic,
+            actor_optimizer=optimizer,
+            critic_optimizer=optimizer,
+            **a2c_kwargs,
         )
 
         # To report in the `model` property
         self.full_model = FullModel(
             game_model=self.game_model,
             opponent_model=self.opponent_model,
-            actor_critic=self.actor_critic,
+            actor=self.actor,
+            critic=self.critic,
         )
 
         # Optimizers. The actor-critic module already takes care of its own optimizers.
@@ -320,25 +318,45 @@ class FootsiesAgent(FootsiesAgentTorch):
             self.cumulative_delta += self.actor_critic.delta
             self.cumulative_delta_n += 1
 
-    def load(self, folder_path: str):
-        representation_module_path = path.join(folder_path, "representation")
-        game_model_path = path.join(folder_path, "game_model")
-        actor_critic_path = path.join(folder_path, "actor_critic")
-        self.representation_module.load_state_dict(torch.load(representation_module_path))
-        self.game_model.load_state_dict(torch.load(game_model_path))
-        self.actor_critic.load_state_dict(torch.load(actor_critic_path))
-
-    def save(self, folder_path: str):
-        representation_module_path = path.join(folder_path, "representation")
-        game_model_path = path.join(folder_path, "game_model")
-        actor_critic_path = path.join(folder_path, "actor_critic")
-        torch.save(self.representation_module.state_dict(), representation_module_path)
-        torch.save(self.game_model.state_dict(), game_model_path)
-        torch.save(self.actor_critic.state_dict(), actor_critic_path)
+    def initialize(
+        self,
+        dataset: FootsiesDataset,
+        policy: bool = True,
+        value: bool = False,
+        game_model: bool = False,
+        opponent_model: bool = False,
+        frozen_representation: bool = False,
+        agent_is_p1: bool = True,
+    ):
+        """
+        Initialize models from a pre-built dataset of episodes.
+        
+        By default, only initializes the policy, which is what one would do in imitation learning.
+        This however has implications if the different models share a common representation, as the representation
+        will be skewed to favour the policy, unless `frozen_representation` is set to `True`.
+        
+        Parameters
+        ----------
+        - `dataset`: the dataset of episodes
+        - `policy`: whether to update the policy
+        - `value`: whether to update the value function
+        - `game_model`: whether to update the game model
+        - `opponent_model`: whether to update the opponent model 
+        - `frozen_representation`: whether to freeze the representation module
+        - `agent_is_p1`: whether player 1 is to be treated as the agent. If `False`, player 2 is treated as the agent
+        """
+        if value or game_model or opponent_model:
+            raise NotImplementedError("initializing anything, but the policy, is not implemented yet")
+        
+        if policy:
+            for episode in dataset.episodes:
+                for obs, next_obs, reward, p1_action, p2_action in episode:
+                    action = p1_action if agent_is_p1 else p2_action
+                    self.actor_critic.update_policy_by_imitation(obs, action, frozen_representation)
 
     # NOTE: literally extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        model = deepcopy(self.actor_critic)
+        model = deepcopy(self.actor_critic.actor)
 
         def internal_policy(obs):
             obs = torch.from_numpy(obs).float().unsqueeze(0)

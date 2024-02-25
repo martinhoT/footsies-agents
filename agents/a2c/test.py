@@ -9,8 +9,8 @@ from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium import ObservationWrapper
 from gymnasium.spaces import Box
 from tqdm import tqdm
-from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
-from agents.a2c.icm import IntrinsicCuriosityModule, AbstractEnvironmentEncoder, InverseEnvironmentModel, ForwardEnvironmentModel, NoveltyTable
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
+from agents.icm import IntrinsicCuriosityModule, AbstractEnvironmentEncoder, InverseEnvironmentModel, ForwardEnvironmentModel, NoveltyTable
 from agents.tile import TileCoding, Tiling
 from itertools import combinations, count
 from enum import Enum
@@ -140,7 +140,7 @@ MountainCar:
 """
 
 
-ENVIRONMENT = "MountainCar-v0"
+ENVIRONMENT = "LunarLander-v2"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -182,44 +182,28 @@ icm_encoder = AbstractEnvironmentEncoder(
     hidden_layer_sizes=[32],
     hidden_layer_activation=nn.ReLU,
 )
-model = A2CModule(
+model = A2CLambdaLearner(
     actor=ActorNetwork(
         obs_dim=obs_dim,
         action_dim=action_dim,
-        hidden_layer_sizes=[],
+        hidden_layer_sizes=[16],
         hidden_layer_activation=nn.ReLU,
     ),
     critic=CriticNetwork(
         obs_dim=obs_dim,
-        hidden_layer_sizes=[],
+        hidden_layer_sizes=[16],
         hidden_layer_activation=nn.ReLU,
     ),
     discount=1.0,
-    actor_learning_rate=5e-3,
-    critic_learning_rate=1e-4,
-    actor_eligibility_traces_decay=0.0,
-    critic_eligibility_traces_decay=0.0,
-    actor_entropy_loss_coef=0.2,
-    optimizer=torch.optim.SGD,
-    curiosity=None,
-    # curiosity=IntrinsicCuriosityModule(
-    #     encoder=icm_encoder,
-    #     inverse_model=InverseEnvironmentModel(
-    #         encoded_dim=12,
-    #         action_dim=action_dim,
-    #         encoder=icm_encoder,
-    #         hidden_layer_sizes=[32],
-    #         hidden_layer_activation=nn.ReLU,
-    #     ),
-    #     forward_model=ForwardEnvironmentModel(
-    #         encoded_dim=12,
-    #         action_dim=action_dim,
-    #         encoder=icm_encoder,
-    #         hidden_layer_sizes=[32],
-    #         hidden_layer_activation=nn.ReLU,
-    #     ),
-    #     reward_scale=1e3,
-    # ),
+    actor_lambda=0.8,
+    critic_lambda=0.8,
+    actor_entropy_loss_coef=0.1,
+    actor_optimizer=torch.optim.Adam,
+    critic_optimizer=torch.optim.Adam,
+    **{
+        "actor_optimizer.lr": 1e-3,
+        "critic_optimizer.lr": 1e-3,
+    }
 )
 
 # Novelty-based intrinsic reward
@@ -263,9 +247,9 @@ try:
             action = model.act(obs)
             next_obs, reward, terminated, truncated, info = env.step(action)
             # Augment reward with novelty-based curiosity
-            t = mountain_car_tile_coding.transform(next_obs)
-            novelty_table.register(t)
-            reward += novelty_table.intrinsic_reward(t)
+            # t = mountain_car_tile_coding.transform(next_obs)
+            # novelty_table.register(t)
+            # reward += novelty_table.intrinsic_reward(t)
             # Update agent
             model.update(obs, next_obs, reward, terminated)
             
@@ -342,9 +326,9 @@ while True:
         action = model.act(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
         # Augment reward with novelty-based curiosity
-        t = mountain_car_tile_coding.transform(next_obs)
-        novelty_table.register(t)
-        reward += novelty_table.intrinsic_reward(t)
+        # t = mountain_car_tile_coding.transform(next_obs)
+        # novelty_table.register(t)
+        # reward += novelty_table.intrinsic_reward(t)
         # Update agent
         model.update(obs, next_obs, reward, terminated)
         obs = next_obs

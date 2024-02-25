@@ -3,10 +3,8 @@ import numpy as np
 from torch import nn
 from torch.distributions import Categorical
 from agents.torch_utils import create_layered_network
-from agents.a2c.icm import IntrinsicCuriosityModule, IntrinsicCuriosityTrainer
+from agents.utils import extract_sub_kwargs
 
-
-# NOTE: it's useful to include the representation module into the actor and critic networks so that the parameters of the representation network can be included in the eligibility traces
 
 class CriticNetwork(nn.Module):
     def __init__(
@@ -44,6 +42,7 @@ class ActorNetwork(nn.Module):
         self.actor_layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
         self.actor_layers.append(nn.Softmax(dim=1))
         self.representation = nn.Identity() if representation is None else representation
+        self.action_dim = action_dim
 
     def forward(self, obs: torch.Tensor):
         rep = self.representation(obs)
@@ -54,32 +53,26 @@ class ActorNetwork(nn.Module):
         return self.actor_layers(rep)
 
 
-class A2CModule(nn.Module):
-    """Training class implementing the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
+class A2CLambdaLearner:
     def __init__(
         self,
         actor: ActorNetwork,
         critic: CriticNetwork,
         discount: float = 1.0,
-        actor_learning_rate: float = 1e-2,
-        critic_learning_rate: float = 1e-2,
-        actor_eligibility_traces_decay: float = 0.0,
-        critic_eligibility_traces_decay: float = 0.0,
+        actor_lambda: float = 0.0,
+        critic_lambda: float = 0.0,
         actor_entropy_loss_coef: float = 0.0,
-        optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
-        curiosity: IntrinsicCuriosityModule = None,
+        actor_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        critic_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        **kwargs,
     ):
-        super().__init__()
-
-        self.discount = discount
-        self.actor_eligibility_traces_decay = actor_eligibility_traces_decay
-        self.critic_eligibility_traces_decay = critic_eligibility_traces_decay
-        self.actor_entropy_loss_coef = actor_entropy_loss_coef
-        self.curiosity = curiosity
-        self.curiosity_trainer = None if curiosity is None else IntrinsicCuriosityTrainer(curiosity)
-
+        """Implementation of the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
         self.actor = actor
         self.critic = critic
+        self.discount = discount
+        self.actor_lambda = actor_lambda
+        self.critic_lambda = critic_lambda
+        self.actor_entropy_loss_coef = actor_entropy_loss_coef
 
         self.actor_traces = [
             torch.zeros_like(parameter)
@@ -90,9 +83,20 @@ class A2CModule(nn.Module):
             for parameter in critic.parameters()
         ]
 
+        actor_optimizer_kwargs, critic_optimizer_kwargs = extract_sub_kwargs(kwargs, ("actor_optimizer", "critic_optimizer"))
+
+        actor_optimizer_kwargs = {
+            "lr": 1e-4,
+            **actor_optimizer_kwargs,
+        }
+        critic_optimizer_kwargs = {
+            "lr": 1e-4,
+            **critic_optimizer_kwargs,
+        }
+
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients unchanged)
-        self.actor_optimizer = optimizer(self.actor.parameters(), lr=actor_learning_rate, maximize=True)
-        self.critic_optimizer = optimizer(self.critic.parameters(), lr=critic_learning_rate, maximize=True)
+        self.actor_optimizer = actor_optimizer(self.actor.parameters(), maximize=True, **actor_optimizer_kwargs)
+        self.critic_optimizer = critic_optimizer(self.critic.parameters(), maximize=True, **critic_optimizer_kwargs)
 
         self.action_distribution = None
         self.action = None
@@ -102,14 +106,13 @@ class A2CModule(nn.Module):
         
         # Track values
         self.delta = 0.0
-        self.intrinsic_reward = 0.0
 
     def _obs_to_torch(self, obs: np.ndarray) -> torch.Tensor:
         if not isinstance(obs, torch.Tensor):
-            return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
+            return torch.from_numpy(obs).float().reshape((1, -1))
         return obs
 
-    def act(self, obs: np.ndarray) -> int:
+    def sample_action(self, obs: np.ndarray) -> int:
         """Sample an action from the actor. A training step starts with `act()`, followed immediately by an environment step and `update()`"""
         obs = self._obs_to_torch(obs)
 
@@ -122,31 +125,18 @@ class A2CModule(nn.Module):
         
         return self.action.item()
 
-    # TODO: if this is linear, could I do True Online TD(lambda)?
-    def update(self, obs: np.ndarray, next_obs: np.ndarray, reward: float, terminated: bool):
+    # TODO: if we use linear function approximation, could we do True Online TD(lambda)?
+    def learn(self, obs: np.ndarray, next_obs: np.ndarray, reward: float, terminated: bool):
         """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `act()`"""
         obs = self._obs_to_torch(obs)
 
-        # If curiosity is used, then update it first
-        if self.curiosity is not None:
-            next_obs = self._obs_to_torch(next_obs)
-            self.curiosity_trainer.train(obs, self.action.detach(), next_obs)
-
         # Compute the TD delta
         with torch.no_grad():
-            # Compute the intrinsic reward first
-            intrinsic_reward = 0.0
-            if self.curiosity is not None:
-                next_obs = self._obs_to_torch(next_obs)
-                intrinsic_reward = self.curiosity.intrinsic_reward(obs, self.action.detach(), next_obs)
-                self.intrinsic_reward = intrinsic_reward
-            
-            # NOTE: watch out for when the episode ends, since bootstraping is not performed we don't have an equalizer in case the critic's values are exploding, which should translate in large loss/score and thus large gradients
             if terminated:
-                target = reward + intrinsic_reward
+                target = reward
             else:
                 next_obs = self._obs_to_torch(next_obs)
-                target = reward + intrinsic_reward + self.discount * self.critic(next_obs)
+                target = reward + self.discount * self.critic(next_obs)
             
             delta = (target - self.critic(obs)).item()
 
@@ -162,8 +152,6 @@ class A2CModule(nn.Module):
         # Add the entropy score gradient
         entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
         entropy_score.backward()
-        # TODO: try only optimizing after the critic backwarded
-        self.actor_optimizer.step()
 
         critic_score = self.critic(obs)
         critic_score.backward()
@@ -171,6 +159,8 @@ class A2CModule(nn.Module):
             for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
                 critic_trace.copy_(self.discount * self.critic_eligibility_traces_decay * critic_trace + parameter.grad)
                 parameter.grad.copy_(delta * critic_trace)
+
+        self.actor_optimizer.step()
         self.critic_optimizer.step()
 
         self.cumulative_discount *= self.discount
@@ -182,15 +172,36 @@ class A2CModule(nn.Module):
             for critic_trace in self.critic_traces:
                 critic_trace.zero_()
 
-    def value(self, obs: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            return self.critic(obs)
 
-    def policy(self, obs: torch.Tensor) -> torch.Tensor:
-        with torch.no_grad():
-            return self.actor(obs)
+class ImitationLearner:
+    def __init__(
+        self,
+        policy: nn.Module,
+        optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        **kwargs,
+    ):
+        """Imitation learning applied to a policy"""
+        optimizer_kwargs = extract_sub_kwargs(kwargs, ("optimizer",))
+        
+        self.policy = policy
+        self.optimizer = optimizer(self.policy.parameters(), maximize=False, **optimizer_kwargs)
+        self.loss_fn = nn.KLDivLoss(reduction="batchmean")
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        policy = self.actor(obs)
-        value = self.critic(obs)
-        return policy, value
+    def learn(self, obs: np.ndarray, action: int, frozen_representation: bool = False):
+        """Update policy by imitating the action at the given observation"""
+        obs = self._obs_to_torch(obs)
+        action_onehot = torch.nn.functional.one_hot(torch.Tensor(action), num_classes=self.actor.action_dim)
+        self.optimizer.zero_grad()
+
+        if frozen_representation:
+            with torch.no_grad():
+                rep = self.actor.representation(obs)
+            probs = self.actor.from_representation(rep)
+
+        else:
+            probs = self.actor(obs)
+
+        loss = self.loss_fn(probs, action_onehot)
+        loss.backward()
+
+        self.optimizer.step()

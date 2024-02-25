@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Tuple
 from gymnasium import Env
 from torch import nn
+import torch
 
 from agents.utils import wrap_policy
 
@@ -50,3 +51,9 @@ class FootsiesAgentTorch(FootsiesAgentBase):
     @abstractmethod
     def model(self) -> nn.Module:
         """The PyTorch model used by the agent"""
+    
+    def load(self, folder_path: str):
+        self.model.load_state_dict(torch.load(folder_path))
+
+    def save(self, folder_path: str):
+        torch.save(self.model.state_dict(), folder_path)

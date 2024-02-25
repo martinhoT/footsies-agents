@@ -7,7 +7,8 @@ from torch import nn
 from tqdm import tqdm
 from rps.rps import RPS
 from rps.plotter import AnimatedPlot
-from agents.a2c.a2c import A2CModule, ActorNetwork, CriticNetwork
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
+from agents.a2c.agent import FootsiesAgent as A2CAgent
 from itertools import starmap, count
 
 
@@ -19,7 +20,7 @@ OPPONENT_POOL = {
 }
 
 
-def print_results(game: RPS, agent: A2CModule):
+def print_results(game: RPS, agent: A2CAgent):
     healths_list = [(h1 + 1, h2 + 1) for h1 in range(game.health) for h2 in range(game.health)]
     plays_list = [(pl1, pl2) for pl1 in range(game.play_dim) for pl2 in range(game.play_dim)] if game.observation_include_play else [[None, None]]
 
@@ -48,7 +49,7 @@ def print_results(game: RPS, agent: A2CModule):
     print()
 
 
-def train(game: RPS, agent: A2CModule, episodes: int = None) -> Generator[tuple, None, None]:
+def train(game: RPS, agent: A2CAgent, episodes: int = None) -> Generator[tuple, None, None]:
     episode_iterator = range(episodes) if episodes is not None else count()
 
     try:
@@ -107,7 +108,9 @@ def main(
         observation_transformer=lambda o: o.to(torch.float32).unsqueeze(0),
     )
 
-    agent = A2CModule(
+    agent = A2CAgent(
+        game.observation_dim,
+        game.action_dim,
         actor=ActorNetwork(
             obs_dim=game.observation_dim,
             action_dim=game.action_dim,
@@ -119,12 +122,17 @@ def main(
             hidden_layer_sizes=[],
             hidden_layer_activation=nn.Identity,
         ),
-        actor_learning_rate=1e-4,
-        critic_learning_rate=1e-4,
-        actor_eligibility_traces_decay=0.0,
-        critic_eligibility_traces_decay=0.0,
-        actor_entropy_loss_coef=0.0,
-        optimizer=torch.optim.SGD,
+        learner=A2CLambdaLearner(
+            actor_optimizer=torch.optim.Adam,
+            critic_optimizer=torch.optim.Adam,
+            actor_lambda=0.0,
+            critic_lambda=0.0,
+            actor_entropy_loss_coef=0.0,
+            **{
+                "actor_optimizer.lr": 1e-4,
+                "critic_optimizer.lr": 1e-4,
+            }
+        ),
     )
 
     if self_play:

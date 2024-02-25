@@ -2,8 +2,9 @@ import numpy as np
 import gzip
 import os
 import struct
-from typing import Any, Callable, Generator, Iterable
-from dataclasses import dataclass
+from torch.utils.data import Dataset
+from typing import Any, Callable, Generator, Iterable, Iterator
+from dataclasses import dataclass, field
 from itertools import pairwise
 from gymnasium import Env
 from gymnasium.wrappers import FlattenObservation
@@ -13,12 +14,17 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from agents.action import ActionMap
 
 
+FootsiesTransition = tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, bool]
+
+
 @dataclass(slots=True)
 class FootsiesEpisode:
     """
     Data container of an episode in FOOTSIES, from beginning to end.
     Contains the `n` experienced observations, and the `n-1` player 1 and 2 actions.
     The final observation is terminal, on which no actions were performed.
+
+    NOTE: it's assumed that the episode has terminated, and not truncated.
     """
     observations:       np.ndarray
     p1_actions:         np.ndarray
@@ -121,19 +127,42 @@ class FootsiesEpisode:
             rewards=rewards,
         )
 
+    def __iter__(self) -> Iterator[FootsiesTransition]:
+        for i, ((obs, next_obs), reward, p1_action, p2_action) in enumerate(zip(pairwise(self.observations), self.rewards, self.p1_actions, self.p2_actions)):
+            terminated = i >= self.steps - 1
+            yield obs, next_obs, reward, p1_action, p2_action, terminated
+    
+    def __getitem__(self, idx: int) -> tuple[FootsiesTransition]:
+        obs = self.observations[idx, :]
+        next_obs = self.observations[idx + 1, :]
+        reward = self.rewards[idx, 0]
+        p1_action = self.p1_actions[idx, 0]
+        p2_action = self.p2_actions[idx, 0]
+        terminated = idx >= self.steps - 1
+        return obs, next_obs, reward, p1_action, p2_action, terminated
+
+    def __len__(self) -> int:
+        return self.steps
+
 
 @dataclass(slots=True)
 class FootsiesDataset:
-    """
-    Dataset of transitions on the FOOTSIES environment.
-    """
-    episodes:           list[FootsiesEpisode]
+    """Dataset of transitions on the FOOTSIES environment."""
+    episodes:           tuple[FootsiesEpisode]
+
+    transitions:        tuple[FootsiesTransition]   = field(default_factory=tuple, init=False)
+
+    def __post_init__(self):
+        self.transitions = tuple(transition for episode in self.episodes for transition in episode)
 
     def __add__(self, other: "FootsiesDataset"):
         return FootsiesDataset(self.episodes + other.episodes)
 
-    def append(self, episode: FootsiesEpisode):
-        self.episodes.append(episode)
+    def __len__(self) -> int:
+        return len(self.episodes)
+
+    def __getitem__(self, idx) -> FootsiesEpisode:
+        return self.episodes[idx]
 
     @staticmethod
     def load(path: str) -> "FootsiesDataset":
@@ -150,6 +179,41 @@ class FootsiesDataset:
             for episode in self.episodes:
                 f.write(episode.tobytes())
                 f.write(b"\n")
+
+
+class FootsiesTorchDataset(Dataset):
+    """Flattened dataset of transitions, for usage with PyTorch's `DataLoader`."""
+    def __init__(self, dataset: FootsiesDataset):
+        self._dataset = dataset
+
+        self._distinct = False
+        self._update_transitions(distinct=False)
+
+    def __getitem__(self, idx: int) -> FootsiesTransition:
+        return self._transitions[idx]
+
+    def __len__(self) -> int:
+        return len(self._transitions)
+
+    @property
+    def dataset(self) -> FootsiesDataset:
+        return self._dataset
+
+    @property
+    def distinct(self) -> bool:
+        return self._distinct
+
+    @distinct.setter
+    def distinct(self, value: bool):
+        if self._distinct != value:
+            self._update_transitions(distinct=value)
+        self._distinct = value
+    
+    def _update_transitions(self, distinct: bool = False):
+        if distinct:
+            self._transitions = tuple(set(self.dataset.transitions))
+        else:
+            self._transitions = self.dataset.transitions
 
 
 class DataCollector:

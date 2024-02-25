@@ -1,6 +1,6 @@
 import torch
 import torch.multiprocessing as mp
-from typing import Any, Callable
+from typing import Callable
 from math import floor
 from torch import nn
 from itertools import pairwise
@@ -8,7 +8,6 @@ from gymnasium import Env
 
 from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
-from footsies_gym.envs.footsies import FootsiesEnv
 
 
 def create_layered_network(

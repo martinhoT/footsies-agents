@@ -1,9 +1,7 @@
-import psutil
 from copy import copy
-from typing import Callable
+from typing import Any, Callable, Iterable
 from gymnasium import Env, ObservationWrapper, ActionWrapper
 from stable_baselines3.common.base_class import BaseAlgorithm
-from itertools import count
 
 # Some wrappers need to be handled in a special manner when extracting a policy for the FOOTSIES environment
 from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
@@ -68,3 +66,38 @@ def snapshot_sb3_policy(agent: BaseAlgorithm, deterministic: bool = False):
         return policy.predict(obs, deterministic=deterministic)[0].item()
 
     return wrapper
+
+
+def extract_sub_kwargs(kwargs: dict, subkeys: tuple[str], strict: bool = True) -> tuple[dict[str, Any]]:
+    """
+    Extract keyword arguments from `kwargs` with the provided `subkeys`. If `strict`, will raise an error in case not all keys in `kwargs` were exhausted
+    
+    NOTE: multiple periods `'.'` are supported in subkey names, with the first period delimiting the subkey name
+
+    Example:
+    ```
+    >>> kwargs = {
+    ...     "m1.a": 1,
+    ...     "m1.b": 2,
+    ...     "m2.a": 3,
+    ... }
+    >>> keys = ["m1", "m2"]
+    >>> extract_sub_kwargs(kwargs, keys, strict=True)
+    [{"a": 1, "b": 2}, {"a": 3}]
+    ```
+    """
+    if strict:
+        unknown_kwargs = {k for k in kwargs.keys() if (".") not in k}
+        if unknown_kwargs:
+            raise ValueError(f"since it's strict, all keyword arguments must be prefixed with a subkey name ('<subkey>.<kwarg>'), unknown: {unknown_kwargs}")
+        subkeys_set = set(subkeys)
+        unknown_subkeys = {sub for sub in map(lambda k: k.split(".")[0], kwargs.keys()) if sub not in subkeys_set}
+        if unknown_subkeys:
+            raise ValueError(f"since it's strict, all keyword arguments must be prefixed with one of subkeys {subkeys}, unknown: {unknown_subkeys}")
+
+    extracted = [
+        {".".join(k.split(".")[1:]): v for k, v in kwargs.items() if k.startswith(subkey + ".")}
+        for subkey in subkeys
+    ]
+
+    return extracted
