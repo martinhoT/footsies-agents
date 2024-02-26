@@ -130,7 +130,7 @@ CartPole:
     Traces: 0.8 for both
     1 hidden layer of size 128 with ReLU activations
     Adam optimizer
-MountainCar:
+MountainCar: (not good actually)
     Actor LR: 0.475
     Critic LR: 0.469
     Actor ET: 0.41
@@ -176,13 +176,7 @@ env = env_generator(
 obs_dim = env.observation_space.shape[0]
 action_dim = env.action_space.n
 
-icm_encoder = AbstractEnvironmentEncoder(
-    obs_dim=obs_dim,
-    encoded_dim=12,
-    hidden_layer_sizes=[32],
-    hidden_layer_activation=nn.ReLU,
-)
-model = A2CLambdaLearner(
+learner = A2CLambdaLearner(
     actor=ActorNetwork(
         obs_dim=obs_dim,
         action_dim=action_dim,
@@ -226,6 +220,27 @@ mountain_car_tile_coding = TileCoding([
     })
 ])
 
+# Curiosity-based intrinsic reward
+curiosity_trainer = None
+
+# Value function visualization
+if ENVIRONMENT == "MountainCar-v0":
+    from plot_utils import Heatmap
+    heatmap_grid = torch.meshgrid(
+        torch.linspace(-1.2, 0.6, 20),
+        torch.linspace(-0.07, 0.07, 20),
+        indexing="xy",
+    )
+    heatmap_states = torch.stack(heatmap_grid, dim=-1)
+    heatmap = Heatmap(learner.critic(heatmap_states).detach().numpy().squeeze(), "Position", "Velocity", "Value function")
+
+else:
+    heatmap = None
+
+ans = input("Does heatmap look good?")
+if ans == "n":
+    exit(0)
+
 try:
     terminated, truncated = True, True
 
@@ -244,50 +259,53 @@ try:
     # for i in count():
         score = 0
         while not (terminated or truncated):
-            action = model.act(obs)
+            action = learner.act(obs)
             next_obs, reward, terminated, truncated, info = env.step(action)
             # Augment reward with novelty-based curiosity
             # t = mountain_car_tile_coding.transform(next_obs)
             # novelty_table.register(t)
             # reward += novelty_table.intrinsic_reward(t)
             # Update agent
-            model.update(obs, next_obs, reward, terminated)
+            learner.update(obs, next_obs, reward, terminated)
             
             obs = next_obs
             step += 1
-            score += reward + model.intrinsic_reward
-            deltas.append(model.delta)
-            if model.curiosity_trainer is not None:
-                inv_loss_exp_avg = 0.99 * inv_loss_exp_avg + 0.01 * model.curiosity_trainer.inverse_model_loss
-                fwd_loss_exp_avg = 0.99 * fwd_loss_exp_avg + 0.01 * model.curiosity_trainer.forward_model_loss
+            score += reward + learner.intrinsic_reward
+            deltas.append(learner.delta)
+            if curiosity_trainer is not None:
+                inv_loss_exp_avg = 0.99 * inv_loss_exp_avg + 0.01 * curiosity_trainer.inverse_model_loss
+                fwd_loss_exp_avg = 0.99 * fwd_loss_exp_avg + 0.01 * curiosity_trainer.forward_model_loss
 
             if ENVIRONMENT == "MountainCar-v0" and terminated:
                 print("VICTORY!!!")
+
+        if heatmap:
+            heatmap.update(learner.critic(heatmap_states).numpy())
 
         obs, info = env.reset()
         terminated, truncated = False, False
         scores.append(score)
         recent_scores.append(score)
         scores_avg.append(sum(recent_scores) / len(recent_scores))
-        if model.curiosity_trainer is not None:
+        if curiosity_trainer is not None:
             inv_losses.append(inv_loss_exp_avg)
             fwd_losses.append(fwd_loss_exp_avg)
 
         if ENVIRONMENT == "FrozenLake-v1":
-            print(model.value(torch.eye(16)).reshape(4, 4), "\x1B[4A", sep="")
+            print(learner.value(torch.eye(16)).reshape(4, 4), "\x1B[4A", sep="")
 
 except KeyboardInterrupt:
     pass
 
 print("Value function:")
 if ENVIRONMENT == "FrozenLake-v1":
-    print(model.value(torch.eye(16)).reshape(4, 4))
+    print(learner.value(torch.eye(16)).reshape(4, 4))
 else:
     print(None)
 
 print("Policy:")
 if ENVIRONMENT == "FrozenLake-v1":
-    print(model.policy(torch.eye(16)).reshape(4, 4, 4))
+    print(learner.policy(torch.eye(16)).reshape(4, 4, 4))
 else:
     print(None)
 
@@ -300,7 +318,7 @@ plt.plot(scores_avg)
 plt.savefig("a2c_test_scores")
 plt.clf()
 
-if model.curiosity_trainer is not None:
+if curiosity_trainer is not None:
     plt.plot(inv_losses)
     plt.savefig("a2c_test_curio_inv_losses")
     plt.clf()
@@ -323,16 +341,16 @@ terminated, truncated = True, True
 
 while True:
     while not (terminated or truncated):
-        action = model.act(obs)
+        action = learner.act(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
         # Augment reward with novelty-based curiosity
         # t = mountain_car_tile_coding.transform(next_obs)
         # novelty_table.register(t)
         # reward += novelty_table.intrinsic_reward(t)
         # Update agent
-        model.update(obs, next_obs, reward, terminated)
+        learner.update(obs, next_obs, reward, terminated)
         obs = next_obs
-        print(model.value(model._obs_to_torch(next_obs)).item())
+        print(learner.value(learner._obs_to_torch(next_obs)).item())
 
     obs, info = env.reset()
     terminated, truncated = False, False
