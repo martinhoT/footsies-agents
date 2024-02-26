@@ -140,7 +140,7 @@ MountainCar: (not good actually)
 """
 
 
-ENVIRONMENT = "LunarLander-v2"
+ENVIRONMENT = "MountainCar-v0"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -169,7 +169,7 @@ env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,
-        render_mode=None,
+        render_mode="human",
     )
 )
 
@@ -195,8 +195,8 @@ learner = A2CLambdaLearner(
     actor_optimizer=torch.optim.Adam,
     critic_optimizer=torch.optim.Adam,
     **{
-        "actor_optimizer.lr": 1e-3,
-        "critic_optimizer.lr": 1e-3,
+        "actor_optimizer.lr": 1e-4,
+        "critic_optimizer.lr": 1e-4,
     }
 )
 
@@ -226,20 +226,26 @@ curiosity_trainer = None
 # Value function visualization
 if ENVIRONMENT == "MountainCar-v0":
     from plot_utils import Heatmap
-    heatmap_grid = torch.meshgrid(
-        torch.linspace(-1.2, 0.6, 20),
-        torch.linspace(-0.07, 0.07, 20),
-        indexing="xy",
-    )
+    x = torch.linspace(-1.2, 0.6, 20)
+    y = torch.linspace(-0.07, 0.07, 20)
+    heatmap_grid = torch.meshgrid(x, y, indexing="xy")
     heatmap_states = torch.stack(heatmap_grid, dim=-1)
-    heatmap = Heatmap(learner.critic(heatmap_states).detach().numpy().squeeze(), "Position", "Velocity", "Value function")
+    heatmap = Heatmap(
+        learner.critic(heatmap_states).detach().numpy().squeeze(),
+        xlabel="Position",
+        ylabel="Velocity",
+        xticks=[f"{v.item():.2f}" for v in x],
+        yticks=[f"{v.item():.2f}" for v in y],
+        title="Value function",
+    )
+    heatmap.plot()
+    
+    ans = input("Does heatmap look good?")
+    if ans == "n":
+        exit(0)
 
 else:
     heatmap = None
-
-ans = input("Does heatmap look good?")
-if ans == "n":
-    exit(0)
 
 try:
     terminated, truncated = True, True
@@ -255,22 +261,23 @@ try:
     fwd_losses = []
     inv_loss_exp_avg = 0.0
     fwd_loss_exp_avg = 0.0
+    heatmap_update_interval = 25
     for i in tqdm(episode_iterator):
     # for i in count():
         score = 0
         while not (terminated or truncated):
-            action = learner.act(obs)
+            action = learner.sample_action(obs)
             next_obs, reward, terminated, truncated, info = env.step(action)
             # Augment reward with novelty-based curiosity
             # t = mountain_car_tile_coding.transform(next_obs)
             # novelty_table.register(t)
             # reward += novelty_table.intrinsic_reward(t)
             # Update agent
-            learner.update(obs, next_obs, reward, terminated)
+            learner.learn(obs, next_obs, reward, terminated)
             
             obs = next_obs
             step += 1
-            score += reward + learner.intrinsic_reward
+            score += reward
             deltas.append(learner.delta)
             if curiosity_trainer is not None:
                 inv_loss_exp_avg = 0.99 * inv_loss_exp_avg + 0.01 * curiosity_trainer.inverse_model_loss
@@ -279,8 +286,8 @@ try:
             if ENVIRONMENT == "MountainCar-v0" and terminated:
                 print("VICTORY!!!")
 
-        if heatmap:
-            heatmap.update(learner.critic(heatmap_states).numpy())
+            if step % heatmap_update_interval == 0:
+                heatmap.update(learner.critic(heatmap_states).detach().numpy().squeeze())
 
         obs, info = env.reset()
         terminated, truncated = False, False
@@ -333,7 +340,7 @@ env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,
-        render_mode=None,
+        render_mode="human",
     )
 )
 
@@ -341,16 +348,16 @@ terminated, truncated = True, True
 
 while True:
     while not (terminated or truncated):
-        action = learner.act(obs)
+        action = learner.sample_action(obs)
         next_obs, reward, terminated, truncated, info = env.step(action)
         # Augment reward with novelty-based curiosity
         # t = mountain_car_tile_coding.transform(next_obs)
         # novelty_table.register(t)
         # reward += novelty_table.intrinsic_reward(t)
         # Update agent
-        learner.update(obs, next_obs, reward, terminated)
+        # learner.learn(obs, next_obs, reward, terminated)
         obs = next_obs
-        print(learner.value(learner._obs_to_torch(next_obs)).item())
+        # print(learner.critic(learner._obs_to_torch(next_obs)).item())
 
     obs, info = env.reset()
     terminated, truncated = False, False

@@ -44,9 +44,11 @@ class Heatmap:
     
     def update(self, data: np.ndarray):
         self.im.set_data(data)
+        self.im.autoscale()
         for y in range(data.shape[0]):
             for x in range(data.shape[1]):
                 self.text[y][x].set_text(f"{data[y, x]:.2f}")
         
         # TODO: what about draw_idle?
         self.fig.canvas.draw()
+        plt.pause(0.01)

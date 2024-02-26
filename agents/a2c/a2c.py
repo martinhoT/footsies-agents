@@ -147,7 +147,7 @@ class A2CLambdaLearner:
         actor_score.backward(retain_graph=True)
         with torch.no_grad():
             for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
-                actor_trace.copy_(self.discount * self.actor_eligibility_traces_decay * actor_trace + parameter.grad)
+                actor_trace.copy_(self.discount * self.actor_lambda * actor_trace + parameter.grad)
                 parameter.grad.copy_(delta * actor_trace * (1 - self.actor_entropy_loss_coef))
         # Add the entropy score gradient
         entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
@@ -157,7 +157,7 @@ class A2CLambdaLearner:
         critic_score.backward()
         with torch.no_grad():
             for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
-                critic_trace.copy_(self.discount * self.critic_eligibility_traces_decay * critic_trace + parameter.grad)
+                critic_trace.copy_(self.discount * self.critic_lambda * critic_trace + parameter.grad)
                 parameter.grad.copy_(delta * critic_trace)
 
         self.actor_optimizer.step()
