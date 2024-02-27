@@ -8,7 +8,7 @@ python3 main.py the_one \
         reaction_time_emulator.inaction_probability 0.0 \
         reaction_time_emulator.multiplier 0.0 \
         reaction_time_emulator_minimum 0.0 \
-        actor_critic.actor_entropy_loss_coef 0.5 \
+        a2c.actor_entropy_loss_coef 0.5 \
     -mB \
         consider_actions_in_representation false \
         opponent_model_learn false \

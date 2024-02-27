@@ -181,7 +181,7 @@ class ImitationLearner:
         **kwargs,
     ):
         """Imitation learning applied to a policy"""
-        optimizer_kwargs = extract_sub_kwargs(kwargs, ("optimizer",))
+        optimizer_kwargs, = extract_sub_kwargs(kwargs, ("optimizer",))
         
         self.policy = policy
         self.optimizer = optimizer(self.policy.parameters(), maximize=False, **optimizer_kwargs)

@@ -7,8 +7,8 @@ def get_loggables(agent: FootsiesAgent):
             agent.representation_module,
             agent.game_model,
             agent.opponent_model,
-            agent.actor_critic.actor,
-            agent.actor_critic.critic,
+            agent.actor,
+            agent.critic,
         ],
         "custom_evaluators": [
             ("Learning/Delta", agent.evaluate_average_delta),

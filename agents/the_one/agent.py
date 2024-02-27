@@ -10,7 +10,7 @@ from gymnasium import Env
 from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel, AbstractOpponentModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
-from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, ImitationLearner
 from agents.utils import extract_sub_kwargs
 from agents.torch_utils import AggregateModule
 from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
@@ -60,11 +60,11 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Populate kwargs with default values
         a2c_kwargs = {
             "discount": 1.0,
-            "actor_learning_rate": 1e-4,
-            "critic_learning_rate": 1e-4,
-            "actor_eligibility_traces_decay": 0.0,
-            "critic_eligibility_traces_decay": 0.0,
+            "actor_lambda": 0.0,
+            "critic_lambda": 0.0,
             "actor_entropy_loss_coef": 0.0,
+            "actor_optimizer.lr": 1e-4,
+            "critic_optimizer.lr": 1e-4,
             **a2c_kwargs,
         }
 
@@ -127,20 +127,25 @@ class FootsiesAgent(FootsiesAgentTorch):
             representation=self.representation_module,
         )
 
-        A2CLambdaLearner(
-            actor=self.actor,
-            critic=self.critic,
-            actor_optimizer=optimizer,
-            critic_optimizer=optimizer,
-            **a2c_kwargs,
-        )
-
         # To report in the `model` property
         self.full_model = FullModel(
             game_model=self.game_model,
             opponent_model=self.opponent_model,
             actor=self.actor,
             critic=self.critic,
+        )
+
+        # Learning managers
+        self.a2c = A2CLambdaLearner(
+            actor=self.actor,
+            critic=self.critic,
+            actor_optimizer=optimizer,
+            critic_optimizer=optimizer,
+            **a2c_kwargs,
+        )
+        self.imitator = ImitationLearner(
+            policy=self.actor,
+            optimizer=torch.optim.Adam,
         )
 
         # Optimizers. The actor-critic module already takes care of its own optimizers.
@@ -181,7 +186,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             raise ValueError("the game model must be linear to use this method")
         if len(self.opponent_model.opponent_model_layers) > 1:
             raise ValueError("the opponent model must be linear to use this method")
-        if len(self.actor_critic.actor.actor_layers) > 1:
+        if len(self.a2c.actor.actor_layers) > 1:
             raise ValueError("the actor must be linear to use this method")
 
         obs_dim = self.representation_dim
@@ -207,7 +212,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         W_o = opponent_model_parameters["weight"].data
         b_o = opponent_model_parameters["bias"].data.unsqueeze(1)
         
-        policy_parameters = dict(self.actor_critic.actor.actor_layers[0].named_parameters())
+        policy_parameters = dict(self.a2c.actor.actor_layers[0].named_parameters())
         W_a = policy_parameters["weight"].data
         b_a = policy_parameters["bias"].data.unsqueeze(1)
         
@@ -237,7 +242,7 @@ class FootsiesAgent(FootsiesAgentTorch):
                 self.current_simple_action = None
                 self.current_simple_action_frame = 0
         
-        action = self.actor_critic.act(self.current_observation)
+        action = self.a2c.sample_action(self.current_observation)
 
         # Appropriately convert the action in case it is simplified (not primitive)
         if not self.over_primitive_actions:
@@ -314,8 +319,8 @@ class FootsiesAgent(FootsiesAgentTorch):
             update_actor_critic = ActionMap.is_state_actionable_late(previous_agent_move_state, previous_agent_move_progress, current_agent_move_progress)
 
         if update_actor_critic:
-            self.actor_critic.update(obs, next_obs, reward, terminated)
-            self.cumulative_delta += self.actor_critic.delta
+            self.a2c.learn(obs, next_obs, reward, terminated)
+            self.cumulative_delta += self.a2c.delta
             self.cumulative_delta_n += 1
 
     def initialize(
@@ -352,11 +357,11 @@ class FootsiesAgent(FootsiesAgentTorch):
             for episode in dataset.episodes:
                 for obs, next_obs, reward, p1_action, p2_action in episode:
                     action = p1_action if agent_is_p1 else p2_action
-                    self.actor_critic.update_policy_by_imitation(obs, action, frozen_representation)
+                    self.imitator.learn(obs, action, frozen_representation)
 
     # NOTE: literally extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        model = deepcopy(self.actor_critic.actor)
+        model = deepcopy(self.actor)
 
         def internal_policy(obs):
             obs = torch.from_numpy(obs).float().unsqueeze(0)

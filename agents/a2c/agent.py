@@ -15,39 +15,36 @@ class FootsiesAgent(FootsiesAgentTorch):
         self,
         observation_space_size: int,
         action_space_size: int,
-        actor: ActorNetwork = None,
-        critic: CriticNetwork = None,
         learner: A2CLambdaLearner = None,
         **kwargs,
     ):
-        a2c_kwargs, actor_kwargs, critic_kwargs = extract_sub_kwargs(kwargs, "a2c", "actor", "critic", strict=True)
+        a2c_kwargs, actor_kwargs, critic_kwargs = extract_sub_kwargs(kwargs, ("a2c", "actor", "critic"), strict=True)
 
-        self.actor = ActorNetwork(
-            obs_dim=observation_space_size,
-            action_dim=action_space_size,
-            **actor_kwargs,
-        ) if actor is None else actor
-        
-        self.critic = CriticNetwork(
-            obs_dim=observation_space_size,
-            **critic_kwargs,
-        ) if critic is None else critic
+        self.learner = A2CLambdaLearner(
+            actor=ActorNetwork(
+                obs_dim=observation_space_size,
+                action_dim=action_space_size,
+                **actor_kwargs,
+            ),
+            critic=CriticNetwork(
+                obs_dim=observation_space_size,
+                **critic_kwargs,
+            ),
+            **a2c_kwargs,
+        ) if learner is None else learner
+
+        self.actor = learner.actor
+        self.critic = learner.critic
 
         self.actor_critic = AggregateModule({
             "actor": self.actor,
             "critic": self.critic,
         })
 
-        self.learner = A2CLambdaLearner(
-            actor=self.actor,
-            critic=self.critic,
-            **a2c_kwargs,
-        ) if learner is None else learner
-
         self.current_observation = None
 
     def act(self, obs, info: dict) -> "any":
-        self.current_observation = None
+        self.current_observation = obs
         return self.learner.sample_action(obs)
 
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):

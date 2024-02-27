@@ -6,6 +6,7 @@ saved
 /test*
 /runs_*
 /saved_*
+/rps/plots
 
 # VS Code
 .vscode

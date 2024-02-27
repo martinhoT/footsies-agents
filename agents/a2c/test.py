@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from typing import Any
 from torch import nn
 from gymnasium.wrappers.flatten_observation import FlattenObservation
+from gymnasium.wrappers.normalize import NormalizeObservation
+from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium import ObservationWrapper
 from gymnasium.spaces import Box
 from tqdm import tqdm
@@ -140,7 +142,7 @@ MountainCar: (not good actually)
 """
 
 
-ENVIRONMENT = "MountainCar-v0"
+ENVIRONMENT = "LunarLander-v2"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -150,7 +152,7 @@ if ENVIRONMENT == "FrozenLake-v1":
 elif ENVIRONMENT == "LunarLander-v2":
     kwargs = {
         "continuous": False,
-        "enable_wind": False,
+        "enable_wind": True,
     }
 
 else:
@@ -159,9 +161,12 @@ else:
 env_generator = lambda e: (
     # MountainCarCoding(
     # CartPoleCoding(
+    # TransformObservation(
         FlattenObservation(
             e
         )
+        #, lambda obs: (obs - np.array([0.0, -0.3])) / np.array([0.07, 0.9])
+    # )
     # )
 )
 
@@ -169,7 +174,7 @@ env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,
-        render_mode="human",
+        render_mode=None,
     )
 )
 
@@ -180,34 +185,34 @@ learner = A2CLambdaLearner(
     actor=ActorNetwork(
         obs_dim=obs_dim,
         action_dim=action_dim,
-        hidden_layer_sizes=[16],
+        hidden_layer_sizes=[32],
         hidden_layer_activation=nn.ReLU,
     ),
     critic=CriticNetwork(
         obs_dim=obs_dim,
-        hidden_layer_sizes=[16],
+        hidden_layer_sizes=[32],
         hidden_layer_activation=nn.ReLU,
     ),
     discount=1.0,
     actor_lambda=0.8,
     critic_lambda=0.8,
-    actor_entropy_loss_coef=0.1,
+    actor_entropy_loss_coef=0.0,
     actor_optimizer=torch.optim.Adam,
     critic_optimizer=torch.optim.Adam,
     **{
-        "actor_optimizer.lr": 1e-4,
-        "critic_optimizer.lr": 1e-4,
+        "actor_optimizer.lr": 1e-3,
+        "critic_optimizer.lr": 1e-3,
     }
 )
 
 # Novelty-based intrinsic reward
-novelty_table = NoveltyTable(reward_scale=1)
+novelty_table = NoveltyTable(reward_scale=10)
 single_tilings = [
     Tiling({
-        MountainCarAttribute.POSITION: np.linspace(-1.2, 0.6, 20)
+        MountainCarAttribute.POSITION: np.linspace(-1.0, 1.0, 20)
     }),
     Tiling({
-        MountainCarAttribute.VELOCITY: np.linspace(-0.07, 0.07, 20)
+        MountainCarAttribute.VELOCITY: np.linspace(-1.0, 1.0, 20)
     }),
 ]
 mountain_car_tile_coding = TileCoding([
@@ -215,8 +220,8 @@ mountain_car_tile_coding = TileCoding([
     *(t + 0.05 for t in single_tilings),
     *(t - 0.05 for t in single_tilings),
     Tiling({
-        MountainCarAttribute.POSITION: np.linspace(-1.2, 0.6, 20),
-        MountainCarAttribute.VELOCITY: np.linspace(-0.07, 0.07, 20),
+        MountainCarAttribute.POSITION: np.linspace(-1.0, 1.0, 20),
+        MountainCarAttribute.VELOCITY: np.linspace(-1.0, 1.0, 20),
     })
 ])
 
@@ -226,8 +231,10 @@ curiosity_trainer = None
 # Value function visualization
 if ENVIRONMENT == "MountainCar-v0":
     from plot_utils import Heatmap
-    x = torch.linspace(-1.2, 0.6, 20)
-    y = torch.linspace(-0.07, 0.07, 20)
+    # x = torch.linspace(-1.2, 0.6, 20)
+    # y = torch.linspace(-0.07, 0.07, 20)
+    x = torch.linspace(-1.0, 1.0, 20)
+    y = torch.linspace(-1.0, 1.0, 20)
     heatmap_grid = torch.meshgrid(x, y, indexing="xy")
     heatmap_states = torch.stack(heatmap_grid, dim=-1)
     heatmap = Heatmap(
@@ -251,7 +258,7 @@ try:
     terminated, truncated = True, True
 
     # episode_iterator = count()
-    episode_iterator = range(1000)
+    episode_iterator = range(10000)
     step = 0
     scores = []
     scores_avg = []
@@ -269,9 +276,9 @@ try:
             action = learner.sample_action(obs)
             next_obs, reward, terminated, truncated, info = env.step(action)
             # Augment reward with novelty-based curiosity
-            # t = mountain_car_tile_coding.transform(next_obs)
-            # novelty_table.register(t)
-            # reward += novelty_table.intrinsic_reward(t)
+            t = mountain_car_tile_coding.transform(next_obs)
+            novelty_table.register(t)
+            reward += novelty_table.intrinsic_reward(t)
             # Update agent
             learner.learn(obs, next_obs, reward, terminated)
             
@@ -286,7 +293,7 @@ try:
             if ENVIRONMENT == "MountainCar-v0" and terminated:
                 print("VICTORY!!!")
 
-            if step % heatmap_update_interval == 0:
+            if heatmap and step % heatmap_update_interval == 0:
                 heatmap.update(learner.critic(heatmap_states).detach().numpy().squeeze())
 
         obs, info = env.reset()

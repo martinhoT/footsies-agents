@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Tuple
 from gymnasium import Env
@@ -53,7 +54,9 @@ class FootsiesAgentTorch(FootsiesAgentBase):
         """The PyTorch model used by the agent"""
     
     def load(self, folder_path: str):
-        self.model.load_state_dict(torch.load(folder_path))
+        model_path = os.path.join(folder_path, "model")
+        self.model.load_state_dict(torch.load(model_path))
 
     def save(self, folder_path: str):
-        torch.save(self.model.state_dict(), folder_path)
+        model_path = os.path.join(folder_path, "model")
+        torch.save(self.model.state_dict(), model_path)
