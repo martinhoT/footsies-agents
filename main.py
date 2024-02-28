@@ -1,8 +1,10 @@
 import os
 import importlib
 import gymnasium as gym
+import torch
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
+from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.time_limit import TimeLimit
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.envs.exceptions import FootsiesGameClosedError
@@ -16,6 +18,7 @@ from functools import partial
 from typing import List, Any, Callable
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.base import FootsiesAgentBase, FootsiesAgentTorch
+from agents.diayn import DIAYN, DIAYNWrapper
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import snapshot_sb3_policy, wrap_policy
 from agents.torch_utils import hogwild
@@ -165,6 +168,7 @@ def train(
 
 
 def create_env(args: EnvArgs, print_: bool = False) -> Env:
+    # Create environment with initial wrappers
     if args.is_footsies:
         env = FootsiesEnv(**args.kwargs)
 
@@ -178,18 +182,44 @@ def create_env(args: EnvArgs, print_: bool = False) -> Env:
                 print(" Adding FootsiesFrameSkipped wrapper")
             env = FootsiesFrameSkipped(env)
 
-        if args.wrapper_time_limit > 0:
-            env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
+    else:
+        env = gym.make(args.name, **args.kwargs)
 
-        env = FlattenObservation(env)
+    # Wrap with additional, environment-independent wrappers
+    if args.wrapper_time_limit > 0:
+        env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
 
+    env = FlattenObservation(env)
+
+    # Final FOOTSIES wrappers
+    if args.is_footsies:
         if args.footsies_wrapper_acd:
             if print_:
                 print(" Adding FootsiesActionCombinationsDiscretized wrapper")
             env = FootsiesActionCombinationsDiscretized(env)
-    
-    else:
-        env = gym.make(args.name, **args.kwargs)
+
+    if args.torch:
+        if print_:
+            print(" Adding PyTorch tensor wrapper")
+        env = TransformObservation(env, lambda obs: torch.from_numpy(obs).float().unsqueeze(0))
+
+    # Final miscellaneous wrappers
+    if args.diayn:
+        if print_:
+            print(" Adding DIAYN wrapper")
+        env = DIAYNWrapper(
+            env,
+            DIAYN(
+                observation_dim=env.observation_space.shape[0],
+                skill_dim=args.diayn_kwargs["skill_dim"],
+                include_baseline=args.diayn_kwargs["include_baseline"],
+                discriminator_learning_rate=args.diayn_kwargs["discriminator_learning_rate"],
+                discriminator_hidden_layer_sizes=args.diayn_kwargs["discriminator_hidden_layer_sizes"],
+                discriminator_hidden_layer_activation=args.diayn_kwargs["discriminator_hidden_layer_activation"],
+            ),
+            log_dir=args.diayn_kwargs["log_dir"],
+            log_frequency=args.diayn_kwargs["log_frequency"],
+        )
 
     return env
 
@@ -199,12 +229,12 @@ if __name__ == "__main__":
 
     # Prepare environment
 
-    print(f"Initializing {'FOOTSIES' if args.env.is_footsies else ('environment' + args.env.name)}")
-    env = create_env(args.env, print_=True)
-
+    print(f"Initializing {'FOOTSIES' if args.env.is_footsies else ('environment ' + args.env.name)}")
     print(" Environment arguments:")
     for k, v in args.env.kwargs.items():
         print(f"  {k}: {v} ({type(v).__name__})")
+
+    env = create_env(args.env, print_=True)
 
     # Prepare agent
     
@@ -233,23 +263,24 @@ if __name__ == "__main__":
     # Identity function, used when logging is disabled
     agent_logging_wrapper = lambda a: a
     if args.misc.log and not args.agent.is_sb3:
-        print("Logging enabled")
-        loggables = import_loggables(args.agent.name, agent)
+        if not args.agent.is_sb3:
+            print("Logging enabled on the agent")
+            loggables = import_loggables(args.agent.name, agent)
 
-        agent_logging_wrapper = lambda a: TrainingLoggerWrapper(
-            a,
-            log_frequency=args.misc.log_frequency,
-            log_dir=args.misc.log_dir,
-            step_start_value=args.misc.log_step_start,
-            cumulative_reward=True,
-            average_reward=True,
-            average_reward_coef=0.99,
-            win_rate=True,
-            truncation=True,
-            episode_length=True,
-            test_states_number=args.misc.log_test_states_number,
-            **loggables,
-        )
+            agent_logging_wrapper = lambda a: TrainingLoggerWrapper(
+                a,
+                log_frequency=args.misc.log_frequency,
+                log_dir=args.misc.log_dir,
+                step_start_value=args.misc.log_step_start,
+                cumulative_reward=True,
+                average_reward=True,
+                average_reward_coef=0.99,
+                win_rate=True,
+                truncation=True,
+                episode_length=True,
+                test_states_number=args.misc.log_test_states_number,
+                **loggables,
+            )
 
     if args.agent.is_sb3:
         try:

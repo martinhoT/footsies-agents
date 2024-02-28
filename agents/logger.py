@@ -1,10 +1,8 @@
-from itertools import cycle
 from gymnasium import Env
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
 from agents.base import FootsiesAgentBase
 from typing import List, Callable, Any, Tuple
-from footsies_gym.envs.footsies import FootsiesEnv
 from collections import deque
 
 
@@ -16,7 +14,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         log_dir: str = None,
         cumulative_reward: bool = False,
         average_reward: bool = False,
-        average_reward_coef: float = 0.99,
+        average_reward_coef: float = None,
         win_rate: bool = False,
         truncation: bool = False,
         episode_length: bool = False,
@@ -45,7 +43,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         average_reward: bool
             the exponentially weighted average of the reward
         average_reward_coef: float
-            the coefficient of the exponentially weighted average of the reward
+            the coefficient of the exponentially weighted average of the reward. If `None`, will be `1 - 1 / log_frequency`
         win_rate: bool
             the agent's win rate. Only makes sense for the FOOTSIES environment
         truncation: bool
@@ -70,7 +68,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.log_frequency = log_frequency
         self.cumulative_reward_enabled = cumulative_reward
         self.average_reward_enabled = average_reward
-        self.average_reward_coef = average_reward_coef
+        self.average_reward_coef = average_reward_coef if average_reward_coef is not None else (1 - 1 / log_frequency)
         self.win_rate_enabled = win_rate
         self.truncation_enabled = truncation
         self.episode_length_enabled = episode_length
@@ -140,7 +138,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             if self.win_rate_enabled:
                 self.summary_writer.add_scalar(
                     "Performance/Win rate",
-                    self.total_wins / self.total_terminated_episodes,
+                    (self.total_wins / self.total_terminated_episodes) if self.total_terminated_episodes > 0 else 0.5,
                     self.current_step,
                 )
             if self.truncation_enabled:
@@ -152,7 +150,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             if self.episode_length_enabled:
                 self.summary_writer.add_scalar(
                     "Training/Episode length",
-                    sum(self.episode_lengths) / len(self.episode_lengths),
+                    (sum(self.episode_lengths) / len(self.episode_lengths)) if self.episode_lengths else 0.0,
                     self.current_step,
                 )
                 self.episode_lengths.clear()

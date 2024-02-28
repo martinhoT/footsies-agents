@@ -238,3 +238,14 @@ def observation_invert_perspective_flattened(obs: torch.Tensor) -> torch.Tensor:
     inverted[:, [34, 35]] = obs[:, [35, 34]]
 
     return inverted
+
+
+def hidden_layer_parameters_from_specifications(
+    hidden_layer_sizes_specification: str,
+    hidden_layer_activation_specification: str,
+) -> tuple[list[int], type[nn.Module]]:
+    
+    hidden_layer_sizes = [int(n) for n in hidden_layer_sizes_specification.split(",")] if hidden_layer_sizes_specification else []
+    hidden_layer_activation = getattr(nn, hidden_layer_activation_specification)
+
+    return hidden_layer_sizes, hidden_layer_activation

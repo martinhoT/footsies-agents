@@ -1,5 +1,4 @@
 import torch
-import numpy as np
 from torch import nn
 from torch.distributions import Categorical
 from agents.torch_utils import create_layered_network
@@ -107,15 +106,8 @@ class A2CLambdaLearner:
         # Track values
         self.delta = 0.0
 
-    def _obs_to_torch(self, obs: np.ndarray) -> torch.Tensor:
-        if not isinstance(obs, torch.Tensor):
-            return torch.from_numpy(obs).float().reshape((1, -1))
-        return obs
-
-    def sample_action(self, obs: np.ndarray) -> int:
+    def sample_action(self, obs: torch.Tensor) -> int:
         """Sample an action from the actor. A training step starts with `act()`, followed immediately by an environment step and `update()`"""
-        obs = self._obs_to_torch(obs)
-
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
         
@@ -126,16 +118,13 @@ class A2CLambdaLearner:
         return self.action.item()
 
     # TODO: if we use linear function approximation, could we do True Online TD(lambda)?
-    def learn(self, obs: np.ndarray, next_obs: np.ndarray, reward: float, terminated: bool):
+    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool):
         """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `act()`"""
-        obs = self._obs_to_torch(obs)
-
         # Compute the TD delta
         with torch.no_grad():
             if terminated:
                 target = reward
             else:
-                next_obs = self._obs_to_torch(next_obs)
                 target = reward + self.discount * self.critic(next_obs)
             
             delta = (target - self.critic(obs)).item()
@@ -187,9 +176,8 @@ class ImitationLearner:
         self.optimizer = optimizer(self.policy.parameters(), maximize=False, **optimizer_kwargs)
         self.loss_fn = nn.KLDivLoss(reduction="batchmean")
 
-    def learn(self, obs: np.ndarray, action: int, frozen_representation: bool = False):
+    def learn(self, obs: torch.Tensor, action: int, frozen_representation: bool = False):
         """Update policy by imitating the action at the given observation"""
-        obs = self._obs_to_torch(obs)
         action_onehot = torch.nn.functional.one_hot(torch.Tensor(action), num_classes=self.actor.action_dim)
         self.optimizer.zero_grad()
 

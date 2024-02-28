@@ -1,6 +1,5 @@
 import os
 import torch
-import numpy as np
 from torch import nn
 from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
@@ -107,15 +106,10 @@ class FootsiesAgent(FootsiesAgentBase):
         self.cumulative_loss_move_progress = 0
         self.cumulative_loss_position = 0
 
-    def _obs_to_tensor(self, obs: np.ndarray) -> torch.Tensor:
-        return torch.tensor(obs, dtype=torch.float32).reshape((1, -1))
-
     def _action_to_tensor(self, action: int, num_classes: int) -> torch.Tensor:
         return nn.functional.one_hot(torch.tensor(action), num_classes=num_classes).unsqueeze(0)
 
-    def _update_batch(self, obs: np.ndarray, agent_action: int, opponent_action: int, next_obs: np.ndarray):
-        obs = self._obs_to_tensor(obs)
-        next_obs = self._obs_to_tensor(next_obs)
+    def _update_batch(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
         agent_action_oh = self._action_to_tensor(agent_action, self.agent_action_dim)
         opponent_action_oh = self._action_to_tensor(opponent_action, self.opponent_action_dim)
         
@@ -127,11 +121,11 @@ class FootsiesAgent(FootsiesAgentBase):
         
         self.state_batch_as_list.append(torch.hstack((obs, agent_action_oh, opponent_action_oh, target)))
 
-    def act(self, obs: np.ndarray, info: dict) -> "any":
+    def act(self, obs: torch.Tensor, info: dict) -> "any":
         self.current_observation = obs
         return 0
 
-    def update(self, next_obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info: dict):
+    def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
         if not self.by_primitive_actions:
             # Reminder: these actions are the ones in the next observation!
             agent_action = info["p1_move"]
@@ -253,10 +247,8 @@ class FootsiesAgent(FootsiesAgentBase):
 
         return res
 
-    def predict(self, obs: np.ndarray, agent_action: int, opponent_action: int) -> np.ndarray:
+    def predict(self, obs: torch.Tensor, agent_action: int, opponent_action: int) -> torch.Tensor:
         """Predict the next observation. The prediction is sanitized to contain valid values"""
-        obs = self._obs_to_tensor(obs)
-        
         with torch.no_grad():
             next_obs: torch.Tensor = self.game_model(torch.hstack((
                 obs,
@@ -276,7 +268,7 @@ class FootsiesAgent(FootsiesAgentBase):
         next_obs[:, 32] = torch.clamp(next_obs[:, 32], 0.0, 1.0)
         next_obs[:, 33] = torch.clamp(next_obs[:, 33], 0.0, 1.0)
 
-        return next_obs.numpy(force=True)
+        return next_obs
 
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")

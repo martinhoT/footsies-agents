@@ -142,7 +142,7 @@ MountainCar: (not good actually)
 """
 
 
-ENVIRONMENT = "LunarLander-v2"
+ENVIRONMENT = "MountainCar-v0"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -161,12 +161,12 @@ else:
 env_generator = lambda e: (
     # MountainCarCoding(
     # CartPoleCoding(
-    # TransformObservation(
+    TransformObservation(
         FlattenObservation(
             e
         )
-        #, lambda obs: (obs - np.array([0.0, -0.3])) / np.array([0.07, 0.9])
-    # )
+        , lambda obs: torch.from_numpy((obs - np.array([-0.3, 0.0])) / np.array([0.9, 0.07])).float().unsqueeze(0)
+    )
     # )
 )
 
@@ -174,7 +174,7 @@ env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,
-        render_mode=None,
+        render_mode="human",
     )
 )
 
@@ -209,10 +209,10 @@ learner = A2CLambdaLearner(
 novelty_table = NoveltyTable(reward_scale=10)
 single_tilings = [
     Tiling({
-        MountainCarAttribute.POSITION: np.linspace(-1.0, 1.0, 20)
+        MountainCarAttribute.POSITION: torch.linspace(-1.0, 1.0, 20)
     }),
     Tiling({
-        MountainCarAttribute.VELOCITY: np.linspace(-1.0, 1.0, 20)
+        MountainCarAttribute.VELOCITY: torch.linspace(-1.0, 1.0, 20)
     }),
 ]
 mountain_car_tile_coding = TileCoding([
@@ -220,8 +220,8 @@ mountain_car_tile_coding = TileCoding([
     *(t + 0.05 for t in single_tilings),
     *(t - 0.05 for t in single_tilings),
     Tiling({
-        MountainCarAttribute.POSITION: np.linspace(-1.0, 1.0, 20),
-        MountainCarAttribute.VELOCITY: np.linspace(-1.0, 1.0, 20),
+        MountainCarAttribute.POSITION: torch.linspace(-1.0, 1.0, 20),
+        MountainCarAttribute.VELOCITY: torch.linspace(-1.0, 1.0, 20),
     })
 ])
 

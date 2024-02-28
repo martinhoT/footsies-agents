@@ -1,8 +1,6 @@
-import numpy as np
 import torch
 from torch import nn
 from torch.distributions import Categorical
-from os import path
 from copy import deepcopy
 from agents.action import ActionMap
 from agents.base import FootsiesAgentTorch
@@ -12,7 +10,6 @@ from agents.the_one.model import FullModel, RepresentationModule, AbstractGameMo
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, ImitationLearner
 from agents.utils import extract_sub_kwargs
-from agents.torch_utils import AggregateModule
 from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
 from data import FootsiesDataset
 
@@ -229,8 +226,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         return mtx, bias
 
     # It's in this function that the current observation and representation variables are updated
-    def act(self, obs: np.ndarray, info: dict) -> int:
-        self.current_observation = torch.from_numpy(obs).float().unsqueeze(0)
+    def act(self, obs: torch.Tensor, info: dict) -> int:
+        self.current_observation = obs
 
         # In case a simple action was already being executed, just keep doing it
         if self.current_simple_action is not None:
@@ -251,10 +248,8 @@ class FootsiesAgent(FootsiesAgentTorch):
             
         return action
 
-    def update(self, next_obs: np.ndarray, reward: float, terminated: bool, truncated: bool, info: dict):
-        # Setup
-        next_obs = torch.from_numpy(next_obs).float().unsqueeze(0)
-        #  the actions are from info dictionary at the next step, but that's because it contains which action was performed in the *previous* step
+    def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
+        # The actions are from info dictionary at the next step, but that's because it contains which action was performed in the *previous* step
         if not self.over_primitive_actions:
             agent_action = info["p1_move"]
             opponent_action = info["p2_move"]
@@ -364,9 +359,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         model = deepcopy(self.actor)
 
         def internal_policy(obs):
-            obs = torch.from_numpy(obs).float().unsqueeze(0)
             probs = model(obs)
-
             return Categorical(probs=probs).sample().item()
 
         return super()._extract_policy(env, internal_policy)
@@ -375,16 +368,6 @@ class FootsiesAgent(FootsiesAgentTorch):
     def model(self) -> nn.Module:
         return self.full_model
 
-    def evaluate_average_delta(self) -> float:
-        res = (
-            self.cumulative_delta / self.cumulative_delta_n
-        ) if self.cumulative_delta_n != 0 else 0
-
-        self.cumulative_delta = 0
-        self.cumulative_delta_n = 0
-
-        return res
-    
     def evaluate_average_delta(self) -> float:
         res = (
             self.cumulative_delta / self.cumulative_delta_n

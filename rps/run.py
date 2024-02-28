@@ -162,14 +162,14 @@ def main(
     )
 
     if self_play:
-        game.set_opponent(lambda o, i: agent.act(o))
+        game.set_opponent(lambda o, i: agent.act(o, i))
 
-    def exp_averaged_metrics(training_loop: Generator[tuple, None, None]):
+    def exp_averaged_metrics(training_loop: Generator[tuple, None, None], factor: float = 0.998):
         reward_exp_avg = 0.0
         delta_exp_avg = 0.0
         for episode, delta, reward in training_loop:
-            reward_exp_avg = 0.99 * reward_exp_avg + 0.01 * reward
-            delta_exp_avg = 0.99 * delta_exp_avg + 0.01 * delta
+            reward_exp_avg = factor * reward_exp_avg + (1 - factor) * reward
+            delta_exp_avg = factor * delta_exp_avg + (1 - factor) * delta
             yield delta_exp_avg, reward_exp_avg
 
     training_loop = exp_averaged_metrics(train(game, agent, episodes, use_tqdm=log))
@@ -183,6 +183,8 @@ def main(
             
         else:
             fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+            fig: plt.Figure
+            fig.set_figwidth(13)
             ax1.plot(deltas)
             ax1.set_title("Delta")
             ax1.set_xlabel("Episode")

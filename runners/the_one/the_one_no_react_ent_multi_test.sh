@@ -21,7 +21,12 @@ python3 main.py the_one \
     --log-frequency 10000 \
     --log-dir runs/the_one_no_react_ent_multi \
     --model-name the_one_no_react_ent_multi \
-    --hogwild \
-    --hogwild-cpus 12 \
-    --hogwild-n-workers 6 \
+    --no-save \
+    --no-log \
+    -eS \
+        render_mode human \
+        sync_mode synced_non_blocking \
+    -eB \
+        fast_forward false \
+        vs_player true \
     "$@"

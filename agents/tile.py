@@ -72,21 +72,21 @@ class TileCoding:
     ):
         self.tilings = tilings
 
-    def craft_tiling(self, observation: np.ndarray | torch.Tensor, tiling: Tiling) -> torch.Tensor:
+    def craft_tiling(self, observation: torch.Tensor, tiling: Tiling) -> torch.Tensor:
         res = torch.zeros((1, tiling.tiles), dtype=torch.bool)
         
         presence = 0
         offset = 1
 
         for attribute, breakpoints in tiling.breakpoints.items():
-            presence += offset * np.sum(breakpoints <= observation[attribute.value])
+            presence += offset * torch.sum(breakpoints <= observation[:, attribute.value]).item()
             offset *= tiling.tiles_of_attribute(attribute)
         
         res[0, presence] = True
 
         return res
 
-    def transform(self, observation: np.ndarray | torch.Tensor) -> torch.Tensor:
+    def transform(self, observation: torch.Tensor) -> torch.Tensor:
         return torch.hstack([
             self.craft_tiling(observation, tiling)
             for tiling in self.tilings

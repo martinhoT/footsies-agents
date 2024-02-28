@@ -1,6 +1,7 @@
 import argparse
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
+from agents.torch_utils import hidden_layer_parameters_from_specifications
 
 
 @dataclass
@@ -46,6 +47,9 @@ class EnvArgs:
     footsies_wrapper_norm: bool
     footsies_wrapper_acd: bool
     footsies_wrapper_fs: bool
+    diayn: bool
+    diayn_kwargs: dict
+    torch: bool
 
 
 @dataclass
@@ -220,9 +224,47 @@ def parse_args() -> MainArgs:
     parser.add_argument(
         "--wrapper-time-limit",
         type=int,
-        default=99
-        * 60,  # NOTE: not actually sure if it's 60, for FOOTSIES it may be 50
+        default=99 * 60,  # NOTE: not actually sure if it's 60, for FOOTSIES it may be 50
         help="add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES",
+    )
+    parser.add_argument(
+        "--diayn",
+        action="store_true",
+        help="use the DIAYN wrapper, which replaces the environment's reward with the pseudo-reward from DIAYN, fostering the creation of a diverse set of task-agnostic skills"
+    )
+    parser.add_argument(
+        "--diayn-skill-dim",
+        type=int,
+        default=5,
+        help="the dimensionality of the skill vectors for DIAYN, roughly equivalent to the desired number of skills to learn"
+    )
+    parser.add_argument(
+        "--diayn-no-baseline",
+        action="store_true",
+        help="whether to exclude the baseline in the pseudo-reward of DIAYN. Excluding it encourages haste rather than staying alive"
+    )
+    parser.add_argument(
+        "--diayn-discriminator-learning-rate",
+        type=float,
+        default=1e-3,
+        help="the learning rate for the discriminator network in DIAYN"
+    )
+    parser.add_argument(
+        "--diayn-discriminator-hidden-layer-sizes-specification",
+        type=str,
+        default="32",
+        help="specification of the hidden layer sizes for the discriminator network in DIAYN. Should be a string of comma-separated integers"
+    )
+    parser.add_argument(
+        "--diayn-discriminator-hidden-layer-activation-specification",
+        type=str,
+        default="ReLU",
+        help="specification of the hidden layer activation for the discriminator network in DIAYN. Should be a string of the name of a PyTorch activation function"
+    )
+    parser.add_argument(
+        "--torch",
+        action="store_true",
+        help="whether to transform environment observations to torch tensors"
     )
     parser.add_argument("--episodes", type=int, default=None, help="number of episodes. Will be ignored if an SB3 agent is used")
     parser.add_argument("--time-steps", type=int, default=None, help="number of time steps. Will be ignored if a FOOTSIES agent is used")
@@ -333,12 +375,18 @@ def parse_args() -> MainArgs:
         env_kwargs["opponent"] = lambda o: (False, False, False)
         env_kwargs["opponent_port"] = args.footsies_self_play_port
 
-    if is_footsies and args.footsies_path is None:
-        raise ValueError(
-            "the path to the FOOTSIES executable should be specified with '--footsies-path' when using the FOOTSIES environment"
-        )
+    if is_footsies:
+        if args.footsies_path is None:
+            raise ValueError(
+                "the path to the FOOTSIES executable should be specified with '--footsies-path' when using the FOOTSIES environment"
+            )
+        
+        env_kwargs["game_path"] = args.footsies_path
 
-    env_kwargs["game_path"] = args.footsies_path
+    diayn_discriminator_hidden_layer_sizes, diayn_discriminator_hidden_layer_activation = hidden_layer_parameters_from_specifications(
+        args.diayn_discriminator_hidden_layer_sizes_specification,
+        args.diayn_discriminator_hidden_layer_activation_specification,
+    )
 
     return MainArgs(
         episodes=args.episodes,
@@ -370,6 +418,17 @@ def parse_args() -> MainArgs:
             footsies_wrapper_norm=args.footsies_wrapper_norm,
             footsies_wrapper_acd=args.footsies_wrapper_acd,
             footsies_wrapper_fs=args.footsies_wrapper_fs,
+            diayn=args.diayn,
+            diayn_kwargs={
+                "skill_dim": args.diayn_skill_dim,
+                "include_baseline": not args.diayn_no_baseline,
+                "discriminator_learning_rate": args.diayn_discriminator_learning_rate,
+                "discriminator_hidden_layer_sizes": diayn_discriminator_hidden_layer_sizes,
+                "discriminator_hidden_layer_activation": diayn_discriminator_hidden_layer_activation,
+                "log_dir": args.log_dir,
+                "log_frequency": args.log_frequency,
+            },
+            torch=args.torch,
         ),
         self_play=SelfPlayArgs(
             enabled=will_footsies_self_play,
@@ -378,7 +437,6 @@ def parse_args() -> MainArgs:
             mix_bot=args.footsies_self_play_mix_bot,
         )
     )
-
 
 
 def parse_args_experiment() -> ExperimentArgs:

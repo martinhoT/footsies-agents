@@ -136,6 +136,7 @@ class RPS:
         observation_include_move_progress: bool = False,
         observation_transformer: Callable[[RPSObservation], Any] = lambda o: o,
         temporal_actions: list[Callable[[], TemporalAction]] = DEFAULT_TEMPORAL_ACTIONS,
+        time_limit: int = 100000,
     ):
         if not use_temporal_actions and observation_include_move_progress:
             raise ValueError("invalid arguments, asked for inclusion of the move progress of temporal actions without using temporal actions")
@@ -149,6 +150,7 @@ class RPS:
         self.observation_include_move_progress = observation_include_move_progress
         self.transform_observation = observation_transformer
         self.temporal_actions = temporal_actions
+        self.time_limit = time_limit
 
         self.current_observation = 0
         self.p1_health = 0
@@ -309,14 +311,15 @@ class RPS:
         if p2_result < 0:
             self.p2_health -= 1
 
-        terminated = self.p1_health <= 0 or self.p2_health <= 0
-
-        reward = self.reward(p1_result, terminated)
-
         self.current_step += 1
         self.current_observation = self.observation(p1_play, p2_play)
         self.current_info = self.info(p1_play, p2_play, p1_action, p2_action)
-        return self.current_observation, reward, terminated, False, self.current_info
+
+        reward = self.reward(p1_result, terminated)
+        terminated = self.p1_health <= 0 or self.p2_health <= 0
+        truncated = self.current_step >= self.time_limit
+
+        return self.current_observation, reward, terminated, truncated, self.current_info
 
     def set_opponent(self, opponent: Callable[[RPSObservation], int]):
         self.opponent = opponent
