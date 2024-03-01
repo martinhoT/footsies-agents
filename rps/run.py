@@ -22,7 +22,7 @@ OPPONENT_POOL = {
     "uniform_random_play_temporal": lambda o, i: random.randint(0, 3),
     "masher": lambda o, i: ((0 if random.random() < 0.8 else random.randint(1, 3)) + 1) % 4,
     "thrower": lambda o, i: ((0 if random.random() < 0.9 else random.randint(1, 3)) + 2) % 4,
-    "dodge-attacker": lambda o, i: 1 if i["p2_play"] == 3 else 3,
+    "dodge-attacker": lambda o, i: 1 if i["p2_move"] == 3 else 3,
     # Special
     "imitator": lambda o, i: i["p1_action"] if i["step"] > 0 else random.randint(0, 2),
     "query": lambda o, i: int(input("Opponent action? ")),
@@ -31,12 +31,12 @@ OPPONENT_POOL = {
 
 def print_results(game: RPS, agent: A2CAgent):
     healths_list = [(h1 + 1, h2 + 1) for h1 in range(game.health) for h2 in range(game.health)]
-    plays_list = [(pl1, pl2) for pl1 in range(game.play_dim) for pl2 in range(game.play_dim)] if game.observation_include_play else [[None, None]]
+    moves_list = [(pl1, pl2) for pl1 in range(game.move_dim) for pl2 in range(game.move_dim)] if game.observation_include_move else [[None, None]]
 
     observations = starmap(game.craft_observation, sorted({
-        tuple((*healths, *plays))
+        tuple((*healths, *moves))
         for healths in healths_list
-        for plays in plays_list
+        for moves in moves_list
     }))
 
     results = {
@@ -66,6 +66,7 @@ def train(game: RPS, agent: A2CAgent, episodes: int = None, use_tqdm: bool = Tru
             obs, info = game.reset()
             terminated, truncated = False, False
             episode_reward = 0
+            episode_length = 0
 
             while not (terminated or truncated):
                 action = agent.act(obs, info)
@@ -77,8 +78,9 @@ def train(game: RPS, agent: A2CAgent, episodes: int = None, use_tqdm: bool = Tru
                 obs = next_obs
 
                 episode_reward += reward
+                episode_length += 1
             
-            yield episode, agent.learner.delta, episode_reward
+            yield episode, agent.learner.delta, episode_reward, episode_length
     
     except KeyboardInterrupt:
         pass
@@ -87,6 +89,8 @@ def train(game: RPS, agent: A2CAgent, episodes: int = None, use_tqdm: bool = Tru
 def main(
     # Training
     episodes: int = 10000,
+    time_limit: int = 100000,
+    time_limit_as_truncation: bool = False,
     # Agent
     actor_lr: float = 1e-4,
     critic_lr: float = 1e-4,
@@ -102,7 +106,7 @@ def main(
     dense_reward: bool = False,
     health: int = 3,
     use_temporal_actions: bool = False,
-    observation_include_play: bool = False,
+    observation_include_move: bool = False,
     observation_include_move_progress: bool = False,
     opponent: str = "uniform_random_play",
     # Results
@@ -127,10 +131,12 @@ def main(
         dense_reward=dense_reward,
         health=health,
         flattened=True,
-        observation_include_play=observation_include_play,
+        observation_include_move=observation_include_move,
         use_temporal_actions=use_temporal_actions,
         observation_include_move_progress=observation_include_move_progress,
         observation_transformer=lambda o: o.to(torch.float32).unsqueeze(0),
+        time_limit=time_limit,
+        time_limit_as_truncation=time_limit_as_truncation,
     )
 
     agent = A2CAgent(
@@ -167,13 +173,15 @@ def main(
     def exp_averaged_metrics(training_loop: Generator[tuple, None, None], factor: float = 0.998):
         reward_exp_avg = 0.0
         delta_exp_avg = 0.0
-        for episode, delta, reward in training_loop:
+        episode_length_avg = 0.0
+        for episode, delta, reward, episode_length in training_loop:
             reward_exp_avg = factor * reward_exp_avg + (1 - factor) * reward
             delta_exp_avg = factor * delta_exp_avg + (1 - factor) * delta
-            yield delta_exp_avg, reward_exp_avg
+            episode_length_avg = factor * episode_length_avg + (1 - factor) * episode_length
+            yield delta_exp_avg, reward_exp_avg, episode_length_avg
 
     training_loop = exp_averaged_metrics(train(game, agent, episodes, use_tqdm=log))
-    deltas, rewards = zip(*training_loop)
+    deltas, rewards, episode_lengths = zip(*training_loop)
 
     if plot:
         if plot_during_training:
@@ -182,15 +190,18 @@ def main(
             animation.start()
             
         else:
-            fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2)
+            fig, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3)
             fig: plt.Figure
-            fig.set_figwidth(13)
+            fig.set_figwidth(19)
             ax1.plot(deltas)
             ax1.set_title("Delta")
             ax1.set_xlabel("Episode")
             ax2.plot(rewards)
             ax2.set_title("Reward")
             ax2.set_xlabel("Episode")
+            ax3.plot(episode_lengths)
+            ax3.set_title("Episode length")
+            ax3.set_xlabel("Episode")
             if plot_save_path is not None:
                 plt.savefig(plot_save_path)
                 plt.clf()
@@ -230,7 +241,7 @@ def main(
 
             ans = input("Rollout? ")
     
-    return deltas, rewards
+    return deltas, rewards, episode_lengths
 
 
 def parse_args() -> dict:
@@ -240,7 +251,7 @@ def parse_args() -> dict:
     parser.add_argument("--dense-reward", action="store_true", help="Use a dense reward scheme")
     parser.add_argument("--health", type=int, default=3, help="The health of the agents")
     parser.add_argument("--use-temporal-actions", action="store_true", help="Use temporal actions")
-    parser.add_argument("--observation-include-play", action="store_true", help="Include the play information in the observation")
+    parser.add_argument("--observation-include-move", action="store_true", help="Include the move information in the observation")
     parser.add_argument("--observation-include-move-progress", action="store_true", help="Include the play's move progress in the observation. Only works if using temporal actions")
     parser.add_argument("--opponent", type=str, default="uniform_random_play", choices=OPPONENT_POOL.keys(), help="The opponent to use")
     parser.add_argument("--interactive", action="store_true", help="Interactively perform rollouts with the final agent")

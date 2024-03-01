@@ -3,6 +3,7 @@ import gymnasium
 from torch import nn
 from agents.torch_utils import create_layered_network
 from typing import Any
+from collections import defaultdict
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -180,45 +181,57 @@ class DIAYNWrapper(gymnasium.Wrapper):
 
         self.observation_space = gymnasium.spaces.Box(low=-1.0, high=1.0, shape=(env.observation_space.shape[0] + diayn.skill_dim,))
 
-        if log_dir is not None:
-            self.summary_writer = SummaryWriter(log_dir=log_dir)
+        # Logging
+        self.summary_writer = SummaryWriter(log_dir=log_dir) if log_dir is not None else None
         self.log_frequency = log_frequency
-
-        # To determine when to log
         self.current_step = 0
 
         # Tracking exponentially weighted averages
         self._discriminator_entropy_avg = 0.0
         self._discriminator_loss_avg = 0.0
-        self.avg_factor = 1 - 1 / log_frequency
+        self._skill_rewards_avg = {skill: 0.0 for skill in range(self.diayn.skill_dim)}
+        self._avg_factor = 1 - 1 / log_frequency
 
     def reset(self, *args, **kwargs) -> tuple[torch.Tensor, dict[str, Any]]:
         skill = self.diayn.sample_skill_uniform()
+        print("Using skill", skill)
         obs, info = self.env.reset(*args, **kwargs)
         obs_with_skill = torch.hstack([obs, skill])
         return obs_with_skill, info
     
     def step(self, *args, **kwargs):
         obs, _, terminated, truncated, info = self.env.step(*args, **kwargs)
-        reward = self.diayn.pseudo_reward(obs)
-        obs_with_skill = torch.hstack([obs, self.diayn.current_skill])
+        # We need to detach these from the computation graph or else we will run out of memory!
+        reward = self.diayn.pseudo_reward(obs).item()
+        obs_with_skill = torch.hstack([obs, self.diayn.current_skill]).detach()
+        
         self.diayn.update_discriminator()
 
-        self._discriminator_entropy_avg = (self.avg_factor) * self._discriminator_entropy_avg + (1 - self.avg_factor) * self.diayn.discriminator_last_entropy
-        self._discriminator_loss_avg = (self.avg_factor) * self._discriminator_loss_avg + (1 - self.avg_factor) * self.diayn.discriminator_last_loss
-
         # Logging
-        self.current_step += 1
-        if self.current_step % self.log_frequency == 0:
-            self.summary_writer.add_scalar(
-                "DIAYN/Discriminator entropy",
-                self._discriminator_entropy_avg,
-                self.current_step,
-            )
-            self.summary_writer.add_scalar(
-                "DIAYN/Discriminator loss",
-                self._discriminator_loss_avg,
-                self.current_step,
-            )
+        if self.summary_writer is not None:
+            self._discriminator_entropy_avg = (self._avg_factor) * self._discriminator_entropy_avg + (1 - self._avg_factor) * self.diayn.discriminator_last_entropy
+            self._discriminator_loss_avg = (self._avg_factor) * self._discriminator_loss_avg + (1 - self._avg_factor) * self.diayn.discriminator_last_loss
+            self._skill_rewards_avg[self.diayn.current_skill_id] = (self._avg_factor) * self._skill_rewards_avg[self.diayn.current_skill_id] + (1 - self._avg_factor) * reward
+            self.current_step += 1
+            
+            if self.current_step % self.log_frequency == 0:
+                self.summary_writer.add_scalar(
+                    "DIAYN/Discriminator entropy",
+                    self._discriminator_entropy_avg,
+                    self.current_step,
+                )
+                self.summary_writer.add_scalar(
+                    "DIAYN/Discriminator loss",
+                    self._discriminator_loss_avg,
+                    self.current_step,
+                )
+                for skill, reward_avg in self._skill_rewards_avg:
+                    if reward_avg is not None:
+                        self.summary_writer.add_scalar(
+                            f"DIAYN/Average reward of skill [{skill}]",
+                            reward_avg,
+                            self.current_step,
+                        )
+                        self._skill_rewards_avg[skill] = None
 
         return obs_with_skill, reward, terminated, truncated, info

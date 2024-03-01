@@ -10,5 +10,7 @@ def get_loggables(agent: FootsiesAgent):
         "custom_evaluators": [
             ("Learning/Delta", agent.evaluate_average_delta),
         ],
-        "custom_evaluators_over_test_states": [],
+        "custom_evaluators_over_test_states": [
+            ("Learning/Policy entropy", agent.evaluate_average_policy_entropy),
+        ],
     }

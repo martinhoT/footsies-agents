@@ -63,6 +63,8 @@ class A2CLambdaLearner:
         actor_entropy_loss_coef: float = 0.0,
         actor_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
         critic_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        policy_improvement_steps: int = 1,
+        policy_evaluation_steps: int = 1,
         **kwargs,
     ):
         """Implementation of the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
@@ -72,6 +74,8 @@ class A2CLambdaLearner:
         self.actor_lambda = actor_lambda
         self.critic_lambda = critic_lambda
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
+        self.policy_improvement_steps = policy_improvement_steps
+        self.policy_evaluation_steps = policy_evaluation_steps
 
         self.actor_traces = [
             torch.zeros_like(parameter)
@@ -100,6 +104,11 @@ class A2CLambdaLearner:
         self.action_distribution = None
         self.action = None
 
+        # Variables for policy improvement
+        self.at_policy_improvement = True
+        # Track at which environment step we are since we last performed policy improvement/evaluation
+        self.policy_iteration_step = 0
+
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
         
@@ -107,15 +116,47 @@ class A2CLambdaLearner:
         self.delta = 0.0
 
     def sample_action(self, obs: torch.Tensor) -> int:
-        """Sample an action from the actor. A training step starts with `act()`, followed immediately by an environment step and `update()`"""
-        self.actor_optimizer.zero_grad()
-        self.critic_optimizer.zero_grad()
-        
+        """Sample an action from the actor. A training step starts with `act()`, followed immediately by an environment step and `update()`"""    
         action_probabilities = self.actor(obs)
         self.action_distribution = Categorical(probs=action_probabilities)
         self.action = self.action_distribution.sample()
         
         return self.action.item()
+
+    def _step_policy_iteration(self):
+        step_threshold = self.policy_improvement_steps if self.at_policy_improvement else self.policy_evaluation_steps
+        
+        self.policy_iteration_step += 1
+        if self.policy_iteration_step >= step_threshold:
+            self.at_policy_improvement = not self.at_policy_improvement
+            self.policy_iteration_step = 0
+
+    def _update_critic(self, obs: torch.Tensor, delta: float):
+        self.critic_optimizer.zero_grad()
+
+        critic_score = self.critic(obs)
+        critic_score.backward()
+        with torch.no_grad():
+            for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
+                critic_trace.copy_(self.discount * self.critic_lambda * critic_trace + parameter.grad)
+                parameter.grad.copy_(delta * critic_trace)
+
+        self.critic_optimizer.step()
+
+    def _update_actor(self, delta: float):
+        self.actor_optimizer.zero_grad()
+
+        actor_score = self.cumulative_discount * self.action_distribution.log_prob(self.action)
+        actor_score.backward(retain_graph=True)
+        with torch.no_grad():
+            for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
+                actor_trace.copy_(self.discount * self.actor_lambda * actor_trace + parameter.grad)
+                parameter.grad.copy_(delta * actor_trace * (1 - self.actor_entropy_loss_coef))
+        # Add the entropy score gradient
+        entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
+        entropy_score.backward()
+
+        self.actor_optimizer.step()
 
     # TODO: if we use linear function approximation, could we do True Online TD(lambda)?
     def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool):
@@ -131,26 +172,15 @@ class A2CLambdaLearner:
 
         self.delta = delta
 
-        # The actor should be updated first, since it already started training in act()
-        actor_score = self.cumulative_discount * self.action_distribution.log_prob(self.action)
-        actor_score.backward(retain_graph=True)
-        with torch.no_grad():
-            for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
-                actor_trace.copy_(self.discount * self.actor_lambda * actor_trace + parameter.grad)
-                parameter.grad.copy_(delta * actor_trace * (1 - self.actor_entropy_loss_coef))
-        # Add the entropy score gradient
-        entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
-        entropy_score.backward()
-
-        critic_score = self.critic(obs)
-        critic_score.backward()
-        with torch.no_grad():
-            for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
-                critic_trace.copy_(self.discount * self.critic_lambda * critic_trace + parameter.grad)
-                parameter.grad.copy_(delta * critic_trace)
-
-        self.actor_optimizer.step()
-        self.critic_optimizer.step()
+        # Update the networks.
+        # We perform policy improvement first and then policy evaluation (at_policy_improvement begins True).
+        if self.at_policy_improvement:
+            self._update_actor(delta)
+            self._step_policy_iteration()
+        # We don't perform elif since we may want to perform both policy improvement and evaluation in the same step (e.g. if policy_improvement_steps == 1)
+        if not self.at_policy_improvement:
+            self._update_critic(obs, delta)
+            self._step_policy_iteration()
 
         self.cumulative_discount *= self.discount
 

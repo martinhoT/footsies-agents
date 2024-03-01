@@ -142,7 +142,7 @@ MountainCar: (not good actually)
 """
 
 
-ENVIRONMENT = "MountainCar-v0"
+ENVIRONMENT = "LunarLander-v2"
 
 if ENVIRONMENT == "FrozenLake-v1":
     kwargs = {
@@ -164,8 +164,9 @@ env_generator = lambda e: (
     TransformObservation(
         FlattenObservation(
             e
-        )
-        , lambda obs: torch.from_numpy((obs - np.array([-0.3, 0.0])) / np.array([0.9, 0.07])).float().unsqueeze(0)
+        ),
+        # lambda obs: torch.from_numpy((obs - np.array([-0.3, 0.0])) / np.array([0.9, 0.07])).float().unsqueeze(0)
+        lambda obs: torch.from_numpy(obs).float().unsqueeze(0)
     )
     # )
 )
@@ -174,7 +175,7 @@ env = env_generator(
     gymnasium.make(
         ENVIRONMENT,
         **kwargs,
-        render_mode="human",
+        render_mode=None,
     )
 )
 
@@ -193,12 +194,12 @@ learner = A2CLambdaLearner(
         hidden_layer_sizes=[32],
         hidden_layer_activation=nn.ReLU,
     ),
-    discount=1.0,
+    discount=0.99,
     actor_lambda=0.8,
     critic_lambda=0.8,
     actor_entropy_loss_coef=0.0,
-    actor_optimizer=torch.optim.Adam,
-    critic_optimizer=torch.optim.Adam,
+    policy_improvement_steps=1,
+    policy_evaluation_steps=1,
     **{
         "actor_optimizer.lr": 1e-3,
         "critic_optimizer.lr": 1e-3,
@@ -258,7 +259,7 @@ try:
     terminated, truncated = True, True
 
     # episode_iterator = count()
-    episode_iterator = range(10000)
+    episode_iterator = range(1000)
     step = 0
     scores = []
     scores_avg = []
@@ -276,9 +277,9 @@ try:
             action = learner.sample_action(obs)
             next_obs, reward, terminated, truncated, info = env.step(action)
             # Augment reward with novelty-based curiosity
-            t = mountain_car_tile_coding.transform(next_obs)
-            novelty_table.register(t)
-            reward += novelty_table.intrinsic_reward(t)
+            # t = mountain_car_tile_coding.transform(next_obs)
+            # novelty_table.register(t)
+            # reward += novelty_table.intrinsic_reward(t)
             # Update agent
             learner.learn(obs, next_obs, reward, terminated)
             

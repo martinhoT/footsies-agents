@@ -13,7 +13,7 @@ class Configuration:
     dense_reward:                       bool
     health:                             int
     use_temporal_actions:               bool
-    observation_include_play:           bool
+    observation_include_move:           bool
     observation_include_move_progress:  bool
     opponent:                           str
     actor_lr:                           float
@@ -24,10 +24,11 @@ class Configuration:
     critic_hidden_layer_sizes:          list[int]
     critic_hidden_layer_activation:     str
     time_limit:                         int
+    time_limit_as_truncation:           bool
 
     def label(self) -> str:
         convert_bool = lambda value: "T" if value else "F"
-        return f"{convert_bool(self.self_play)}_{convert_bool(self.dense_reward)}_{self.health}_{convert_bool(self.use_temporal_actions)}_{convert_bool(self.observation_include_play)}_{convert_bool(self.observation_include_move_progress)}_{self.opponent}_{self.actor_lr:.0e}_{self.critic_lr:.0e}_{self.actor_entropy_loss_coef:.2f}_{self.actor_hidden_layer_sizes}_{self.actor_hidden_layer_activation}_{self.critic_hidden_layer_sizes}_{self.critic_hidden_layer_activation}_{self.time_limit}"
+        return f"{convert_bool(self.self_play)}_{convert_bool(self.dense_reward)}_{self.health}_{convert_bool(self.use_temporal_actions)}_{convert_bool(self.observation_include_move)}_{convert_bool(self.observation_include_move_progress)}_{self.opponent}_{self.actor_lr:.0e}_{self.critic_lr:.0e}_{self.actor_entropy_loss_coef:.2f}_{self.actor_hidden_layer_sizes}_{self.actor_hidden_layer_activation}_{self.critic_hidden_layer_sizes}_{self.critic_hidden_layer_activation}_{self.time_limit}_{convert_bool(self.time_limit_as_truncation)}"
 
     def markdown(self) -> str:
         """Returns a markdown representation of this configuration, for use in a table in the Logseq documentation"""
@@ -37,7 +38,7 @@ class Configuration:
             convert_bool(self.dense_reward),
             str(self.health),
             convert_bool(self.use_temporal_actions),
-            convert_bool(self.observation_include_play),
+            convert_bool(self.observation_include_move),
             convert_bool(self.observation_include_move_progress),
             self.opponent,
             f"{self.actor_lr:.0e}",
@@ -48,6 +49,7 @@ class Configuration:
             str(self.critic_hidden_layer_sizes),
             self.critic_hidden_layer_activation,
             str(self.time_limit),
+            convert_bool(self.time_limit_as_truncation),
         ]) + " |"
 
 
@@ -56,7 +58,7 @@ ATTRIBUTE_VARIATIONS_NORMAL = {
     "dense_reward": [False, True],
     "health": [1, 3, 5],
     "use_temporal_actions": [False],
-    "observation_include_play": [False, True],
+    "observation_include_move": [False, True],
     "observation_include_move_progress": [False],
     "opponent": ["uniform_random_play", "rocky_play"],
     "actor_lr": [1e-4],
@@ -67,6 +69,7 @@ ATTRIBUTE_VARIATIONS_NORMAL = {
     "critic_hidden_layer_sizes": [[], [32]],
     "critic_hidden_layer_activation": ["ReLU"],
     "time_limit": [18], # (5 + (5 - 4)) * 2, function of healths (aka number of rounds), we consider the maximum health
+    "time_limit_as_truncation": [False, True],
 }
 
 
@@ -75,7 +78,7 @@ ATTRIBUTE_VARIATIONS_TEMPORAL = {
     "dense_reward": [False, True],
     "health": [1, 3, 5],
     "use_temporal_actions": [True],
-    "observation_include_play": [False, True],
+    "observation_include_move": [False, True],
     "observation_include_move_progress": [False, True],
     "opponent": ["uniform_random_play_temporal", "masher", "dodge-attacker"],
     "actor_lr": [1e-4],
@@ -86,6 +89,7 @@ ATTRIBUTE_VARIATIONS_TEMPORAL = {
     "critic_hidden_layer_sizes": [[], [32]],
     "critic_hidden_layer_activation": ["ReLU"],
     "time_limit": [18], # (5 + (5 - 4)) * 2, function of healths (aka number of rounds), we consider the maximum health
+    "time_limit_as_truncation": [False, True],
 }
 
 
@@ -96,7 +100,7 @@ def generate_configurations(variations: dict[str, list]) -> list[Configuration]:
             dense_reward=dense_reward,
             health=health,
             use_temporal_actions=use_temporal_actions,
-            observation_include_play=observation_include_play,
+            observation_include_move=observation_include_move,
             observation_include_move_progress=observation_include_move_progress,
             opponent=opponent,
             actor_lr=actor_lr,
@@ -107,12 +111,13 @@ def generate_configurations(variations: dict[str, list]) -> list[Configuration]:
             critic_hidden_layer_sizes=critic_hidden_layer_sizes,
             critic_hidden_layer_activation=critic_hidden_layer_activation,
             time_limit=time_limit,
+            time_limit_as_truncation=time_limit_as_truncation,
         )
         for self_play in variations["self_play"]
         for dense_reward in variations["dense_reward"]
         for health in variations["health"]
         for use_temporal_actions in variations["use_temporal_actions"]
-        for observation_include_play in variations["observation_include_play"]
+        for observation_include_move in variations["observation_include_move"]
         for observation_include_move_progress in variations["observation_include_move_progress"]
         for opponent in variations["opponent"]
         for actor_lr in variations["actor_lr"]
@@ -123,6 +128,7 @@ def generate_configurations(variations: dict[str, list]) -> list[Configuration]:
         for critic_hidden_layer_sizes in variations["critic_hidden_layer_sizes"]
         for critic_hidden_layer_activation in variations["critic_hidden_layer_activation"]
         for time_limit in variations["time_limit"]
+        for time_limit_as_truncation in variations["time_limit_as_truncation"]
     ]
 
 
@@ -139,7 +145,7 @@ CONFIGURATIONS: list[Configuration] = [
 def run_configuration(configuration: Configuration, episodes: int = 10000) -> tuple[float, float]:
     plot_save_path = "rps/plots/" + configuration.label() + ".png"
 
-    deltas, rewards = main(
+    deltas, rewards, episode_lengths = main(
         episodes=episodes,
         actor_lr=configuration.actor_lr,
         critic_lr=configuration.critic_lr,
@@ -152,23 +158,27 @@ def run_configuration(configuration: Configuration, episodes: int = 10000) -> tu
         dense_reward=configuration.dense_reward,
         health=configuration.health,
         use_temporal_actions=configuration.use_temporal_actions,
-        observation_include_play=configuration.observation_include_play,
+        observation_include_move=configuration.observation_include_move,
         observation_include_move_progress=configuration.observation_include_move_progress,
         opponent=configuration.opponent,
+        time_limit=configuration.time_limit,
+        time_limit_as_truncation=configuration.time_limit_as_truncation,
         plot=True,
         plot_during_training=False,
         plot_save_path=plot_save_path,
         interactive=False,
-        log=False,
+        log=True,
     )
 
     print(f"Configuration '{configuration.label()}' completed")
 
     # We only care about the last values, or else we will be accumulating tons of data (millions of episodes!)
-    return deltas[-1], rewards[-1]
+    return deltas[-1], rewards[-1], episode_lengths[-1]
 
 
 def main_multi(n_processes: int, episodes: int = 10000, configs: list[Configuration] = CONFIGURATIONS, md_out: str = None, part: int = None):
+    print("Total configurations:", len(configs))
+
     # Divide the configurations into parts so that a run doesn't take forever
     if part is not None:
         # Shuffle the configurations so that configurations that take longer don't all sit in the same regions in the list
@@ -176,7 +186,7 @@ def main_multi(n_processes: int, episodes: int = 10000, configs: list[Configurat
         random.seed(shuffle_seed)
         random.shuffle(configs)
         # Get only a part of the configurations
-        part_size = 50
+        part_size = 100
         configs = configs[part * part_size:(part + 1) * part_size]
 
     ans = input(f"{len(configs)} configurations will be run with {n_processes} processes, proceed? (y/[n]) ")
@@ -189,13 +199,13 @@ def main_multi(n_processes: int, episodes: int = 10000, configs: list[Configurat
     
     if md_out is None:
         print("Markdown table rows:")
-        for configuration, (last_delta, last_reward) in zip(configs, results):
-            print(configuration.markdown() + f" {last_delta:.2e} | {last_reward:.2e} |")
+        for configuration, (last_delta, last_reward, last_episode_length) in zip(configs, results):
+            print(configuration.markdown() + f" {last_delta:.2e} | {last_reward:.2e} | {last_episode_length:.2f} |")
 
     else:
         print(f"Saving markdown table to '{md_out}'...", end=" ")
         with open(md_out, "at") as f:
-            f.writelines((configuration.markdown() + f" {last_delta:.2e} | {last_reward:.2e} |\n") for configuration, (last_delta, last_reward) in zip(configs, results))
+            f.writelines((configuration.markdown() + f" {last_delta:.2e} | {last_reward:.2e} | {last_episode_length:.2f} |\n") for configuration, (last_delta, last_reward, last_episode_length) in zip(configs, results))
         print("done!")
 
 def parse_args() -> dict[str, int]:

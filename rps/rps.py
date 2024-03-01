@@ -1,7 +1,6 @@
 import torch
 from typing import Any, Callable, List
-from collections import namedtuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 RPSObservation = tuple | torch.Tensor
@@ -129,15 +128,34 @@ class RPS:
         self,
         opponent: Callable[[RPSObservation], int],
         dense_reward: bool = False,
-        health: int = 2, # a health of 2 is equivalent to a best-of-3 match
+        health: int = 2,
         flattened: bool = True,
         use_temporal_actions: bool = False,
-        observation_include_play: bool = False,
+        observation_include_move: bool = False,
         observation_include_move_progress: bool = False,
         observation_transformer: Callable[[RPSObservation], Any] = lambda o: o,
         temporal_actions: list[Callable[[], TemporalAction]] = DEFAULT_TEMPORAL_ACTIONS,
         time_limit: int = 100000,
+        time_limit_as_truncation: bool = False,
     ):
+        """
+        Environment implementing the rock-paper-scissors (RPS) game.
+        Multiple features can be added, to progressively build complexity akin to that of fighting games.
+
+        Parameters
+        ----------
+        - `opponent`: which opponent to use
+        - `dense_reward`: whether to use a dense reward scheme (reward on every hit)
+        - `health`: the health of the players. For instance, a health of 2 is equivalent to a best-of-3 RPS match
+        - `flattened`: whether to return a flattened observation
+        - `use_temporal_actions`: whether to use temporally extended actions. This incorporates a completely different action set
+        - `observation_include_play`: whether to include each players' play/move in the observation. Note that this is distinct from the action. A play is the perceptual effect of an action
+        - `observation_include_move_progress`: whether to include the move progress in the observation
+        - `observation_transformer`: a function to transform the observation before returning it
+        - `temporal_actions`: the temporally extended action set to use. Recommended to use the default
+        - `time_limit`: the maximum number of steps per episode
+        - `time_limit_as_truncation`: whether to treat the time limit as episode termination or truncation. Fighting games treat the time limit as episode termination
+        """
         if not use_temporal_actions and observation_include_move_progress:
             raise ValueError("invalid arguments, asked for inclusion of the move progress of temporal actions without using temporal actions")
         
@@ -146,11 +164,12 @@ class RPS:
         self.health = health
         self.flattened = flattened
         self.use_temporal_actions = use_temporal_actions
-        self.observation_include_play = observation_include_play
+        self.observation_include_move = observation_include_move
         self.observation_include_move_progress = observation_include_move_progress
         self.transform_observation = observation_transformer
         self.temporal_actions = temporal_actions
         self.time_limit = time_limit
+        self.time_limit_as_truncation = time_limit_as_truncation
 
         self.current_observation = 0
         self.p1_health = 0
@@ -168,8 +187,8 @@ class RPS:
         self,
         p1_health: int,
         p2_health: int,
-        p1_play: int = None,
-        p2_play: int = None,
+        p1_move: int = None,
+        p2_move: int = None,
         p1_move_progress: float = 0.0,
         p2_move_progress: float = 0.0,
     ):
@@ -182,9 +201,9 @@ class RPS:
                 torch.nn.functional.one_hot(torch.tensor(p2_health - 1), num_classes=self.health),
             ]
             
-            if self.observation_include_play:
-                parts.append(torch.nn.functional.one_hot(torch.tensor(p1_play), num_classes=self.play_dim))
-                parts.append(torch.nn.functional.one_hot(torch.tensor(p2_play), num_classes=self.play_dim))
+            if self.observation_include_move:
+                parts.append(torch.nn.functional.one_hot(torch.tensor(p1_move), num_classes=self.move_dim))
+                parts.append(torch.nn.functional.one_hot(torch.tensor(p2_move), num_classes=self.move_dim))
             
             if self.observation_include_move_progress:
                 parts.append(torch.tensor(p1_move_progress))
@@ -197,9 +216,9 @@ class RPS:
             p2_health,
         ]
 
-        if self.observation_include_play:
-            parts.append(p1_play)
-            parts.append(p2_play)
+        if self.observation_include_move:
+            parts.append(p1_move)
+            parts.append(p2_move)
         
         if self.observation_include_move_progress:
             parts.append(torch.tensor(p1_move_progress))
@@ -207,22 +226,22 @@ class RPS:
 
         return self.transform_observation(tuple(parts))
 
-    def observation(self, p1_play: int, p2_play: int) -> RPSObservation:
+    def observation(self, p1_move: int, p2_move: int) -> RPSObservation:
         p1_normalized_duration = (self.p1_current_temporal_action.current_step / self.p1_current_temporal_action.duration) if self.p1_current_temporal_action is not None else 0.0
         p2_normalized_duration = (self.p2_current_temporal_action.current_step / self.p2_current_temporal_action.duration) if self.p2_current_temporal_action is not None else 0.0
 
         return self.craft_observation(
             self.p1_health, self.p2_health,
-            p1_play, p2_play,
+            p1_move, p2_move,
             p1_normalized_duration, p2_normalized_duration,
         )
 
-    def info(self, p1_play: int, p2_play: int, p1_action: int, p2_action: int) -> dict:
+    def info(self, p1_move: int, p2_move: int, p1_action: int, p2_action: int) -> dict:
         return {
             "p1_health": self.p1_health,
             "p2_health": self.p2_health,
-            "p1_play": p1_play,
-            "p2_play": p2_play,
+            "p1_move": p1_move,
+            "p2_move": p2_move,
             "p1_action": p1_action,
             "p2_action": p2_action,
             "p1_frame": None if self.p1_current_temporal_action is None else self.p1_current_temporal_action.current_step,
@@ -241,19 +260,19 @@ class RPS:
         self.current_info = self.info(0, 0, 0, 0)
         return self.current_observation, self.current_info
 
-    def reward(self, result: int, terminated: bool) -> float:
+    def reward(self, result: int, game_over: bool) -> float:
         if self.dense_reward:
             reward = 0.0
             reward += result / self.health
             
             self._cumulative_episode_reward += reward
 
-            if terminated:
+            if game_over:
                 reward += result - self._cumulative_episode_reward
             
             return reward
         
-        if terminated:
+        if game_over:
             if self.p1_health > self.p2_health:
                 return 1.0
             elif self.p1_health < self.p2_health:
@@ -303,8 +322,8 @@ class RPS:
         
         p1_result, p2_result = self.resolve(p1_action, p2_action)
 
-        p1_play = p1_action if self.p1_current_temporal_action is None else self.temporal_action_idx(self.p1_current_temporal_action)
-        p2_play = p2_action if self.p2_current_temporal_action is None else self.temporal_action_idx(self.p2_current_temporal_action)
+        p1_move = p1_action if self.p1_current_temporal_action is None else self.temporal_action_idx(self.p1_current_temporal_action)
+        p2_move = p2_action if self.p2_current_temporal_action is None else self.temporal_action_idx(self.p2_current_temporal_action)
 
         if p1_result < 0:
             self.p1_health -= 1
@@ -312,12 +331,12 @@ class RPS:
             self.p2_health -= 1
 
         self.current_step += 1
-        self.current_observation = self.observation(p1_play, p2_play)
-        self.current_info = self.info(p1_play, p2_play, p1_action, p2_action)
+        self.current_observation = self.observation(p1_move, p2_move)
+        self.current_info = self.info(p1_move, p2_move, p1_action, p2_action)
 
-        reward = self.reward(p1_result, terminated)
         terminated = self.p1_health <= 0 or self.p2_health <= 0
         truncated = self.current_step >= self.time_limit
+        reward = self.reward(p1_result, terminated or truncated)
 
         return self.current_observation, reward, terminated, truncated, self.current_info
 
@@ -328,7 +347,7 @@ class RPS:
         return self.temporal_action_idx_map.index(type(temporal_action))
 
     @property
-    def play_dim(self) -> int:
+    def move_dim(self) -> int:
         if self.use_temporal_actions:
             return len(self.temporal_actions)
         return 3
@@ -342,6 +361,6 @@ class RPS:
     @property
     def observation_dim(self) -> int:
         if self.flattened:
-            return 2 * self.health + 2 * self.play_dim * self.observation_include_play + 2 * self.observation_include_move_progress
-        return 2 + 2 * self.observation_include_play + 2 * self.observation_include_move_progress
+            return 2 * self.health + 2 * self.move_dim * self.observation_include_move + 2 * self.observation_include_move_progress
+        return 2 + 2 * self.observation_include_move + 2 * self.observation_include_move_progress
     

@@ -39,6 +39,7 @@ class ReactionTimeEmulator:
     @staticmethod
     def entropy(distribution: np.ndarray, safety: float = 1e-8) -> float:
         """Get entropy of a probability distribution, measured in bits"""
+        # TODO: should the safety value be included in the probability portion of the formula? That makes the sum of probabilities not be 1
         return -np.nansum((distribution + safety) * np.log2(distribution + safety))
     
     @staticmethod

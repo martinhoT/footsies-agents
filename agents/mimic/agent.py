@@ -8,7 +8,7 @@ from agents.base import FootsiesAgentBase
 from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
 from agents.action import ActionMap
 from gymnasium import Env
-from typing import Callable, List, Tuple
+from typing import Any, Callable, List, Tuple
 from collections.abc import Generator
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 
@@ -494,7 +494,7 @@ class FootsiesAgent(FootsiesAgentBase):
             self._test_actions = torch.tensor(actions, dtype=torch.float32)
 
     def evaluate_divergence_between_players(
-        self, test_states: List[torch.Tensor]
+        self, test_states: List[tuple[Any, Any]]
     ) -> float:
         self._initialize_test_states(test_states)
 

@@ -4,7 +4,7 @@ from torch.distributions import Categorical
 from copy import deepcopy
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
-from typing import Callable, Tuple
+from typing import Any, Callable, Tuple
 from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
 from agents.utils import extract_sub_kwargs
 from agents.torch_utils import AggregateModule
@@ -55,6 +55,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         # For logging
         self.cumulative_delta = 0
         self.cumulative_delta_n = 0
+        self._test_observations = None
 
     def act(self, obs: torch.Tensor, info: dict) -> "any":
         self.current_observation = obs
@@ -88,3 +89,16 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.cumulative_delta_n = 0
 
         return res
+
+    def _initialize_test_states(self, test_states: list[torch.Tensor]):
+        if self._test_observations is None:
+            test_observations, _ = zip(test_states)
+            self._test_observations = torch.tensor(test_observations, dtype=torch.float32)
+
+    def evaluate_average_policy_entropy(self, test_states: list[tuple[Any, Any]]) -> float:
+        self._initialize_test_states(test_states)
+
+        with torch.no_grad():
+            probs = self.actor(self._test_observations)
+            entropies = -torch.sum(torch.log(probs + 1e-8) * probs)
+            return torch.mean(entropies).item()
