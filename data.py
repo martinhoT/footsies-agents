@@ -12,6 +12,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from agents.action import ActionMap
+from io import BufferedIOBase
 
 
 FootsiesTransition = tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, bool]
@@ -34,14 +35,14 @@ class FootsiesEpisode:
     @property
     def p1_won(self) -> bool:
         """Whether player 1 won"""
-        # P2's health at the end is 0
-        return self.observations[-1, 1] == 0
+        # P2 was standing at the end, which signifies death
+        return self.observations[-1, 17] == 1
     
     @property
     def p2_won(self) -> bool:
         """Whether player 2 won"""
-        # P1's health at the end is 0
-        return self.observations[-1, 0] == 0
+        # P1 was standing at the end, which signifies death
+        return self.observations[-1, 2] == 1
 
     @property
     def steps(self) -> int:
@@ -58,7 +59,7 @@ class FootsiesEpisode:
         if self.steps > 2**32 - 1:
             raise ValueError("episode is too long, should be no longer than 2^32 - 1 (is this even possible?)")
         
-        states = self.observations.tobytes(order="C")
+        observations = self.observations.tobytes(order="C")
         p1_actions = self.p1_actions.tobytes(order="C")
         p2_actions = self.p2_actions.tobytes(order="C")
         rewards = self.rewards.tobytes(order="C")
@@ -66,11 +67,11 @@ class FootsiesEpisode:
         # Episode length
         prefix = struct.pack("<I", self.steps)
 
-        return prefix + states + p1_actions + p2_actions + rewards
+        return prefix + observations + p1_actions + p2_actions + rewards
 
     @staticmethod
-    def frombytes(b: bytes) -> "FootsiesEpisode":
-        """Deserialize an episode from bytes."""
+    def frombytes(b: bytes) -> tuple["FootsiesEpisode", int]:
+        """Deserialize an episode from bytes. Returns the episode and the number of bytes read"""
         pointer = 0
         
         n_steps = struct.unpack("<I", b[pointer:pointer + 4])[0]
@@ -86,6 +87,28 @@ class FootsiesEpisode:
         pointer += n_steps
 
         rewards = np.frombuffer(b[pointer:pointer + 4 * n_steps], dtype=np.float32).reshape(-1, 1, order="C")
+        pointer += 4 * n_steps
+
+        return FootsiesEpisode(
+            observations=observations,
+            p1_actions=p1_actions,
+            p2_actions=p2_actions,
+            rewards=rewards,
+        ), pointer
+
+    @staticmethod
+    def fromfile(file: BufferedIOBase) -> "FootsiesEpisode":
+        """Deserialize an episode from a file"""
+        n_steps_bytes = file.read(4)
+        if len(n_steps_bytes) == 0:
+            return None
+
+        n_steps = struct.unpack("<I", n_steps_bytes)[0]
+
+        observations = np.frombuffer(file.read(8 * 36 * (n_steps + 1)), dtype=np.float64).reshape(-1, 36, order="C")
+        p1_actions = np.frombuffer(file.read(n_steps), dtype=np.int8).reshape(-1, 1, order="C")
+        p2_actions = np.frombuffer(file.read(n_steps), dtype=np.int8).reshape(-1, 1, order="C")
+        rewards = np.frombuffer(file.read(4 * n_steps), dtype=np.float32).reshape(-1, 1, order="C")
 
         return FootsiesEpisode(
             observations=observations,
@@ -167,7 +190,10 @@ class FootsiesDataset:
     @staticmethod
     def load(path: str) -> "FootsiesDataset":
         with gzip.open(path, "rb") as f:
-            episodes = [FootsiesEpisode.frombytes(episode_bytes.strip()) for episode_bytes in f]
+            episodes = []
+            while (episode := FootsiesEpisode.fromfile(f)) is not None:
+                episodes.append(episode)
+                f.read(1)  # Skip newline character
         
         return FootsiesDataset(episodes)
 

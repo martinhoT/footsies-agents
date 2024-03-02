@@ -65,6 +65,7 @@ class A2CLambdaLearner:
         critic_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
         policy_improvement_steps: int = 1,
         policy_evaluation_steps: int = 1,
+        policy_cumulative_discount: bool = True,
         **kwargs,
     ):
         """Implementation of the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
@@ -76,6 +77,7 @@ class A2CLambdaLearner:
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
         self.policy_improvement_steps = policy_improvement_steps
         self.policy_evaluation_steps = policy_evaluation_steps
+        self.policy_cumulative_discount = policy_cumulative_discount
 
         self.actor_traces = [
             torch.zeros_like(parameter)
@@ -182,7 +184,8 @@ class A2CLambdaLearner:
             self._update_critic(obs, delta)
             self._step_policy_iteration()
 
-        self.cumulative_discount *= self.discount
+        if self.policy_cumulative_discount:
+            self.cumulative_discount *= self.discount
 
         if terminated:
             self.cumulative_discount = 1.0
@@ -196,6 +199,7 @@ class ImitationLearner:
     def __init__(
         self,
         policy: nn.Module,
+        action_dim: int,
         optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
         **kwargs,
     ):
@@ -203,23 +207,34 @@ class ImitationLearner:
         optimizer_kwargs, = extract_sub_kwargs(kwargs, ("optimizer",))
         
         self.policy = policy
+        self.action_dim = action_dim
         self.optimizer = optimizer(self.policy.parameters(), maximize=False, **optimizer_kwargs)
+        # NOTE: because of this loss, combinatory actions are not supported
         self.loss_fn = nn.KLDivLoss(reduction="batchmean")
 
-    def learn(self, obs: torch.Tensor, action: int, frozen_representation: bool = False):
-        """Update policy by imitating the action at the given observation"""
-        action_onehot = torch.nn.functional.one_hot(torch.Tensor(action), num_classes=self.actor.action_dim)
+    def action_as_onehot(self, action: torch.Tensor) -> torch.Tensor:
+        """Transform the action tensor into a one-hot encoded version"""
+        return torch.nn.functional.one_hot(action, num_classes=self.action_dim).float()
+
+    def action_as_combination(self, action: torch.Tensor) -> torch.Tensor:
+        """Transform the action tensor into a tensor where actions are treated as being combinatory"""
+        return torch.hstack([(action & 2**i) != 0 for i in range(self.action_dim)]).float()
+                            
+    def learn(self, obs: torch.Tensor, action: torch.Tensor, frozen_representation: bool = False) -> float:
+        """Update policy by imitating the action at the given observation. Returns the loss"""
         self.optimizer.zero_grad()
 
         if frozen_representation:
             with torch.no_grad():
-                rep = self.actor.representation(obs)
-            probs = self.actor.from_representation(rep)
+                rep = self.policy.representation(obs)
+            probs = self.policy.from_representation(rep)
 
         else:
-            probs = self.actor(obs)
+            probs = self.policy(*obs)
 
-        loss = self.loss_fn(probs, action_onehot)
+        loss = self.loss_fn(probs.log(), action)
         loss.backward()
 
         self.optimizer.step()
+
+        return loss.item()

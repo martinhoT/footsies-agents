@@ -225,13 +225,12 @@ class DIAYNWrapper(gymnasium.Wrapper):
                     self._discriminator_loss_avg,
                     self.current_step,
                 )
-                for skill, reward_avg in self._skill_rewards_avg:
-                    if reward_avg is not None:
-                        self.summary_writer.add_scalar(
-                            f"DIAYN/Average reward of skill [{skill}]",
-                            reward_avg,
-                            self.current_step,
-                        )
-                        self._skill_rewards_avg[skill] = None
+                for skill, reward_avg in self._skill_rewards_avg.items():
+                    self.summary_writer.add_scalar(
+                        f"DIAYN/Average reward of skill [{skill}]",
+                        reward_avg,
+                        self.current_step,
+                    )
+                    self._skill_rewards_avg[skill] = 0.0
 
         return obs_with_skill, reward, terminated, truncated, info

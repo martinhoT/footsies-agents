@@ -41,6 +41,7 @@ def import_sb3(agent_name: str, env: Env, parameters: dict) -> BaseAlgorithm:
     import stable_baselines3
     agent_class = stable_baselines3.__dict__[agent_name.upper()]
     return agent_class(
+        policy="MlpPolicy", # we assume we will never need the CnnPolicy
         env=env,
         **parameters,
     )
