@@ -11,6 +11,7 @@ from gymnasium import Env
 from typing import Any, Callable, List, Tuple
 from collections.abc import Generator
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
+from agents.torch_utils import observation_invert_perspective_flattened
 
 
 # Sigmoid output is able to tackle action combinations.
@@ -439,9 +440,11 @@ class FootsiesAgent(FootsiesAgentBase):
         if not (self.append_last_actions_distinct and action_history[-1] == action):
             action_history.append(action)
 
-    def craft_observation(self, obs: torch.Tensor, use_p1_model: bool, use_p1_action_history: bool) -> torch.Tensor:
+    def craft_observation(self, obs: torch.Tensor, use_p1_model: bool, use_p1_action_history: bool, use_p1_perspective: bool) -> torch.Tensor:
         model = self.p1_model if use_p1_model else self.p2_model
         action_history = self.p1_action_history if use_p1_action_history else self.p2_action_history
+        if not use_p1_perspective:
+            obs = observation_invert_perspective_flattened(obs)
 
         full_observation = torch.hstack((obs,) + tuple(self._action_onehot(action) for action in action_history))
         

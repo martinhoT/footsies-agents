@@ -8,6 +8,7 @@ from gymnasium import Env
 
 from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
+from agents.utils import extract_sub_kwargs
 
 
 def create_layered_network(
@@ -225,6 +226,7 @@ class AggregateModule(nn.Module):
 
 
 def observation_invert_perspective_flattened(obs: torch.Tensor) -> torch.Tensor:
+    """Invert the observation's perspective. The observation should be a flattened torch tensor"""
     inverted = obs.clone().detach()
     
     #  guard
@@ -249,3 +251,48 @@ def hidden_layer_parameters_from_specifications(
     hidden_layer_activation = getattr(nn, hidden_layer_activation_specification)
 
     return hidden_layer_sizes, hidden_layer_activation
+
+
+class ImitationLearner:
+    def __init__(
+        self,
+        policy: nn.Module,
+        action_dim: int,
+        optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        **kwargs,
+    ):
+        """Imitation learning applied to a policy"""
+        optimizer_kwargs, = extract_sub_kwargs(kwargs, ("optimizer",))
+        
+        self.policy = policy
+        self.action_dim = action_dim
+        self.optimizer = optimizer(self.policy.parameters(), maximize=False, **optimizer_kwargs)
+        # NOTE: because of this loss, combinatory actions are not supported
+        self.loss_fn = nn.KLDivLoss(reduction="batchmean")
+
+    def action_as_onehot(self, action: torch.Tensor) -> torch.Tensor:
+        """Transform the action tensor into a one-hot encoded version"""
+        return torch.nn.functional.one_hot(action, num_classes=self.action_dim).float()
+
+    def action_as_combination(self, action: torch.Tensor) -> torch.Tensor:
+        """Transform the action tensor into a tensor where actions are treated as being combinatory"""
+        return torch.hstack([(action & 2**i) != 0 for i in range(self.action_dim)]).float()
+                            
+    def learn(self, obs: torch.Tensor, action: torch.Tensor, frozen_representation: bool = False) -> float:
+        """Update policy by imitating the action at the given observation. Returns the loss"""
+        self.optimizer.zero_grad()
+
+        if frozen_representation:
+            with torch.no_grad():
+                rep = self.policy.representation(obs)
+            probs = self.policy.from_representation(rep)
+
+        else:
+            probs = self.policy(*obs)
+
+        loss = self.loss_fn(probs.log(), action)
+        loss.backward()
+
+        self.optimizer.step()
+
+        return loss.item()

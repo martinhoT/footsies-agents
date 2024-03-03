@@ -189,10 +189,10 @@ def main_multi(n_processes: int, episodes: int = 10000, configs: list[Configurat
         part_size = 100
         configs = configs[part * part_size:(part + 1) * part_size]
 
-    ans = input(f"{len(configs)} configurations will be run with {n_processes} processes, proceed? (y/[n]) ")
-    if ans.lower() != "y":
-        print("Not accepted, exiting")
-        return
+    #ans = input(f"{len(configs)} configurations will be run with {n_processes} processes, proceed? (y/[n]) ")
+    #if ans.lower() != "y":
+    #    print("Not accepted, exiting")
+    #    return
 
     with multiprocessing.Pool(n_processes) as pool:
         results = pool.map(partial(run_configuration, episodes=episodes), configs)

@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import nn
 from torch.distributions import Categorical
@@ -6,8 +7,10 @@ from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
 from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
+from agents.ql.ql import QTable
 from agents.utils import extract_sub_kwargs
 from agents.torch_utils import AggregateModule
+from agents.action import ActionMap
 
 
 class FootsiesAgent(FootsiesAgentTorch):
@@ -16,39 +19,72 @@ class FootsiesAgent(FootsiesAgentTorch):
         observation_space_size: int,
         action_space_size: int,
         learner: A2CLambdaLearner = None,
+        use_simple_actions: bool = True,
+        use_q_table: bool = False,
         actor_hidden_layer_sizes_specification: str = "",
         critic_hidden_layer_sizes_specification: str = "",
         actor_hidden_layer_activation_specification: str = "ReLU",
         critic_hidden_layer_activation_specification: str = "ReLU",
         **kwargs,
     ):
+        """
+        Footsies agent using the A2C algorithm, potentially with some modifications.
+
+        Parameters
+        ----------
+        - `observation_space_size`: the size of the observation space
+        - `action_space_size`: the size of the action space
+        - `learner`: the A2C algorithm class to use. If `None`, one will be created
+        - `use_simple_actions`: whether to use simple actions rather than discrete actions
+        - `use_q_table`: whether to use a Q-table instead of a neural network for the critic
+        - `actor_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the actor network
+        - `critic_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the critic network
+        - `actor_hidden_layer_activation_specification`: a string specifying the hidden layer activation for the actor network
+        - `critic_hidden_layer_activation_specification`: a string specifying the hidden layer activation for the critic network
+        """
+        self.action_space_size = action_space_size if use_simple_actions else ActionMap.n_simple()
+        self.use_simple_actions = use_simple_actions
+
         a2c_kwargs, actor_kwargs, critic_kwargs = extract_sub_kwargs(kwargs, ("a2c", "actor", "critic"), strict=True)
 
-        learner = A2CLambdaLearner(
-            actor=ActorNetwork(
+        if learner is None:
+            actor = ActorNetwork(
                 obs_dim=observation_space_size,
-                action_dim=action_space_size,
+                action_dim=self.action_space_size,
                 hidden_layer_sizes=[int(n) for n in actor_hidden_layer_sizes_specification.split(",")] if actor_hidden_layer_sizes_specification else [],
                 hidden_layer_activation=getattr(nn, actor_hidden_layer_activation_specification),
                 **actor_kwargs,
-            ),
-            critic=CriticNetwork(
-                obs_dim=observation_space_size,
-                hidden_layer_sizes=[int(n) for n in critic_hidden_layer_sizes_specification.split(",")] if critic_hidden_layer_sizes_specification else [],
-                hidden_layer_activation=getattr(nn, critic_hidden_layer_activation_specification),
-                **critic_kwargs,
-            ),
-            **a2c_kwargs,
-        ) if learner is None else learner
+            )
+
+            if use_q_table:
+                critic = QTable(
+                    action_dim=self.action_space_size,
+                    opponent_action_dim=self.action_space_size,
+                    **critic_kwargs,
+                )
+            else:
+                critic = CriticNetwork(
+                    obs_dim=observation_space_size,
+                    hidden_layer_sizes=[int(n) for n in critic_hidden_layer_sizes_specification.split(",")] if critic_hidden_layer_sizes_specification else [],
+                    hidden_layer_activation=getattr(nn, critic_hidden_layer_activation_specification),
+                    **critic_kwargs,
+                )
+
+            learner = A2CLambdaLearner(
+                actor=actor,
+                critic=critic,
+                **a2c_kwargs,
+            )
 
         self.learner = learner
         self.actor = learner.actor
         self.critic = learner.critic
 
-        self.actor_critic = AggregateModule({
-            "actor": self.actor,
-            "critic": self.critic,
-        })
+        models = {"actor": self.actor}
+        # Could be a QTable
+        if isinstance(self.critic, nn.Module):
+            models["critic"] = self.critic
+        self.actor_critic = AggregateModule(models)
 
         self.current_observation = None
 
@@ -57,12 +93,15 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.cumulative_delta_n = 0
         self._test_observations = None
 
-    def act(self, obs: torch.Tensor, info: dict) -> "any":
+    def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None) -> "any":
         self.current_observation = obs
-        return self.learner.sample_action(obs)
+        return self.learner.sample_action(obs, predicted_opponent_action)
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
-        self.learner.learn(self.current_observation, next_obs, reward, terminated)
+        # We consider simplified actions, we don't care about discrete or primitive actions
+        actual_opponent_action = info["p2_move"]
+
+        self.learner.learn(self.current_observation, next_obs, reward, terminated, actual_opponent_action)
         
         self.cumulative_delta += self.learner.delta
         self.cumulative_delta_n += 1
@@ -80,6 +119,15 @@ class FootsiesAgent(FootsiesAgentTorch):
     def model(self) -> nn.Module:
         return self.actor_critic
     
+    # Need to use custom save and load functions because we could use a tabular Q-function
+    def load(self, folder_path: str):
+        model_path = os.path.join(folder_path, "model")
+        self.model.load_state_dict(torch.load(model_path))
+
+    def save(self, folder_path: str):
+        model_path = os.path.join(folder_path, "model")
+        torch.save(self.model.state_dict(), model_path)
+
     def evaluate_average_delta(self) -> float:
         res = (
             self.cumulative_delta / self.cumulative_delta_n
