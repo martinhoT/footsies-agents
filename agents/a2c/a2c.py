@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 from torch.distributions import Categorical
-from agents.torch_utils import create_layered_network
+from agents.torch_utils import create_layered_network, observation_invert_perspective_flattened
 from agents.utils import extract_sub_kwargs
 from agents.ql.ql import QTable
-from agents.action import ActionMap
 from abc import ABC, abstractmethod
+from collections import deque
 
 
 class CriticNetwork(nn.Module):
@@ -57,15 +57,11 @@ class ActorNetwork(nn.Module):
 
 class A2CLearnerBase(ABC):
     @abstractmethod
-    def compute_advantage(self) -> float:
+    def sample_action(self, obs: torch.Tensor, **kwargs) -> int:
         pass
 
     @abstractmethod
-    def sample_action(self, obs: torch.Tensor) -> int:
-        pass
-
-    @abstractmethod
-    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool):
+    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, **kwargs):
         pass
 
 
@@ -134,8 +130,8 @@ class A2CLambdaLearner(A2CLearnerBase):
         # Track values
         self.delta = 0.0
 
-    def sample_action(self, obs: torch.Tensor) -> int:
-        """Sample an action from the actor. A training step starts with `act()`, followed immediately by an environment step and `update()`"""    
+    def sample_action(self, obs: torch.Tensor, **kwargs) -> int:
+        """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
         action_probabilities = self.actor(obs)
         self.action_distribution = Categorical(probs=action_probabilities)
         self.action = self.action_distribution.sample()
@@ -177,7 +173,7 @@ class A2CLambdaLearner(A2CLearnerBase):
 
         self.actor_optimizer.step()
 
-    def compute_td_delta(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool) -> float:
+    def compute_advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool) -> float:
         """Compute the TD delta (a.k.a. advantage)."""
         with torch.no_grad():
             if terminated:
@@ -190,10 +186,10 @@ class A2CLambdaLearner(A2CLearnerBase):
         return delta
 
     # TODO: if we use linear function approximation, could we do True Online TD(lambda)?
-    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool):
-        """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `act()`"""
+    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, **kwargs):
+        """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `sample_action()`."""
         # Compute the TD delta
-        self.delta = self.compute_td_delta(obs, next_obs, reward, terminated)
+        self.delta = self.compute_advantage(obs, next_obs, reward, terminated)
 
         # Update the networks.
         # We perform policy improvement first and then policy evaluation (at_policy_improvement begins True).
@@ -208,7 +204,7 @@ class A2CLambdaLearner(A2CLearnerBase):
         if self.policy_cumulative_discount:
             self.cumulative_discount *= self.discount
 
-        if terminated:
+        if terminated or truncated:
             self.cumulative_discount = 1.0
             for actor_trace in self.actor_traces:
                 actor_trace.zero_()
@@ -217,7 +213,7 @@ class A2CLambdaLearner(A2CLearnerBase):
 
 
 # TODO: use both players' perspectives when updating the Q-value function
-class A2CQLearner:
+class A2CQLearner(A2CLearnerBase):
     def __init__(
         self,
         actor: ActorNetwork,
@@ -229,7 +225,7 @@ class A2CQLearner:
         over_simple_actions: bool = True,
         **kwargs,
     ):
-        """Implementation of the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
+        """Implementation of a custom actor-critic algorithm with a Q-value table for the critic"""
         if not over_simple_actions:
             raise NotImplementedError("discrete and primitive actions are not supported yet")
         if not consider_opponent_action:
@@ -242,7 +238,7 @@ class A2CQLearner:
         self.policy_cumulative_discount = policy_cumulative_discount
         self.consider_opponent_action = consider_opponent_action
 
-        actor_optimizer_kwargs = extract_sub_kwargs(kwargs, ("actor_optimizer",))
+        actor_optimizer_kwargs, = extract_sub_kwargs(kwargs, ("actor_optimizer",))
 
         actor_optimizer_kwargs = {
             "lr": 1e-4,
@@ -254,11 +250,7 @@ class A2CQLearner:
 
         self.action_distribution = None
         self.action = None
-
-        # Variables for policy improvement
-        self.at_policy_improvement = True
-        # Track at which environment step we are since we last performed policy improvement/evaluation
-        self.policy_iteration_step = 0
+        self.postponed_learn: dict = None
 
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
@@ -266,14 +258,16 @@ class A2CQLearner:
         # Track values
         self.delta = 0.0
 
-    def sample_action(self, obs: torch.Tensor, next_opponent_action: int) -> int:
-        """Sample an action from the actor. A training step starts with `act()`, followed immediately by an environment step and `update()`"""    
+    def compute_action_distribution(self, obs: torch.Tensor, next_opponent_action: int) -> torch.distributions.Distribution:
+        """Get the action probability distribution for the given observation and predicted opponent action."""
         obs = self._append_opponent_action_if_needed(obs, next_opponent_action)
-
         action_probabilities = self.actor(obs)
-        self.action_distribution = Categorical(probs=action_probabilities)
+        return Categorical(probs=action_probabilities)
+
+    def sample_action(self, obs: torch.Tensor, *, next_opponent_action: int, **kwargs) -> int:
+        """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
+        self.action_distribution = self.compute_action_distribution(obs, next_opponent_action)
         self.action = self.action_distribution.sample()
-        
         return self.action.item()
 
     def _append_opponent_action_if_needed(self, obs: torch.Tensor, opponent_action: int) -> torch.Tensor:
@@ -281,86 +275,91 @@ class A2CQLearner:
             if opponent_action is None:
                 raise ValueError("a prediction for the opponent's next action must be provided when choosing how to act, since we are considering opponent actions")
 
-        opponent_action_onehot = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.action_space_size)
+        opponent_action_onehot = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self.critic.opponent_action_dim)
         return torch.hstack((obs, opponent_action_onehot))
 
-    def _step_policy_iteration(self):
-        step_threshold = self.policy_improvement_steps if self.at_policy_improvement else self.policy_evaluation_steps
+    def _update_actor(self, obs: torch.Tensor, agent_action: int, opponent_action: int):
+        # Compute the TD delta
+        delta = self.compute_advantage(obs, agent_action, opponent_action)
+        self.delta = delta
         
-        self.policy_iteration_step += 1
-        if self.policy_iteration_step >= step_threshold:
-            self.at_policy_improvement = not self.at_policy_improvement
-            self.policy_iteration_step = 0
-
-    # Only the Q-table requires all these arguments, the critic network only really needs obs and the saved delta in self.delta
-    def _update_critic(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, opponent_action: int):
-        self.critic.update(obs, self.action.item(), reward, next_obs, terminated, opponent_action)
-
-    def _update_actor(self):
+        # Calculate the probability distribution at obs considering opponent action, and consider we did the given action
+        action_distribution = self.compute_action_distribution(obs, opponent_action)
+        action_tensor = torch.tensor(agent_action, dtype=torch.int64)
+        
+        # Update the actor network
         self.actor_optimizer.zero_grad()
 
-        actor_score = self.cumulative_discount * self.action_distribution.log_prob(self.action)
-        actor_score.backward(retain_graph=True)
-        with torch.no_grad():
-            for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
-                actor_trace.copy_(self.discount * self.actor_lambda * actor_trace + parameter.grad)
-                parameter.grad.copy_(self.delta * actor_trace * (1 - self.actor_entropy_loss_coef))
-        # Add the entropy score gradient
-        entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
-        entropy_score.backward()
+        actor_score = (1 - self.actor_entropy_loss_coef) * self.cumulative_discount * delta * action_distribution.log_prob(action_tensor) + self.actor_entropy_loss_coef * action_distribution.entropy()
+        actor_score.backward()
 
         self.actor_optimizer.step()
 
-    def compute_td_delta(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool) -> float:
+    def compute_advantage(self, obs: torch.Tensor, agent_action: int, opponent_action: int) -> float:
         """Compute the TD delta (a.k.a. advantage)."""
-        if isinstance(self.critic, QTable):
-            # A(s, a) = Q(s, a) - V(s, a) = Q(s, a) - pi.T Q(s, .)
-            delta = self.critic.q(obs, self.action.item()) - self.actor(obs).numpy(force=True).T @ self.qs(obs)
-
+        # If the opponent's action doesn't matter, since it's ineffectual, then compute the advantage considering all possible opponent actions.
+        # NOTE: another possibility would be to perform random sampling? But then it would probably take a long time before convergence...
+        if opponent_action is None:
+            obs_with_opp = torch.vstack(self._append_opponent_action_if_needed(obs, o) for o in range(self.critic.opponent_action_dim))
         else:
-            with torch.no_grad():
-                if terminated:
-                    target = reward
-                else:
-                    target = reward + self.discount * self.critic(next_obs)
-                
-                delta = (target - self.critic(obs)).item()
-        
-        return delta
+            obs_with_opp = self._append_opponent_action_if_needed(obs, opponent_action)
 
-    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, info: dict, next_info: dict):
-        """
-        Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `act()`
-        
-        NOTE: `info` and `next_info` are, respectively, the info dictionary after the observations `obs` and `next_obs` were acted upon
-        """
-        p1_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p1_move"]]
-        p1_actionable = ActionMap.is_state_actionable_late()
-        p2_actionable = ActionMap.is_state_actionable_late()
+        # NOTE: since the tensors are always on CPU, we don't need to call .numpy() with force=True
+        # A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi.T Q(s, o, .)
+        q_soa = self.critic.q(obs.numpy().squeeze(), agent_action, opponent_action)
+        pi = self.actor(obs_with_opp).detach().numpy()
+        q_so = self.critic.q(obs.numpy().squeeze(), opponent_action=opponent_action)
+        return q_soa - (pi @ q_so).item()
+    
+    def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, obs_agent_action: int, obs_opponent_action: int, next_obs_opponent_action: int):
+        """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the opponent's actual action on the next observation `next_obs`."""
+        # Update the Q-table
+        self.critic.update(obs.numpy().squeeze(), obs_agent_action, reward, next_obs.numpy().squeeze(), terminated, obs_opponent_action, next_obs_opponent_action)
 
-        # TODO: FRAMESKIPPPINGNGNG IF OPPONENT FRAMMESKIP THEN UPDATE CRITIC CONSIDERING ANY ACTION. SAME FOR AGENT
-        obs = self._append_opponent_action_if_needed(obs, obs_opponent_action)
-        next_obs = self._append_opponent_action_if_needed(next_obs, next_obs_opponent_action)
-
-        # Compute the TD delta
-        self.delta = self.compute_td_delta(obs, next_obs, reward, terminated)
-
-        # Update the networks.
-        # We perform policy improvement first and then policy evaluation (at_policy_improvement begins True).
-        if self.at_policy_improvement:
-            self._update_actor()
-            self._step_policy_iteration()
-        # We don't perform elif since we may want to perform both policy improvement and evaluation in the same step (e.g. if policy_improvement_steps == 1)
-        if not self.at_policy_improvement:
-            self._update_critic(obs, next_obs, reward, terminated)
-            self._step_policy_iteration()
+        # If the agent action is None then that means the agent couldn't act, so it doesn't make sense to update the actor
+        if obs_agent_action is None:
+            pass
+        # If the agent did perform an action, then update the actor
+        else:
+            # If the opponent is being frameskipped, then we consider them as doing any of their actions, and update accordingly
+            if obs_opponent_action is None:
+                # TODO: how about considering it to be 0? (i.e. STAND, the action of doing nothing)
+                for opponent_action in range(self.critic.opponent_action_dim):
+                    self._update_actor(obs, obs_agent_action, opponent_action)
+            # We have to recalculate the policy's action distribution since the opponent action is likely different
+            else:
+                self._update_actor(obs, obs_agent_action, obs_opponent_action)
 
         if self.policy_cumulative_discount:
             self.cumulative_discount *= self.discount
 
-        if terminated:
+        if terminated or truncated:
             self.cumulative_discount = 1.0
-            for actor_trace in self.actor_traces:
-                actor_trace.zero_()
-            for critic_trace in self.critic_traces:
-                critic_trace.zero_()
+
+    # TODO: can we use importance sampling weights to make the update of the Q-value more efficient by not explicitly considering just one action from the opponent but all of them? Of course, we need access to the opponent's policy, which we do during training supposedly
+    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, *, obs_agent_action: int, obs_opponent_action: int, **kwargs):
+        """
+        Update the actor and critic in this environment step. Should be preceded by an environment interaction with `sample_action()`.
+        
+        NOTE: actual learning occurs one-step later, since we need to know the opponent's actual action on the next observation
+
+        Extra parameters
+        ----------------
+        - `obs_agent_action`: which action the agent actually performed. Should match what was sampled, but can be `None` if the critic update should be done for all agent actions
+        - `obs_opponent_action`: which action the opponent actually performed. May not match what was used at the time of sampling
+        """
+        if self.postponed_learn is not None:
+            self._learn_complete(**self.postponed_learn, next_obs_opponent_action=obs_opponent_action)
+            
+            if terminated or truncated:
+                self.postponed_learn = None
+            
+        self.postponed_learn = {
+            "obs": obs,
+            "next_obs": next_obs,
+            "reward": reward,
+            "terminated": terminated,
+            "truncated": truncated,
+            "obs_agent_action": obs_agent_action,
+            "obs_opponent_action": obs_opponent_action,
+        }

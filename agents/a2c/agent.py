@@ -1,16 +1,18 @@
 import os
 import torch
+import random
 from torch import nn
 from torch.distributions import Categorical
 from copy import deepcopy
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
-from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, A2CLearnerBase, A2CQLearner
 from agents.ql.ql import QTable
 from agents.utils import extract_sub_kwargs
 from agents.torch_utils import AggregateModule
 from agents.action import ActionMap
+from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
 
 
 class FootsiesAgent(FootsiesAgentTorch):
@@ -18,7 +20,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self,
         observation_space_size: int,
         action_space_size: int,
-        learner: A2CLambdaLearner = None,
+        learner: A2CLearnerBase = None,
         use_simple_actions: bool = True,
         use_q_table: bool = False,
         actor_hidden_layer_sizes_specification: str = "",
@@ -62,6 +64,7 @@ class FootsiesAgent(FootsiesAgentTorch):
                     opponent_action_dim=self.action_space_size,
                     **critic_kwargs,
                 )
+                learner_class = A2CQLearner
             else:
                 critic = CriticNetwork(
                     obs_dim=observation_space_size,
@@ -69,8 +72,9 @@ class FootsiesAgent(FootsiesAgentTorch):
                     hidden_layer_activation=getattr(nn, critic_hidden_layer_activation_specification),
                     **critic_kwargs,
                 )
+                learner_class = A2CLambdaLearner
 
-            learner = A2CLambdaLearner(
+            learner = learner_class(
                 actor=actor,
                 critic=critic,
                 **a2c_kwargs,
@@ -87,6 +91,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.actor_critic = AggregateModule(models)
 
         self.current_observation = None
+        self.current_info = None
 
         # For logging
         self.cumulative_delta = 0
@@ -95,13 +100,42 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None) -> "any":
         self.current_observation = obs
-        return self.learner.sample_action(obs, predicted_opponent_action)
+        self.current_info = info
+        
+        if predicted_opponent_action is None:
+            predicted_opponent_action = random.randint(0, self.action_space_size - 1)
+
+        if self.current_action is not None:
+            try:
+                action = next(self.current_action)
+        
+            except StopIteration:
+                self.current_action = None
+        
+        if self.current_action is None:
+            simple_action = self.learner.sample_action(obs,
+                next_opponent_action=predicted_opponent_action
+            )
+            self.current_action = ActionMap.simple_to_discrete(simple_action)
+            action = next(self.current_action)
+        
+        return action
+
+    def _obtain_effective_action(self, previous_move_index: int, current_move_index: int, previous_move_progress: float, current_move_progress: float) -> int | None:
+        """Obtain what action was performed by the player. If the action was inefffectual, return `None`."""
+        move = FOOTSIES_MOVE_INDEX_TO_MOVE[previous_move_index]
+        actionable = ActionMap.is_state_actionable_late(move, previous_move_progress, current_move_progress)
+        return ActionMap.simple_from_move_index(current_move_index) if actionable else None
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
-        # We consider simplified actions, we don't care about discrete or primitive actions
-        actual_opponent_action = info["p2_move"]
-
-        self.learner.learn(self.current_observation, next_obs, reward, terminated, actual_opponent_action)
+        # NOTE: with the way frameskipping is being done we are updating Q-values throughout the duration of moves, not "skipping" them
+        obs_agent_action = self._obtain_effective_action(self.current_info["p1_move"], info["p1_move"], self.current_observation[0, 32].item(), next_obs[0, 32].item())
+        obs_opponent_action = self._obtain_effective_action(self.current_info["p2_move"], info["p2_move"], self.current_observation[0, 33].item(), next_obs[0, 33].item())
+        
+        self.learner.learn(self.current_observation, next_obs, reward, terminated, truncated,
+            obs_agent_action=obs_agent_action,
+            obs_opponent_action=obs_opponent_action,
+        )
         
         self.cumulative_delta += self.learner.delta
         self.cumulative_delta_n += 1

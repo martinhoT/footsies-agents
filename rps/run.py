@@ -8,8 +8,7 @@ from torch import nn
 from tqdm import tqdm
 from rps.rps import RPS
 from rps.plotter import AnimatedPlot
-from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
-from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, A2CLearnerBase
 from itertools import starmap, count
 
 
@@ -29,7 +28,7 @@ OPPONENT_POOL = {
 }
 
 
-def print_results(game: RPS, agent: A2CAgent):
+def print_results(game: RPS, agent: A2CLambdaLearner):
     healths_list = [(h1 + 1, h2 + 1) for h1 in range(game.health) for h2 in range(game.health)]
     moves_list = [(pl1, pl2) for pl1 in range(game.move_dim) for pl2 in range(game.move_dim)] if game.observation_include_move else [[None, None]]
 
@@ -58,7 +57,7 @@ def print_results(game: RPS, agent: A2CAgent):
     print()
 
 
-def train(game: RPS, agent: A2CAgent, episodes: int = None, use_tqdm: bool = True) -> Generator[tuple, None, None]:
+def train(game: RPS, agent: A2CLearnerBase, episodes: int = None, use_tqdm: bool = True) -> Generator[tuple, None, None]:
     episode_iterator = range(episodes) if episodes is not None else count()
 
     try:
@@ -69,18 +68,18 @@ def train(game: RPS, agent: A2CAgent, episodes: int = None, use_tqdm: bool = Tru
             episode_length = 0
 
             while not (terminated or truncated):
-                action = agent.act(obs, info)
+                action = agent.sample_action(obs, info=info)
                 next_obs, reward, terminated, truncated, info = game.step(action)
                 # When the episode terminates, next_obs becomes None.
                 # Make it equal to the previous observation so that the agent doesn't freak out, but it's not like it will actually use it.
                 # next_obs = next_obs if next_obs is not None else obs
-                agent.update(next_obs, reward, terminated, truncated, info)
+                agent.learn(obs, next_obs, reward, terminated, truncated, info=info)
                 obs = next_obs
 
                 episode_reward += reward
                 episode_length += 1
             
-            yield episode, agent.learner.delta, episode_reward, episode_length
+            yield episode, agent.delta, episode_reward, episode_length
     
     except KeyboardInterrupt:
         pass
@@ -139,36 +138,32 @@ def main(
         time_limit_as_truncation=time_limit_as_truncation,
     )
 
-    agent = A2CAgent(
-        game.observation_dim,
-        game.action_dim,
-        learner=A2CLambdaLearner(
-            discount=1.0,
-            actor=ActorNetwork(
-                obs_dim=game.observation_dim,
-                action_dim=game.action_dim,
-                hidden_layer_sizes=actor_hidden_layer_sizes,
-                hidden_layer_activation=actor_hidden_layer_activation,
-            ),
-            critic=CriticNetwork(
-                obs_dim=game.observation_dim,
-                hidden_layer_sizes=critic_hidden_layer_sizes,
-                hidden_layer_activation=critic_hidden_layer_activation,
-            ),
-            actor_lambda=actor_lambda,
-            critic_lambda=critic_lambda,
-            actor_entropy_loss_coef=actor_entropy_loss_coef,
-            actor_optimizer=torch.optim.Adam,
-            critic_optimizer=torch.optim.Adam,
-            **{
-                "actor_optimizer.lr": actor_lr,
-                "critic_optimizer.lr": critic_lr,
-            }
+    agent = A2CLambdaLearner(
+        discount=1.0,
+        actor=ActorNetwork(
+            obs_dim=game.observation_dim,
+            action_dim=game.action_dim,
+            hidden_layer_sizes=actor_hidden_layer_sizes,
+            hidden_layer_activation=actor_hidden_layer_activation,
         ),
+        critic=CriticNetwork(
+            obs_dim=game.observation_dim,
+            hidden_layer_sizes=critic_hidden_layer_sizes,
+            hidden_layer_activation=critic_hidden_layer_activation,
+        ),
+        actor_lambda=actor_lambda,
+        critic_lambda=critic_lambda,
+        actor_entropy_loss_coef=actor_entropy_loss_coef,
+        actor_optimizer=torch.optim.Adam,
+        critic_optimizer=torch.optim.Adam,
+        **{
+            "actor_optimizer.lr": actor_lr,
+            "critic_optimizer.lr": critic_lr,
+        }
     )
 
     if self_play:
-        game.set_opponent(lambda o, i: agent.act(o, i))
+        game.set_opponent(lambda o, i: agent.sample_action(o, info=i))
 
     def exp_averaged_metrics(training_loop: Generator[tuple, None, None], factor: float = 0.998):
         reward_exp_avg = 0.0

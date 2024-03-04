@@ -31,7 +31,7 @@ class QTable:
         - `action_dim`: the number of possible actions
         - `opponent_action_dim`: the number of possible actions from the opponent.
         If not `None`, the opponent's immediate future actions `o` will be considered as part of the observation,
-        and action-values will be of the form `Q(s, a, o)`
+        and action-values will be of the form `Q(s, o, a)`
         - `learning_rate`: the learning rate
         - `discount`: the discount factor
         - `table_as_matrix`: whether the table should be stored as a matrix. If `False`, will be stored as a dictionary.
@@ -61,13 +61,14 @@ class QTable:
                 self.update_frequency_table = np.zeros((self.obs_dim, self.action_dim), dtype=np.int32)
         else:
             if self.considering_opponent:
-                self.table = defaultdict(lambda: np.zeros((self.opponent_action, self.action_dim), dtype=np.float32))
-                self.update_frequency_table = defaultdict(lambda: np.zeros((self.opponent_action, self.action_dim), dtype=np.int32))
+                self.table = defaultdict(lambda: np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.float32))
+                self.update_frequency_table = defaultdict(lambda: np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.int32))
             else:
                 self.table = defaultdict(lambda: np.zeros(self.action_dim, dtype=np.float32))
                 self.update_frequency_table = defaultdict(lambda: np.zeros(self.action_dim, dtype=np.int32))
 
     def _obs_idx(self, obs: np.ndarray) -> int:
+        """Obtain the integer identifier associated to the given observation."""
         gu1, gu2 = tuple(np.round(obs[0:2] * 3))
         mo1 = np.argmax(obs[2:17])
         mo2 = np.argmax(obs[17:32])
@@ -82,36 +83,45 @@ class QTable:
         
         If `opponent_action` is `None` and considering the opponent, then will perform an update for all opponent actions. This is useful for frame skipping.
         """
+        if action is None:
+            action = slice(None)
         if obs_opponent_action is None:
             obs_opponent_action = slice(None)
         if next_obs_opponent_action is None:
             next_obs_opponent_action = slice(None)
 
-        obs = self._obs_idx(obs)
-        next_obs = self._obs_idx(next_obs)
-
-        nxt = (self.discount * np.max(self.qs(next_obs))) if not terminated else 0.0
-        td_error = (reward + nxt - self.q(obs, action))
+        # Performing the maximum over axis -1 is equivalent to performing the maximum over the last axis, which pertains to the axis of agent actions.
+        nxt = np.max(self.q(next_obs, opponent_action=next_obs_opponent_action), axis=-1, keepdims=True)
+        # We expect the Q-value of any next opponent action to be the same in case one in particular wasn't specified.
+        # If that's not the case, then updated must have not been done correctly.
+        if not np.all(nxt == nxt[0]):
+            raise RuntimeError("the Q-value of the next state should be the same for all next opponent actions, in case one in particular is not being considered")
+        nxt_value = (self.discount * nxt[0]) if not terminated else 0.0
+        td_error = (reward + nxt_value - self.q(obs, action, opponent_action=obs_opponent_action))
+        
+        obs_idx = self._obs_idx(obs)
 
         if self.table_as_matrix:
             if self.considering_opponent:
-                self.table[obs, obs_opponent_action, action] += self.learning_rate * td_error
-                self.update_frequency_table[obs, obs_opponent_action, action] += 1
+                self.table[obs_idx, obs_opponent_action, action] += self.learning_rate * td_error
+                self.update_frequency_table[obs_idx, obs_opponent_action, action] += 1
             else:
-                self.table[obs, action] += self.learning_rate * td_error
-                self.update_frequency_table[obs, action] += 1
+                self.table[obs_idx, action] += self.learning_rate * td_error
+                self.update_frequency_table[obs_idx, action] += 1
         else:
             if self.considering_opponent:
-                self.table[obs][obs_opponent_action, action] += self.learning_rate * td_error
-                self.update_frequency_table[obs][obs_opponent_action, action] += 1
+                self.table[obs_idx][obs_opponent_action, action] += self.learning_rate * td_error
+                self.update_frequency_table[obs_idx][obs_opponent_action, action] += 1
             else:
-                self.table[obs][action] += self.learning_rate * td_error
-                self.update_frequency_table[obs][action] += 1
+                self.table[obs_idx][action] += self.learning_rate * td_error
+                self.update_frequency_table[obs_idx][action] += 1
 
         return td_error
     
-    def q(self, obs: np.ndarray, action: int, opponent_action: int = None) -> float:
-        """Get the Q-value for the given action and observation."""
+    def q(self, obs: np.ndarray, action: int = None, opponent_action: int = None) -> float | np.ndarray:
+        """Get the Q-value for the given action and observation. If an action is `None`, then return Q-values considering all actions"""
+        if action is None:
+            action = slice(None)
         if opponent_action is None:
             opponent_action = slice(None)
         
@@ -119,16 +129,6 @@ class QTable:
             return self.table[self._obs_idx(obs), opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs), action]
         else:
             return self.table[self._obs_idx(obs)][opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs)][action]
-
-    def qs(self, obs: np.ndarray, opponent_action: int = None) -> np.ndarray:
-        """Get the Q-values of all actions for the given observation."""
-        if opponent_action is None:
-            opponent_action = slice(None) 
-        
-        if self.table_as_matrix:
-            return self.table[self._obs_idx(obs), opponent_action, :] if self.considering_opponent else self.table[self._obs_idx(obs), :]
-        else:
-            return self.table[self._obs_idx(obs)][opponent_action, :] if self.considering_opponent else self.table[self._obs_idx(obs)][:]
 
     def sample_action_best(self, obs: np.ndarray, opponent_action: int = None) -> int:
         """Sample the best action for the given observation."""

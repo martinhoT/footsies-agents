@@ -18,7 +18,8 @@ from io import BufferedIOBase
 FootsiesTransition = tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, bool]
 
 
-@dataclass(slots=True)
+# repr is False to avoid printing the entire episode, which is especially important when debugging
+@dataclass(slots=True, repr=False)
 class FootsiesEpisode:
     """
     Data container of an episode in FOOTSIES, from beginning to end.
@@ -168,7 +169,7 @@ class FootsiesEpisode:
         return self.steps
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, repr=False)
 class FootsiesDataset:
     """Dataset of transitions on the FOOTSIES environment."""
     episodes:           tuple[FootsiesEpisode]
@@ -207,6 +208,7 @@ class FootsiesDataset:
                 f.write(b"\n")
 
 
+# TODO: make this return tensors
 class FootsiesTorchDataset(Dataset):
     """Flattened dataset of transitions, for usage with PyTorch's `DataLoader`."""
     def __init__(self, dataset: FootsiesDataset):
