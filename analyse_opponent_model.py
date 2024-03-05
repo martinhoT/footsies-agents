@@ -306,18 +306,19 @@ class MimicAnalyserManager:
             return
 
         observation = analyser.previous_observation
-        p1_move_state = ActionMap.move_from_move_index(analyser.current_info["p1_move"])
-        p2_move_state = ActionMap.move_from_move_index(analyser.current_info["p2_move"])
-        p1_simple = ActionMap.simple_from_move(p1_move_state)
-        p2_simple = ActionMap.simple_from_move(p2_move_state)
-        p1_simple_move = ActionMap.simple_as_move(p1_simple)
-        p2_simple_move = ActionMap.simple_as_move(p2_simple)
+        p1_simple = ActionMap.simple_from_transition(analyser.current_info["p1_move"], analyser.current_info["p2_move"], analyser.current_observation[32], analyser.current_observation[33])
+        p2_simple = ActionMap.simple_from_transition(analyser.current_info["p2_move"], analyser.current_info["p1_move"], analyser.current_observation[33], analyser.current_observation[32])
+        
+        if p1_simple is not None:
+            p1_simple_move = ActionMap.simple_as_move(p1_simple)
+            dpg.set_value(self.actual_p1_move, p1_simple_move.name)
+        
+        if p2_simple is not None:
+            p2_simple_move = ActionMap.simple_as_move(p2_simple)
+            dpg.set_value(self.actual_p2_move, p2_simple_move.name)
 
-        dpg.set_value(self.actual_p1_move, p1_simple_move.name)
-        dpg.set_value(self.actual_p2_move, p2_simple_move.name)
-
-        dpg.set_value(self.p1_frameskip, not ActionMap.is_state_actionable_late(p1_move_state, analyser.previous_observation[32], analyser.current_observation[32]))
-        dpg.set_value(self.p2_frameskip, not ActionMap.is_state_actionable_late(p2_move_state, analyser.previous_observation[33], analyser.current_observation[33]))
+        dpg.set_value(self.p1_frameskip, p1_simple is None)
+        dpg.set_value(self.p2_frameskip, p2_simple is None)
 
         self.p1_action_table.update(observation, p1_simple)
         self.p2_action_table.update(observation, p2_simple)
@@ -344,12 +345,11 @@ class MimicAnalyserManager:
 
         observation_torch = AGENT._obs_to_tensor(observation)
         if self.p1_mirror_p2:
-            inverted = observation_invert_perspective_flattened(observation_torch)
-            p1_distribution_predicted = AGENT.p2_model.probability_distribution(AGENT.craft_observation(inverted, False, True)).squeeze()
+            p1_distribution_predicted = AGENT.p2_model.probability_distribution(AGENT.craft_observation(observation_torch, False, True, True)).squeeze()
         else:
-            p1_distribution_predicted = AGENT.p1_model.probability_distribution(AGENT.craft_observation(observation_torch, True, True)).squeeze()
+            p1_distribution_predicted = AGENT.p1_model.probability_distribution(AGENT.craft_observation(observation_torch, True, True, True)).squeeze()
         p1_distribution_estimated = self.p1_action_table.probability_distribution(observation) # we don't mirror this one, it's not that important
-        p2_distribution_predicted = AGENT.p2_model.probability_distribution(AGENT.craft_observation(observation_torch, False, False)).squeeze()
+        p2_distribution_predicted = AGENT.p2_model.probability_distribution(AGENT.craft_observation(observation_torch, False, False, False)).squeeze()
         p2_distribution_estimated = self.p2_action_table.probability_distribution(observation)
 
         self.p1_plot.update(p1_distribution_predicted, p1_distribution_estimated)
@@ -367,10 +367,8 @@ class MimicAnalyserManager:
         except StopIteration:
             obs = AGENT._obs_to_tensor(obs)
             
-            # We need to craft the observation to be as if P1 is the one experiencing it (since P2 model was trained inverted)
-            obs = observation_invert_perspective_flattened(obs)
-            
-            simple_action = AGENT.p2_model.predict(AGENT.craft_observation(obs, use_p1_model=False, use_p1_action_history=True), deterministic=True).item()
+            # We need to craft the observation to be as if P1 is the one experiencing it (since P2 model was trained inverted), so use_p1_perspective=True
+            simple_action = AGENT.p2_model.predict(AGENT.craft_observation(obs, use_p1_model=False, use_p1_action_history=True, use_p1_perspective=True), deterministic=True).item()
             self.p2_predicted_action_iterator = iter(ActionMap.simple_to_discrete(simple_action))
             discrete_action = next(self.p2_predicted_action_iterator)
 
@@ -437,8 +435,8 @@ if __name__ == "__main__":
 
     analyser = Analyser(
         env=env,
-        p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
-        # p1_action_source=lambda o, i: next(p1),
+        # p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
+        p1_action_source=lambda o, i: next(p1),
         custom_elements_callback=mimic_analyser_manager.include_mimic_dpg_elements,
         custom_state_update_callback=mimic_analyser_manager.predict_next_move,
     )

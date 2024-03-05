@@ -275,7 +275,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             previous_opponent_move_progress = obs[0, 33]
             current_opponent_move_progress = next_obs[0, 33]
 
-            if not self.opponent_model_frameskip or ActionMap.is_state_actionable_late(previous_opponent_move_state, previous_opponent_move_progress, current_opponent_move_progress):
+            if not self.opponent_model_frameskip or ActionMap.is_state_actionable(previous_opponent_move_state, previous_opponent_move_progress, current_opponent_move_progress):
                 self.opponent_model_optimizer.zero_grad()
 
                 opponent_action_probabilities = self.opponent_model(obs)
@@ -311,7 +311,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             previous_agent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[torch.argmax(self.current_observation[0, 2:17]).item()]
             previous_agent_move_progress = self.current_observation[0, 32]
             current_agent_move_progress = next_obs[0, 32]
-            update_actor_critic = ActionMap.is_state_actionable_late(previous_agent_move_state, previous_agent_move_progress, current_agent_move_progress)
+            update_actor_critic = ActionMap.is_state_actionable(previous_agent_move_state, previous_agent_move_progress, current_agent_move_progress)
 
         if update_actor_critic:
             self.a2c.learn(obs, next_obs, reward, terminated)

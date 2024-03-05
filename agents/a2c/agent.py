@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import torch
 import random
 from torch import nn
@@ -10,9 +11,8 @@ from typing import Any, Callable, Tuple
 from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, A2CLearnerBase, A2CQLearner
 from agents.ql.ql import QTable
 from agents.utils import extract_sub_kwargs
-from agents.torch_utils import AggregateModule
+from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
 from agents.action import ActionMap
-from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
 
 
 class FootsiesAgent(FootsiesAgentTorch):
@@ -23,6 +23,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         learner: A2CLearnerBase = None,
         use_simple_actions: bool = True,
         use_q_table: bool = False,
+        consider_opponent_action: bool = False,
         actor_hidden_layer_sizes_specification: str = "",
         critic_hidden_layer_sizes_specification: str = "",
         actor_hidden_layer_activation_specification: str = "ReLU",
@@ -39,19 +40,21 @@ class FootsiesAgent(FootsiesAgentTorch):
         - `learner`: the A2C algorithm class to use. If `None`, one will be created
         - `use_simple_actions`: whether to use simple actions rather than discrete actions
         - `use_q_table`: whether to use a Q-table instead of a neural network for the critic
+        - `consider_opponent_action`: whether to consider the opponent's action as part of the observation. We consider the opponent's action space to be the same as the agent's
         - `actor_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the actor network
         - `critic_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the critic network
         - `actor_hidden_layer_activation_specification`: a string specifying the hidden layer activation for the actor network
         - `critic_hidden_layer_activation_specification`: a string specifying the hidden layer activation for the critic network
         """
-        self.action_space_size = action_space_size if use_simple_actions else ActionMap.n_simple()
+        self.action_space_size = ActionMap.n_simple() if use_simple_actions else action_space_size
         self.use_simple_actions = use_simple_actions
+        self.consider_opponent_action = consider_opponent_action
 
         a2c_kwargs, actor_kwargs, critic_kwargs = extract_sub_kwargs(kwargs, ("a2c", "actor", "critic"), strict=True)
 
         if learner is None:
             actor = ActorNetwork(
-                obs_dim=observation_space_size,
+                obs_dim=observation_space_size + (self.action_space_size if consider_opponent_action else 0),
                 action_dim=self.action_space_size,
                 hidden_layer_sizes=[int(n) for n in actor_hidden_layer_sizes_specification.split(",")] if actor_hidden_layer_sizes_specification else [],
                 hidden_layer_activation=getattr(nn, actor_hidden_layer_activation_specification),
@@ -77,6 +80,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             learner = learner_class(
                 actor=actor,
                 critic=critic,
+                consider_opponent_action=consider_opponent_action,
                 **a2c_kwargs,
             )
 
@@ -92,10 +96,13 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         self.current_observation = None
         self.current_info = None
+        self.current_action = None
 
         # For logging
         self.cumulative_delta = 0
         self.cumulative_delta_n = 0
+        self.cumulative_qtable_error = 0
+        self.cumulative_qtable_error_n = 0
         self._test_observations = None
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None) -> "any":
@@ -116,29 +123,60 @@ class FootsiesAgent(FootsiesAgentTorch):
             simple_action = self.learner.sample_action(obs,
                 next_opponent_action=predicted_opponent_action
             )
-            self.current_action = ActionMap.simple_to_discrete(simple_action)
+            self.current_action = iter(ActionMap.simple_to_discrete(simple_action))
             action = next(self.current_action)
         
         return action
 
-    def _obtain_effective_action(self, previous_move_index: int, current_move_index: int, previous_move_progress: float, current_move_progress: float) -> int | None:
-        """Obtain what action was performed by the player. If the action was inefffectual, return `None`."""
-        move = FOOTSIES_MOVE_INDEX_TO_MOVE[previous_move_index]
-        actionable = ActionMap.is_state_actionable_late(move, previous_move_progress, current_move_progress)
-        return ActionMap.simple_from_move_index(current_move_index) if actionable else None
-
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
+        obs = self.current_observation
+
         # NOTE: with the way frameskipping is being done we are updating Q-values throughout the duration of moves, not "skipping" them
-        obs_agent_action = self._obtain_effective_action(self.current_info["p1_move"], info["p1_move"], self.current_observation[0, 32].item(), next_obs[0, 32].item())
-        obs_opponent_action = self._obtain_effective_action(self.current_info["p2_move"], info["p2_move"], self.current_observation[0, 33].item(), next_obs[0, 33].item())
+        p1_move_progress = obs[0, 32].item()
+        p2_move_progress = obs[0, 33].item()
+        p1_move_index = torch.argmax(obs[0, 2:17]).item()
+        p2_move_index = torch.argmax(obs[0, 17:32]).item()
+        p1_next_move_index = torch.argmax(next_obs[0, 2:17]).item()
+        p2_next_move_index = torch.argmax(next_obs[0, 17:32]).item()
+        obs_agent_action = ActionMap.simple_from_transition(
+            previous_player_move_index=p1_move_index,
+            previous_opponent_move_index=p2_move_index,
+            previous_player_move_progress=p1_move_progress,
+            previous_opponent_move_progress=p2_move_progress,
+            player_move_index=p1_next_move_index,
+        )
+        obs_opponent_action = ActionMap.simple_from_transition(
+            previous_player_move_index=p2_move_index,
+            previous_opponent_move_index=p1_move_index,
+            previous_player_move_progress=p2_move_progress,
+            previous_opponent_move_progress=p1_move_progress,
+            player_move_index=p2_next_move_index,
+        )
         
-        self.learner.learn(self.current_observation, next_obs, reward, terminated, truncated,
+        # Learn using P1's perspective
+        self.learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
         )
-        
         self.cumulative_delta += self.learner.delta
         self.cumulative_delta_n += 1
+        if isinstance(self.learner, A2CQLearner):
+            self.cumulative_qtable_error += np.mean(self.learner.td_error).item()
+            self.cumulative_qtable_error_n += 1
+
+        # Learn using P2's perspective
+        # NOTE: only valid for FOOTSIES, since both players are using the same character
+        p2_obs = observation_invert_perspective_flattened(obs)
+        p2_next_obs = observation_invert_perspective_flattened(next_obs)
+        self.learner.learn(p2_obs, p2_next_obs, -reward, terminated, truncated,
+            obs_agent_action=obs_opponent_action,
+            obs_opponent_action=obs_agent_action,
+        )
+        self.cumulative_delta += self.learner.delta
+        self.cumulative_delta_n += 1
+        if isinstance(self.learner, A2CQLearner):
+            self.cumulative_qtable_error += np.mean(self.learner.td_error).item()
+            self.cumulative_qtable_error_n += 1
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         model = deepcopy(self.actor_critic.actor)
@@ -157,10 +195,16 @@ class FootsiesAgent(FootsiesAgentTorch):
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model")
         self.model.load_state_dict(torch.load(model_path))
+        if isinstance(self.critic, QTable):
+            qtable_path = os.path.join(folder_path, "q")
+            self.critic.load(qtable_path)
 
     def save(self, folder_path: str):
         model_path = os.path.join(folder_path, "model")
         torch.save(self.model.state_dict(), model_path)
+        if isinstance(self.critic, QTable):
+            qtable_path = os.path.join(folder_path, "q")
+            self.critic.save(qtable_path)
 
     def evaluate_average_delta(self) -> float:
         res = (
@@ -171,11 +215,28 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.cumulative_delta_n = 0
 
         return res
+        
+    def evaluate_average_qtable_error(self) -> float:
+        res = (
+            self.cumulative_qtable_error / self.cumulative_qtable_error_n
+        ) if self.cumulative_qtable_error_n != 0 else 0
+
+        self.cumulative_qtable_error = 0
+        self.cumulative_qtable_error_n = 0
+
+        return res
 
     def _initialize_test_states(self, test_states: list[torch.Tensor]):
         if self._test_observations is None:
-            test_observations, _ = zip(test_states)
-            self._test_observations = torch.tensor(test_observations, dtype=torch.float32)
+            test_observations, _ = zip(*test_states)
+            self._test_observations = torch.vstack(test_observations)
+            # Append random opponent actions merely for evaluation of policy entropy (in case opponent action are being considered, of course)
+            if self.consider_opponent_action:
+                random_opponent_actions = nn.functional.one_hot(
+                    torch.randint(0, self.action_space_size, (len(test_states),)),
+                    num_classes=9,
+                ).float()
+                self._test_observations = torch.hstack((self._test_observations, random_opponent_actions))
 
     def evaluate_average_policy_entropy(self, test_states: list[tuple[Any, Any]]) -> float:
         self._initialize_test_states(test_states)

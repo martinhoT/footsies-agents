@@ -11,6 +11,7 @@ from gymnasium.wrappers import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
+from footsies_gym.utils import get_dict_obs_from_vector_obs
 from agents.action import ActionMap
 from io import BufferedIOBase
 
@@ -206,6 +207,66 @@ class FootsiesDataset:
             for episode in self.episodes:
                 f.write(episode.tobytes())
                 f.write(b"\n")
+    
+    def visualize(self, episode: int):
+        """Visualize an episode from the dataset."""
+        e = self.episodes[episode]
+        
+        class FixedOpponent:
+            def __init__(self, opponent_actions: list[int]):
+                self.action_iterator = iter(opponent_actions)
+
+            def __call__(self, obs: dict):
+                try:
+                    action = next(self.action_iterator)
+                except StopIteration:
+                    action = 0
+
+                t = ((action & 1) != 0), ((action & 2) != 0), ((action & 4) != 0)
+                return t
+
+        opponent = FixedOpponent(list(e.p2_actions.flatten()))
+
+        footsies_env = FootsiesEnv(
+            game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
+            dense_reward=True,
+            frame_delay=0,
+            render_mode="human",
+            skip_instancing=False,
+            fast_forward=False,
+            sync_mode="synced_non_blocking",
+            by_example=False,
+            vs_player=False,
+            opponent=opponent,
+            log_file="out.log",
+            log_file_overwrite=True,
+        )
+
+        footsies_normalized = FootsiesNormalized(footsies_env)
+        env = FlattenObservation(footsies_normalized)
+        
+        obs, _ = env.reset()
+
+        # Load the initial observation that is in the dataset. This is because the bot (player 1) could act the instant reset() was called, but that action wasn't saved
+        battle_state = footsies_env.save_battle_state()
+        initial_obs = get_dict_obs_from_vector_obs(e.observations[0, :], unflattenend_observation_space=footsies_normalized.observation_space)
+        battle_state.p1State.position[0] = initial_obs["position"][0].item()
+        battle_state.p2State.position[0] = initial_obs["position"][1].item()
+        battle_state.p1State.guardHealth = initial_obs["guard"][0].item()
+        battle_state.p2State.guardHealth = initial_obs["guard"][1].item()
+        battle_state.p1State.currentActionID = initial_obs["move"][0].item()
+        battle_state.p2State.currentActionID = initial_obs["move"][1].item()
+        battle_state.p1State.moveFrame = initial_obs["move_frame"][0].item()
+        battle_state.p2State.moveFrame = initial_obs["move_frame"][1].item()
+        footsies_env.load_battle_state(battle_state)
+
+        for recorded_obs, p1_action in zip(list(e.observations[1:, :]), list(e.p1_actions.flatten())):
+            t = ((p1_action & 1) != 0), ((p1_action & 2) != 0), ((p1_action & 4) != 0)
+            obs, _, _, _, _ = env.step(t)
+            if not np.isclose(recorded_obs, obs).all():
+                raise RuntimeError("the recorded dataset can't correctly reproduce the episode")
+
+        env.close()
 
 
 # TODO: make this return tensors
@@ -262,7 +323,7 @@ class DataCollector:
         self.env = env
         self.action_source = action_source
     
-    def sample_trajectory(self) -> Generator[tuple[np.ndarray, dict], None, None]:
+    def sample_trajectory(self) -> Generator[tuple[np.ndarray, float, dict], None, None]:
         """
         Sample a trajectory from the environment.
         """

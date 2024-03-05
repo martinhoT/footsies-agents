@@ -1,8 +1,8 @@
 import numpy as np
-from collections import defaultdict
 
 
 # TODO: double Q-learning support
+# TODO: forward view eligibility traces (maybe that's not possible with Q-learning? be careful)
 # NOTE: Sutton & Barto chapter 6.8 talks about different ways of thinking about value and action-value functions. One example is afterstates. Maybe we are doing something along those lines by explicitly considering future actions of an opponent
 #       We could use the afterstate thing if we had an environment model. That is actually possible with a deterministic environment such as fighting games. Evaluate this in the future.
 class QTable:
@@ -61,12 +61,17 @@ class QTable:
                 self.update_frequency_table = np.zeros((self.obs_dim, self.action_dim), dtype=np.int32)
         else:
             if self.considering_opponent:
-                self.table = defaultdict(lambda: np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.float32))
-                self.update_frequency_table = defaultdict(lambda: np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.int32))
+                self.table = {}
+                self.update_frequency_table = {}
+                self.table_empty_value = np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.float32)
             else:
-                self.table = defaultdict(lambda: np.zeros(self.action_dim, dtype=np.float32))
-                self.update_frequency_table = defaultdict(lambda: np.zeros(self.action_dim, dtype=np.int32))
+                self.table = {}
+                self.update_frequency_table = {}
+                self.table_empty_value = np.zeros(self.action_dim, dtype=np.float32)
 
+            # Make the empty value read-only. This is the value that is returned if the queried observation is not in the Q-table
+            self.table_empty_value.setflags(write=False)
+        
     def _obs_idx(self, obs: np.ndarray) -> int:
         """Obtain the integer identifier associated to the given observation."""
         gu1, gu2 = tuple(np.round(obs[0:2] * 3))
@@ -77,7 +82,7 @@ class QTable:
         # yikes
         return int(gu1 + 4 * gu2 + 4 * 4 * mo1 + 4 * 4 * 15 * mo2 + 4 * 4 * 15 * 15 * mf1 + 4 * 4 * 15 * 15 * 5 * mf2 + 4 * 4 * 15 * 15 * 5 * 5 * po1 + 4 * 4 * 15 * 15 * 5 * 5 * 5 * po2)
 
-    def update(self, obs: np.ndarray, action: int, reward: float, next_obs: np.ndarray, terminated: bool, obs_opponent_action: int = None, next_obs_opponent_action: int = None) -> float:
+    def update(self, obs: np.ndarray, action: int, reward: float, next_obs: np.ndarray, terminated: bool, obs_opponent_action: int = None, next_obs_opponent_action: int = None) -> float | np.ndarray:
         """
         Perform a Q-value update. Returns the TD error.
         
@@ -93,12 +98,18 @@ class QTable:
         # Performing the maximum over axis -1 is equivalent to performing the maximum over the last axis, which pertains to the axis of agent actions.
         nxt = np.max(self.q(next_obs, opponent_action=next_obs_opponent_action), axis=-1, keepdims=True)
         # We expect the Q-value of any next opponent action to be the same in case one in particular wasn't specified.
-        # If that's not the case, then updated must have not been done correctly.
-        if not np.all(nxt == nxt[0]):
-            raise RuntimeError("the Q-value of the next state should be the same for all next opponent actions, in case one in particular is not being considered")
-        nxt_value = (self.discount * nxt[0]) if not terminated else 0.0
+        # If that's not the case, then updates must not have been done correctly.
+        # if not np.all(nxt == nxt[0]):
+            # raise RuntimeError("the Q-value of the next state should be the same for all next opponent actions, in case one in particular is not being considered")
+        # However, since small variations in the move progress determine whether a move is actionable or not, but here we are binning them into the same slot, we can't really have these expectations.
+        # Therefore, we will just take the average.
+        nxt_value = (self.discount * np.mean(nxt)) if not terminated else 0.0
         td_error = (reward + nxt_value - self.q(obs, action, opponent_action=obs_opponent_action))
         
+        # Don't even bother updating. This also saves needlessly creating matrices with 0s when using a dictionary
+        if np.all(td_error == 0.0):
+            return td_error
+
         obs_idx = self._obs_idx(obs)
 
         if self.table_as_matrix:
@@ -110,9 +121,15 @@ class QTable:
                 self.update_frequency_table[obs_idx, action] += 1
         else:
             if self.considering_opponent:
+                if obs_idx not in self.table:
+                    self.table[obs_idx] = np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.float32)
+                    self.update_frequency_table[obs_idx] = np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.int32)
                 self.table[obs_idx][obs_opponent_action, action] += self.learning_rate * td_error
                 self.update_frequency_table[obs_idx][obs_opponent_action, action] += 1
             else:
+                if obs_idx not in self.table:
+                    self.table[obs_idx] = np.zeros(self.action_dim, dtype=np.float32)
+                    self.update_frequency_table[obs_idx] = np.zeros(self.action_dim, dtype=np.int32)
                 self.table[obs_idx][action] += self.learning_rate * td_error
                 self.update_frequency_table[obs_idx][action] += 1
 
@@ -128,6 +145,9 @@ class QTable:
         if self.table_as_matrix:
             return self.table[self._obs_idx(obs), opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs), action]
         else:
+            obs_idx = self._obs_idx(obs)
+            if obs_idx not in self.table:
+                return self.table_empty_value[opponent_action, action]
             return self.table[self._obs_idx(obs)][opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs)][action]
 
     def sample_action_best(self, obs: np.ndarray, opponent_action: int = None) -> int:
@@ -135,14 +155,14 @@ class QTable:
         if opponent_action is None and self.considering_opponent:
             raise ValueError("opponent_action must be provided when explicitly considering the opponent's actions")
         
-        return np.argmax(self.qs(obs, opponent_action)) if self.considering_opponent else np.argmax(self.qs(obs))
+        return np.argmax(self.q(obs, opponent_action=opponent_action)) if self.considering_opponent else np.argmax(self.q(obs))
 
     def sample_action_random(self, obs: np.ndarray, opponent_action: int = None) -> int:
         """Sample a random action for the given observation, with action probabilities proportional to their Q-values."""
         if opponent_action is None and self.considering_opponent:
             raise ValueError("opponent_action must be provided when explicitly considering the opponent's actions")
         
-        qs = self.qs(obs, opponent_action) if self.considering_opponent else self.qs(obs)
+        qs = self.q(obs, opponent_action=opponent_action) if self.considering_opponent else self.q(obs)
 
         # Softmax
         probs = np.exp(qs) / np.sum(np.exp(qs)) 
@@ -159,3 +179,28 @@ class QTable:
     def considering_opponent(self) -> bool:
         """Whether we are explicitly considering the opponent's next action as part of the observation when computing a Q-value."""
         return self.opponent_action_dim is not None
+
+    def save(self, path: str):
+        """Save the Q-table to a file stored in `path`."""
+        table_path = path + "_table"
+        update_frequency_table_path = path + "_update_frequency_table"
+        np.save(table_path, self.table)
+        np.save(update_frequency_table_path, self.update_frequency_table)
+    
+    def load(self, path: str):
+        """Load the Q-table from a file stored in `path`."""
+        table_path = path + "_table.npy"
+        update_frequency_table_path = path + "_update_frequency_table.npy"
+        self.table = np.load(table_path, allow_pickle=True).item()
+        self.update_frequency_table = np.load(update_frequency_table_path, allow_pickle=True).item()
+
+    def sparsity(self) -> float:
+        """Calculate how sparse the Q-table is (i.e. how many entries are 0)."""
+        if self.table_as_matrix:
+            if self.table.size == 0:
+                return 0.0
+            return 1 - len(self.table.nonzero()[0]) / self.table.size
+        else:
+            if len(self.table) == 0:
+                return 0.0
+            return sum(np.sum(m == 0.0) for m in self.table.values()) / (len(self.table) * self.action_dim**2)

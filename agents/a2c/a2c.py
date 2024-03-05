@@ -212,7 +212,7 @@ class A2CLambdaLearner(A2CLearnerBase):
                 critic_trace.zero_()
 
 
-# TODO: use both players' perspectives when updating the Q-value function
+# NOTE: we can use both players' perspectives when updating the Q-value function. This is left to the training loop to manage
 class A2CQLearner(A2CLearnerBase):
     def __init__(
         self,
@@ -222,12 +222,9 @@ class A2CQLearner(A2CLearnerBase):
         actor_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
         policy_cumulative_discount: bool = True,
         consider_opponent_action: bool = False,
-        over_simple_actions: bool = True,
         **kwargs,
     ):
         """Implementation of a custom actor-critic algorithm with a Q-value table for the critic"""
-        if not over_simple_actions:
-            raise NotImplementedError("discrete and primitive actions are not supported yet")
         if not consider_opponent_action:
             raise NotImplementedError("not considering the opponent's actions is not supported yet")
 
@@ -257,6 +254,7 @@ class A2CQLearner(A2CLearnerBase):
         
         # Track values
         self.delta = 0.0
+        self.td_error = 0.0
 
     def compute_action_distribution(self, obs: torch.Tensor, next_opponent_action: int) -> torch.distributions.Distribution:
         """Get the action probability distribution for the given observation and predicted opponent action."""
@@ -313,8 +311,8 @@ class A2CQLearner(A2CLearnerBase):
     
     def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, obs_agent_action: int, obs_opponent_action: int, next_obs_opponent_action: int):
         """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the opponent's actual action on the next observation `next_obs`."""
-        # Update the Q-table
-        self.critic.update(obs.numpy().squeeze(), obs_agent_action, reward, next_obs.numpy().squeeze(), terminated, obs_opponent_action, next_obs_opponent_action)
+        # Update the Q-table. Save the TD error in case the caller wants to check it
+        self.td_error = self.critic.update(obs.numpy().squeeze(), obs_agent_action, reward, next_obs.numpy().squeeze(), terminated, obs_opponent_action, next_obs_opponent_action)
 
         # If the agent action is None then that means the agent couldn't act, so it doesn't make sense to update the actor
         if obs_agent_action is None:

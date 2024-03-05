@@ -1,3 +1,4 @@
+import os
 from agents.ql.ql import QTable
 from agents.base import FootsiesAgentBase
 from gymnasium import Env
@@ -35,10 +36,12 @@ class FootsiesAgent(FootsiesAgentBase):
         self.q_table.update(self.current_obs, self.current_action, reward, next_obs, terminated)
 
     def load(self, folder_path: str):
-        raise NotImplementedError("loading not supported")
+        path = os.path.join(folder_path, "q")
+        self.q_table.load(path)
 
     def save(self, folder_path: str):
-        raise NotImplementedError("saving not supported")
+        path = os.path.join(folder_path, "q")
+        self.q_table.save(path)
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         raise NotImplementedError("policy extraction not supported")

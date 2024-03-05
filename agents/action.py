@@ -69,76 +69,121 @@ class ActionMap:
     HIT_GUARD_STATES = {FootsiesMove.DAMAGE, FootsiesMove.GUARD_STAND, FootsiesMove.GUARD_CROUCH, FootsiesMove.GUARD_M, FootsiesMove.GUARD_BREAK}
     # Neutral moves on which players can act, since they are instantaneous (I think guard proximity also counts?)
     NEUTRAL_STATES = {FootsiesMove.STAND, FootsiesMove.BACKWARD, FootsiesMove.FORWARD, FootsiesMove.GUARD_PROXIMITY}
+    # Temporal moves that can be canceled into other moves
+    TEMPORAL_ACTIONS_CANCELABLE = {FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK}
 
     ## Conversions between actions
 
     @staticmethod
     def discrete_to_primitive(discrete: int) -> tuple[bool, bool, bool]:
+        """Convert a discrete (integer) action into a primitive (boolean combination) action."""
         return ((discrete & 1) != 0, (discrete & 2) != 0, (discrete & 4) != 0)
 
     @staticmethod
     def primitive_to_discrete(primitive: tuple[bool, bool, bool]) -> int:
+        """Convert a primitive (boolean combination) action into a discrete (integer) action."""
         return (primitive[0] << 0) + (primitive[1] << 1) + (primitive[2] << 2)
 
     @staticmethod
     def simple_as_move_to_discrete(simple: FootsiesMove) -> Iterable[int]:
+        """Covert a simple action (as a `FootsiesMove`) into a sequence of discrete (integer) actions."""
         return ActionMap.SIMPLE_AS_MOVE_TO_DISCRETE_MAP[simple]
     
     @staticmethod
     def simple_as_move_to_primitive(simple: FootsiesMove) -> Iterable[tuple[bool, bool, bool]]:
+        """Convert a simple action (as a `Footsiesmove`) into a sequence of primitive (boolean combination) actions."""
         return ActionMap.SIMPLE_AS_MOVE_TO_PRIMITIVE_MAP[simple]
 
     @staticmethod
     def simple_to_discrete(simple: int) -> Iterable[int]:
+        """Convert a simple action (as an integer) into a sequence of discrete (integer) actions."""
         return ActionMap.SIMPLE_TO_DISCRETE_MAP[simple]
     
     @staticmethod
     def simple_to_primitive(simple: int) -> Iterable[tuple[bool, bool, bool]]:
+        """Convert a simple action (as an integer) into a sequence of primitive (boolean combination) actions."""
         return ActionMap.SIMPLE_TO_PRIMITIVE_MAP[simple]
 
     ## Extractions
 
     @staticmethod
     def move_from_move_index(move_index: int) -> FootsiesMove:
+        """Extract the `FootsiesMove` from the move index."""
         return FOOTSIES_MOVE_INDEX_TO_MOVE[move_index]
 
+    # NOTE: the below two methods classify the N_SPECIAL from N/B_ATTACK as being N_SPECIAL rather than N/B_ATTACK
     @staticmethod
     def simple_from_move_index(move_index: int) -> int:
+        """Obtain the simple action corresponding to the given move index. \n\n NOTE: `N_SPECIAL` is not correctly classified when canceling into it from `N/B_ATTACK`."""
         return ActionMap.SIMPLE_FROM_MOVE_INDEX_MAP[move_index]
 
     @staticmethod
     def simple_from_move(move: FootsiesMove) -> int:
+        """Obtain the simple action corresponding to the given `FootsiesMove`. \n\n NOTE: `N_SPECIAL` is not correctly classified when canceling into it from `N/B_ATTACK`"""
         return ActionMap.SIMPLE_FROM_MOVE_MAP[move]
 
+    # TODO: the very first frame of temporal actions is being counted as actionable
+    @staticmethod
+    def simple_from_transition(previous_player_move_index: int, previous_opponent_move_index: int, previous_player_move_progress: float, previous_opponent_move_progress: float, player_move_index: int) -> int:
+        """Correctly infer the simple action that was effectively performed in a game transition. If the action was ineffectual, return `None`. This is the method that should be used for obtaining simple actions from gameplay."""
+        previous_player_move = FOOTSIES_MOVE_INDEX_TO_MOVE[previous_player_move_index]
+        previous_opponent_move = FOOTSIES_MOVE_INDEX_TO_MOVE[previous_opponent_move_index]
+        player_move = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
+        was_actionable = ActionMap.is_state_actionable(previous_player_move, previous_opponent_move, previous_player_move_progress, previous_opponent_move_progress)
+        
+        # The player should have been able to perform an action, otherwise no simple action was effectively performed
+        if was_actionable:
+            # If the N/B_ATTACK was canceled into N_SPECIAL, we should return the N_ATTACK simple action
+            if previous_player_move in ActionMap.TEMPORAL_ACTIONS_CANCELABLE and player_move == FootsiesMove.N_SPECIAL:
+                return ActionMap.simple_from_move(FootsiesMove.N_ATTACK) if was_actionable else None
+            
+            # Otherwise, return the simple action extracted directly from the move
+            else:
+                return ActionMap.simple_from_move(player_move) if was_actionable else None
+        
+        return None
+    
     @staticmethod
     def simple_as_move(simple: int) -> FootsiesMove:
+        """Obtain the `FootsiesMove` that identifies the given simple action."""
         return ActionMap.SIMPLE_ACTIONS[simple]
 
     ## Attributes
 
     @staticmethod
     def n_simple() -> int:
+        """Number of simple actions."""
         return len(ActionMap.SIMPLE_ACTIONS)
 
     ## Utility methods
 
-    # TODO: the very first hit frame is not being counted as hitstop
     @staticmethod
-    def is_in_hitstop_late(previous_player_move_state: FootsiesMove, previous_move_progress: float, current_move_progress: float) -> bool:
-        """Whether the player, at the previous move state, is in hitstop. This evaluation is done late, as it can't be done on the current state"""
-        return previous_player_move_state in ActionMap.TEMPORAL_ACTIONS and np.isclose(previous_move_progress, current_move_progress) and current_move_progress > 0.0
+    def is_in_hitstop(player_move_state: FootsiesMove, opponent_move_state: FootsiesMove, opponent_move_progress: float) -> bool:
+        """Whether the player, at the current move state, is in hitstop."""
+        return (
+            # The player should be performing an action that takes time and is cancelable
+            player_move_state in ActionMap.TEMPORAL_ACTIONS_CANCELABLE
+            # Opponent has just been hit
+            and opponent_move_progress == 0.0 and opponent_move_state in ActionMap.HIT_GUARD_STATES
+            # (
+                # The move progress is either not advancing (frozen in time)...
+                # np.isclose(previous_move_progress, current_move_progress)
+                # ... or that move was canceled into another move. We hardcode the only situation in which this happens (if I'm not wrong)
+                # or current_player_move_state == FootsiesMove.N_SPECIAL
+            # )
+        )
 
     @staticmethod
-    def is_state_actionable_late(previous_player_move_state: FootsiesMove, previous_move_progress: float, current_move_progress: float) -> bool:
-        """Whether the player, at the previous move state, is able to perform an action. This evaluation is done late, as it can't be done on the current state"""
-        in_hitstop = ActionMap.is_in_hitstop_late(previous_player_move_state, previous_move_progress, current_move_progress)
+    def is_state_actionable(player_move_state: FootsiesMove, opponent_move_state: FootsiesMove, player_move_progress: float, opponent_move_progress: float) -> bool:
+        """Whether the player, at the current move state, is able to perform an action."""
+        in_hitstop = ActionMap.is_in_hitstop(player_move_state, opponent_move_state, opponent_move_progress)
         return (
             # Is the player in hitstop? (performing an action that takes time and the opponent was just hit)
             in_hitstop
-            # Previous move has just finished
-            or current_move_progress < previous_move_progress
-            # Is the player in a neutral state?
-            or previous_player_move_state in ActionMap.NEUTRAL_STATES
+            # Current move is finishing
+            or np.isclose(player_move_state.value.duration * player_move_progress + 1, player_move_state.value.duration)
+            # Is the player in a neutral state? i.e. states from which the player can always act
+            or player_move_state in ActionMap.NEUTRAL_STATES
         )
     
     @staticmethod

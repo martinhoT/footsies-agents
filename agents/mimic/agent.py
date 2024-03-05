@@ -309,6 +309,9 @@ class FootsiesAgent(FootsiesAgentBase):
         if tile_coding:
             raise NotImplementedError("tile coding is not supported yet")
 
+        if not frameskipping:
+            raise NotImplementedError("Not using frame skipping is not supported yet")
+
         self.frameskipping = frameskipping
         self.append_last_actions_n = append_last_actions_n
         self.append_last_actions_distinct = append_last_actions_distinct
@@ -360,8 +363,8 @@ class FootsiesAgent(FootsiesAgentBase):
         self.previous_observation = None
         self.previous_p1_move_state: FootsiesMove = None
         self.previous_p2_move_state: FootsiesMove = None
-        self.previous_p1_move: int = None
-        self.previous_p2_move: int = None
+        self.previous_p1_move_state: int = None
+        self.previous_p2_move_state: int = None
         # Fill the action history with STANDs
         self.p1_action_history: deque[int] = deque([0] * self.append_last_actions_n, maxlen=self.append_last_actions_n)
         self.p2_action_history: deque[int] = deque([0] * self.append_last_actions_n, maxlen=self.append_last_actions_n)
@@ -378,10 +381,8 @@ class FootsiesAgent(FootsiesAgentBase):
     def act(self, obs, info: dict, p1: bool = True, deterministic: bool = False, predict: bool = False) -> "any":
         obs = self._obs_to_tensor(obs)
         self.previous_observation = obs
-        self.previous_p1_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p1_move"]]
-        self.previous_p2_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p2_move"]]
-        self.previous_p1_move = ActionMap.simple_from_move_index(info["p1_move"])
-        self.previous_p2_move = ActionMap.simple_from_move_index(info["p2_move"])
+        self.previous_p1_move_state = info["p1_move"]
+        self.previous_p2_move_state = info["p2_move"]
 
         if predict:
             model = self.p1_model if p1 else self.p2_model
@@ -396,23 +397,26 @@ class FootsiesAgent(FootsiesAgentBase):
         key = "action" if self.by_primitive_actions else "move"
         
         # The move_state variables are the direct FOOTSIES moves, all other variables correspond to "action moves" as specified in the utils
-        p1_move_state: FootsiesMove = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p1_" + key]]
-        p2_move_state: FootsiesMove = FOOTSIES_MOVE_INDEX_TO_MOVE[info["p2_" + key]]
-        p1_simple = ActionMap.simple_from_move(p1_move_state)
-        p2_simple = ActionMap.simple_from_move(p2_move_state)
-        p1_simple_oh = self._action_onehot(p1_simple)
-        p2_simple_oh = self._action_onehot(p2_simple)
+        p1_move_state = info["p1_" + key]
+        p2_move_state = info["p2_" + key]
+        p1_simple = ActionMap.simple_from_transition(p1_move_state, p2_move_state, next_obs[32], next_obs[33])
+        p2_simple = ActionMap.simple_from_transition(p2_move_state, p1_move_state, next_obs[33], next_obs[32])
 
-        p1_observation = self.craft_observation(self.previous_observation, True, True)
-        p2_observation = self.craft_observation(self.previous_observation, False, False)
+        p1_observation = self.craft_observation(self.previous_observation, True, True, True)
+        p2_observation = self.craft_observation(self.previous_observation, False, False, False)
 
-        if self.learn_p1 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p1_move_state, self.previous_observation[0, 32], next_obs[32])):
-            self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move != p1_simple)# and ActionMap.is_simple_action_commital(p1_simple))
-        if self.learn_p2 and (not self.frameskipping or ActionMap.is_state_actionable_late(self.previous_p2_move_state, self.previous_observation[0, 33], next_obs[33])):
-            self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move != p2_simple)# and ActionMap.is_simple_action_commital(p2_simple))
+        if self.learn_p1 and (not self.frameskipping or p1_simple is not None):
+            p1_simple_oh = self._action_onehot(p1_simple)
+            self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move_state != p1_simple)# and ActionMap.is_simple_action_commital(p1_simple))
+        
+        if self.learn_p2 and (not self.frameskipping or p2_simple is not None):
+            p2_simple_oh = self._action_onehot(p2_simple)
+            self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move_state != p2_simple)# and ActionMap.is_simple_action_commital(p2_simple))
 
-        self.append_to_action_history(p1_simple, True)
-        self.append_to_action_history(p2_simple, False)
+        if p1_simple is not None:
+            self.append_to_action_history(p1_simple, True)
+        if p2_simple is not None:
+            self.append_to_action_history(p2_simple, False)
 
         # Update metrics
         # self._p1_correct = (self._p1_correct * self._correct_decay) + (
