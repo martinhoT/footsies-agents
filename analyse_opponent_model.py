@@ -2,19 +2,11 @@ from typing import Iterable
 import torch
 import dearpygui.dearpygui as dpg
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as pltanim
-from itertools import cycle
-from matplotlib.axes import Axes
-from matplotlib.container import BarContainer
-from matplotlib.figure import Figure
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
-from agents.the_one.reaction_time import ReactionTimeEmulator
-from agents.torch_utils import observation_invert_perspective_flattened
 from analysis import Analyser
 from agents.mimic.agent import FootsiesAgent as OpponentModelAgent
 from agents.action import ActionMap

@@ -12,7 +12,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         agent: FootsiesAgentBase,
         log_frequency: int,
         log_dir: str = None,
-        cumulative_reward: bool = False,
+        episode_reward: bool = False,
         average_reward: bool = False,
         average_reward_coef: float = None,
         win_rate: bool = False,
@@ -25,6 +25,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         ] = None,
         test_states_number: int = 10_000,
         step_start_value: int = 0,
+        episode_start_value: int = 0,
     ):
         """
         A wrapper on FOOTSIES agents which logs the specified training metrics.
@@ -34,14 +35,14 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         agent: FootsiesAgentBase
             the agent that will be wrapped
         log_frequency: int
-            how frequent, in terms of time steps, should logs be written
+            how frequent, in terms of time steps, should logs related to time steps be written
         log_dir: str
             to which directory will logs be written
 
-        cumulative_reward: bool
-            the total accumulated reward since training started
+        episode_reward: bool
+            the reward per episode. Logged independently of the log frequency
         average_reward: bool
-            the exponentially weighted average of the reward
+            the exponentially weighted average of the reward per time step
         average_reward_coef: float
             the coefficient of the exponentially weighted average of the reward. If `None`, will be `1 - 1 / log_frequency`
         win_rate: bool
@@ -60,13 +61,16 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             The list of state-action pairs won't change in future calls of those methods, so the agents can cache it if they have to perform some transformations on it.
             If there is at least one evaluator, then `preprocess` will collect those test state-action pairs.
             It's a list with the same structure as `custom_evaluators`
-        episode_start_value: int
+        step_start_value: int
             the value with which the time step counter will begin.
+            This is useful if one training run is stopped, and if future logs should continue after the previous training run
+        episode_start_value: int
+            the value with which the episode counter will begin.
             This is useful if one training run is stopped, and if future logs should continue after the previous training run
         """
         self.agent = agent
         self.log_frequency = log_frequency
-        self.cumulative_reward_enabled = cumulative_reward
+        self.episode_reward_enabled = episode_reward
         self.average_reward_enabled = average_reward
         self.average_reward_coef = average_reward_coef if average_reward_coef is not None else (1 - 1 / log_frequency)
         self.win_rate_enabled = win_rate
@@ -87,15 +91,13 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.test_states_number = test_states_number
 
         self.summary_writer = SummaryWriter(log_dir=log_dir)
-        self.cumulative_reward = 0
+        self.current_step = step_start_value
+        self.current_episode = episode_start_value
+        self.episode_reward = 0
+        self.episode_length = 0
         self.average_reward = 0 # exponentially weighted average
         self.total_wins = 0
-        self.total_truncated_episodes = 0
         self.total_terminated_episodes = 0
-        self.current_step = step_start_value
-        self.current_episode = 0
-        self.current_episode_length = 0
-        self.episode_lengths = deque([], maxlen=100)
 
     def act(self, obs, *args, **kwargs) -> "any":
         return self.agent.act(obs, *args, **kwargs)
@@ -103,32 +105,47 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
     def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
         self.agent.update(next_obs, reward, terminated, truncated, info)
 
-        self.cumulative_reward += reward
+        self.episode_reward += reward
+        self.episode_length += 1
         self.average_reward = self.average_reward_coef * self.average_reward + (1 - self.average_reward_coef) * reward
         self.current_step += 1
-        self.current_episode_length += 1
 
-        if terminated or truncated:
-            self.current_episode += 1
-            self.episode_lengths.append(self.current_episode_length)
-            self.current_episode_length = 0
-
+        # Update the win rate tracker (only really valid for FOOTSIES)
         if terminated:
             if reward > 0.0:
                 self.total_wins += 1
             self.total_terminated_episodes += 1
 
-        if truncated:
-            self.total_truncated_episodes += 1
-
-        # Write logs
-        if self.current_step % self.log_frequency == 0:
-            if self.cumulative_reward_enabled:
+        # Write logs (at the episode level)
+        if terminated or truncated:
+            self.current_episode += 1
+            
+            if self.episode_reward_enabled:
                 self.summary_writer.add_scalar(
-                    "Performance/Cumulative reward",
-                    self.cumulative_reward,
-                    self.current_step,
+                    "Performance/Episode reward",
+                    self.episode_reward,
+                    self.current_episode,
                 )
+
+            if self.episode_length_enabled:
+                self.summary_writer.add_scalar(
+                    "Training/Episode length",
+                    self.episode_length,
+                    self.current_episode,
+                )
+            
+            if self.truncation_enabled:
+                self.summary_writer.add_scalar(
+                    "Training/Episode truncations",
+                    1 if truncated else 0,
+                    self.current_episode,
+                )
+
+            self.episode_reward = 0
+            self.episode_length = 0
+
+        # Write logs (at the time step level)
+        if self.current_step % self.log_frequency == 0:
             if self.average_reward_enabled:
                 self.summary_writer.add_scalar(
                     "Performance/Average reward",
@@ -141,19 +158,6 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                     (self.total_wins / self.total_terminated_episodes) if self.total_terminated_episodes > 0 else 0.5,
                     self.current_step,
                 )
-            if self.truncation_enabled:
-                self.summary_writer.add_scalar(
-                    "Training/Truncated episodes",
-                    self.total_truncated_episodes,
-                    self.current_step,
-                )
-            if self.episode_length_enabled:
-                self.summary_writer.add_scalar(
-                    "Training/Episode length",
-                    (sum(self.episode_lengths) / len(self.episode_lengths)) if self.episode_lengths else 0.0,
-                    self.current_step,
-                )
-                self.episode_lengths.clear()
 
             for network in self.network_histograms:
                 for layer_name, layer in network.named_parameters():

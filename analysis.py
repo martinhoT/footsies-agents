@@ -53,7 +53,7 @@ class Analyser:
     
     def __init__(self,
         env: Env,
-        p1_action_source: FootsiesAgentBase,
+        p1_action_source: Callable[["any", dict], "any"],
         custom_elements_callback: Callable[["Analyser"], None], # function that will be called when the main DPG window is being created, allowing the addition of custom elements
         custom_state_update_callback: Callable[["Analyser"], None], # function that will be called when the battle state is updated (either through the 'Advance' button or by manipulation)
     ):
@@ -92,6 +92,8 @@ class Analyser:
         self.previous_observation = None
         self.previous_info = None
         self.requires_reset = True
+
+        self._custom_battle_state_cached = None
 
         self.saved_battle_states: list[AnalyserState] = []
         self.episode_counter = -1
@@ -212,6 +214,7 @@ class Analyser:
         self.update_state(obs, info, reward)
         
         self.custom_state_update_callback(self)
+        self._custom_battle_state_cached = None
 
     @property
     def current_action(self) -> tuple[bool, bool, bool] | int:
@@ -234,8 +237,11 @@ class Analyser:
 
     @property
     def custom_battle_state(self) -> FootsiesBattleState:
-        battle_state = copy.copy(self.footsies_env.save_battle_state())
-        
+        if self._custom_battle_state_cached is None:
+            self._custom_battle_state_cached = copy.copy(self.footsies_env.save_battle_state())
+
+        battle_state = self._custom_battle_state_cached
+
         battle_state.p1State.position[0] = self.p1_position
         battle_state.p2State.position[0] = self.p2_position
         battle_state.p1State.guardHealth = self.p1_guard
@@ -286,7 +292,7 @@ class Analyser:
     frame: int = editable_dpg_value("frame")
     text_output: str = editable_dpg_value("text_output")
 
-    def start(self):
+    def start(self, state_change_apply_immediately: bool = False):
         dpg.create_context()
         dpg.create_viewport(title="FOOTSIES data analyser", width=600, height=300)
 
@@ -329,23 +335,23 @@ class Analyser:
 
                 with dpg.table_row():
                     dpg.add_text("Guard")
-                    dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard")
-                    dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard")
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
                 
                 with dpg.table_row():
                     dpg.add_text("Position")
-                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position")
-                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position")
+                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
 
                 with dpg.table_row():
                     dpg.add_text("Move")
-                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p1_move")
-                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p2_move")
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p1_move", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p2_move", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
 
                 with dpg.table_row():
                     dpg.add_text("Move progress")
-                    dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress")
-                    dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress")
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
 
             dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state, require_update=False))
 
@@ -430,5 +436,5 @@ if __name__ == "__main__":
         )
     )
 
-    analyser = Analyser(env=env, agent=None)
+    analyser = Analyser(env=env, p1_action_source=lambda: 0)
     analyser.start()

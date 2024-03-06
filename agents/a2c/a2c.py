@@ -225,9 +225,6 @@ class A2CQLearner(A2CLearnerBase):
         **kwargs,
     ):
         """Implementation of a custom actor-critic algorithm with a Q-value table for the critic"""
-        if not consider_opponent_action:
-            raise NotImplementedError("not considering the opponent's actions is not supported yet")
-
         self.actor = actor
         self.critic = critic
         self.discount = critic.discount
@@ -269,8 +266,10 @@ class A2CQLearner(A2CLearnerBase):
         return self.action.item()
 
     def _append_opponent_action_if_needed(self, obs: torch.Tensor, opponent_action: int) -> torch.Tensor:
-        if self.consider_opponent_action:
-            if opponent_action is None:
+        if not self.consider_opponent_action:
+            return obs
+        
+        if self.consider_opponent_action and opponent_action is None:
                 raise ValueError("a prediction for the opponent's next action must be provided when choosing how to act, since we are considering opponent actions")
 
         opponent_action_onehot = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self.critic.opponent_action_dim)
@@ -316,6 +315,9 @@ class A2CQLearner(A2CLearnerBase):
 
         # If the agent action is None then that means the agent couldn't act, so it doesn't make sense to update the actor
         if obs_agent_action is None:
+            # TODO: save in a buffer for later update
+            # self.agent_action_buffer.append(obs, next_obs, reward)
+            
             pass
         # If the agent did perform an action, then update the actor
         else:

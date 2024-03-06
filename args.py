@@ -25,6 +25,7 @@ class MiscArgs:
     log_frequency: int
     log_test_states_number: int
     log_step_start: int
+    log_episode_start: int
     hogwild: bool
     hogwild_cpus: int
     hogwild_n_workers: int
@@ -337,6 +338,12 @@ def parse_args() -> MainArgs:
         help="value at which the logging time step will start, useful for appending to existing logs",
     )
     parser.add_argument(
+        "--log-episode-start",
+        type=int,
+        default=0,
+        help="value at which the logging episode will start, useful for appending to existing logs",
+    )
+    parser.add_argument(
         "--hogwild",
         action="store_true",
         help="whether to use the Hogwild! asynchronous training algorithm. Only available for FOOTSIES agents based on PyTorch (for sharing of model parameters)"
@@ -400,6 +407,7 @@ def parse_args() -> MainArgs:
             log_frequency=args.log_frequency,
             log_test_states_number=args.log_test_states_number,
             log_step_start=args.log_step_start,
+            log_episode_start=args.log_episode_start,
             hogwild=args.hogwild,
             hogwild_cpus=args.hogwild_cpus,
             hogwild_n_workers=args.hogwild_n_workers,

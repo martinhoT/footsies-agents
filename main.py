@@ -272,14 +272,15 @@ if __name__ == "__main__":
                 a,
                 log_frequency=args.misc.log_frequency,
                 log_dir=args.misc.log_dir,
-                step_start_value=args.misc.log_step_start,
-                cumulative_reward=True,
+                episode_reward=True,
                 average_reward=True,
                 average_reward_coef=0.99,
                 win_rate=True,
                 truncation=True,
                 episode_length=True,
                 test_states_number=args.misc.log_test_states_number,
+                step_start_value=args.misc.log_step_start,
+                episode_start_value=args.misc.log_episode_start,
                 **loggables,
             )
 

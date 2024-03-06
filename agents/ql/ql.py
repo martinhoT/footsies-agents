@@ -22,6 +22,7 @@ class QTable:
         table_as_matrix: bool = False,
         move_frame_n_bins: int = 5,
         position_n_bins: int = 5,
+        environment: str = "footsies",
     ):
         """
         Instantiate a Q-value table.
@@ -37,21 +38,39 @@ class QTable:
         - `table_as_matrix`: whether the table should be stored as a matrix. If `False`, will be stored as a dictionary.
         Storing as a matrix should have a computational performance improvement, but spends much, much more memory than using a dictionary.
         A dictionary is recommended
-        - `move_frame_n_bins`: how many separations to perform on the move frame observation variable when discretizing
-        - `position_n_bins`: how many separations to perform on the position observation variable when discretizing
+        - `move_frame_n_bins`: how many separations to perform on the move frame observation variable when discretizing. Only valid for the "footsies" environment
+        - `position_n_bins`: how many separations to perform on the position observation variable when discretizing. Only valid for the "footsies" environment
+        - `environment`: the environment for which the Q-table is being instantiated. Currently only supports "footsies" and "mountain car"
         """
+        if environment not in ("footsies", "mountain car"):
+            raise ValueError(f"environment '{environment}' not supported")
+
         self.action_dim = action_dim
         self.opponent_action_dim = opponent_action_dim
         self.learning_rate = learning_rate
         self.discount = discount
         self.table_as_matrix = table_as_matrix
+        self.environment = environment
 
-        self.obs_dim = 4**2 * 15**2 * move_frame_n_bins**2 * position_n_bins**2
+        if self.environment == "footsies":
+            self.move_frame_n_bins = move_frame_n_bins
+            self.position_n_bins = position_n_bins
+            self.obs_dim = 4**2 * 15**2 * move_frame_n_bins**2 * position_n_bins**2
 
-        # Leave some leeway for the start and end of the linear space, since the start and end are part of the observation
-        self.move_frame_bins = np.linspace(-0.1, 1.1, move_frame_n_bins)
-        self.position_bins = np.linspace(-1.1, 1.1, position_n_bins)
-        
+            # Leave some leeway for the start and end of the linear space, since the start and end are part of the observation
+            self.move_frame_bins = np.linspace(-0.1, 1.1, move_frame_n_bins)
+            self.position_bins = np.linspace(-1.1, 1.1, position_n_bins)
+
+        elif self.environment == "mountain car":
+            # These variables are hardcorded for the mountain car environment
+            position_n_bins = 20
+            velocity_n_bins = 20
+            self.position_n_bins = position_n_bins
+            self.obs_dim = position_n_bins * velocity_n_bins
+
+            self.position_bins = np.linspace(-1.2, 0.6, position_n_bins)
+            self.velocity_bins = np.linspace(-0.07, 0.07, velocity_n_bins)
+
         if self.table_as_matrix:
             if self.considering_opponent:
                 self.table = np.zeros((self.obs_dim, self.opponent_action_dim, self.action_dim), dtype=np.float32)
@@ -72,16 +91,40 @@ class QTable:
             # Make the empty value read-only. This is the value that is returned if the queried observation is not in the Q-table
             self.table_empty_value.setflags(write=False)
         
-    def _obs_idx(self, obs: np.ndarray) -> int:
-        """Obtain the integer identifier associated to the given observation."""
+    def _footsies_obs_idx(self, obs: np.ndarray) -> int:
+        """Obtain the integer identifier associated to the given observation from the `footsies` environment."""
         gu1, gu2 = tuple(np.round(obs[0:2] * 3))
         mo1 = np.argmax(obs[2:17])
         mo2 = np.argmax(obs[17:32])
         mf1, mf2 = tuple(np.digitize(obs[32:34], self.move_frame_bins))
         po1, po2 = tuple(np.digitize(obs[34:36], self.position_bins))
         # yikes
-        return int(gu1 + 4 * gu2 + 4 * 4 * mo1 + 4 * 4 * 15 * mo2 + 4 * 4 * 15 * 15 * mf1 + 4 * 4 * 15 * 15 * 5 * mf2 + 4 * 4 * 15 * 15 * 5 * 5 * po1 + 4 * 4 * 15 * 15 * 5 * 5 * 5 * po2)
+        return int(
+            gu1
+            + 4 * gu2
+            + 4**2 * mo1
+            + 4**2 * 15 * mo2
+            + 4**2 * 15**2 * mf1
+            + 4**2 * 15**2 * self.move_frame_n_bins * mf2
+            + 4**2 * 15**2 * self.move_frame_n_bins**2 * po1
+            + 4**2 * 15**2 * self.move_frame_n_bins**2 * self.position_n_bins * po2
+        )
 
+    def _mountain_car_obs_idx(self, obs: np.ndarray) -> int:
+        """Obtain the integer identifier associated to the given observation from the `mountain car` environment."""
+        pos = np.digitize(obs[0], self.position_bins).item()
+        vel = np.digitize(obs[1], self.velocity_bins).item()
+        return int(pos + 10 * vel)
+
+    def _obs_idx(self, obs: np.ndarray) -> int:
+        """Obtain the integer identifier associated to the given observation."""
+        if self.environment == "footsies":
+            return self._footsies_obs_idx(obs)
+        elif self.environment == "mountain car":
+            return self._mountain_car_obs_idx(obs)
+        
+        return None
+        
     def update(self, obs: np.ndarray, action: int, reward: float, next_obs: np.ndarray, terminated: bool, obs_opponent_action: int = None, next_obs_opponent_action: int = None) -> float | np.ndarray:
         """
         Perform a Q-value update. Returns the TD error.
