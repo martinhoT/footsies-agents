@@ -9,7 +9,7 @@ from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
 from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, A2CLearnerBase, A2CQLearner
-from agents.ql.ql import QTable
+from agents.ql.ql import QTable, QNetwork
 from agents.utils import extract_sub_kwargs
 from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
 from agents.action import ActionMap
@@ -23,6 +23,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         learner: A2CLearnerBase = None,
         use_simple_actions: bool = True,
         use_q_table: bool = False,
+        use_q_network: bool = False,
         consider_opponent_action: bool = False,
         actor_hidden_layer_sizes_specification: str = "",
         critic_hidden_layer_sizes_specification: str = "",
@@ -41,6 +42,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         - `learner`: the A2C algorithm class to use. If `None`, one will be created
         - `use_simple_actions`: whether to use simple actions rather than discrete actions
         - `use_q_table`: whether to use a Q-table instead of a neural network for the critic
+        - `use_q_network`: whether to use a Q-network instead of a neural network for the critic
         - `consider_opponent_action`: whether to consider the opponent's action as part of the observation. We consider the opponent's action space to be the same as the agent's
         - `actor_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the actor network
         - `critic_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the critic network
@@ -48,6 +50,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         - `critic_hidden_layer_activation_specification`: a string specifying the hidden layer activation for the critic network
         - `footsies`: whether to consider the FOOTSIES environment is being used. If `False`, the agent will not do any special treatment
         """
+        if use_q_table and use_q_network:
+            raise ValueError("can only use either a Q-table or a Q-network, can't ask for both")
         self.action_space_size = ActionMap.n_simple() if use_simple_actions else action_space_size
         self.use_simple_actions = use_simple_actions
         self.consider_opponent_action = consider_opponent_action
@@ -71,6 +75,17 @@ class FootsiesAgent(FootsiesAgentTorch):
                     **critic_kwargs,
                 )
                 learner_class = A2CQLearner
+            
+            elif use_q_network:
+                critic = QNetwork(
+                    action_dim=self.action_space_size,
+                    opponent_action_dim=self.action_space_size,
+                    hidden_layer_sizes=[int(n) for n in critic_hidden_layer_sizes_specification.split(",")] if critic_hidden_layer_sizes_specification else [],
+                    hidden_layer_activation=getattr(nn, critic_hidden_layer_activation_specification),
+                    **critic_kwargs,
+                )
+                learner_class = A2CQLearner
+
             else:
                 critic = CriticNetwork(
                     obs_dim=observation_space_size,

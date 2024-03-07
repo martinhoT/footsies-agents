@@ -1,6 +1,6 @@
 from .agent import FootsiesAgent
-from agents.ql.ql import QTable
-from agents.a2c.a2c import CriticNetwork
+from agents.ql.ql import QTable, QNetwork
+from agents.a2c.a2c import CriticNetwork, A2CQLearner
 
 
 def get_loggables(agent: FootsiesAgent):
@@ -18,8 +18,13 @@ def get_loggables(agent: FootsiesAgent):
         custom_evaluators.extend([
             ("Learning/Q-table sparsity", agent.critic.sparsity),
             ("Learning/Q-table size", lambda: len(agent.critic.table)),
-            ("Learning/Q-table error", agent.evaluate_average_qtable_error),
         ])
+
+    if isinstance(agent.learner, A2CQLearner):
+        custom_evaluators.append(("Learning/Q-learner error", agent.evaluate_average_qtable_error))
+
+    if isinstance(agent.critic, QNetwork):
+        network_histograms.append(agent.critic.network)
 
     if isinstance(agent.critic, CriticNetwork):
         network_histograms.append(agent.critic)

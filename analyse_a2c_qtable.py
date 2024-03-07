@@ -1,24 +1,19 @@
-from typing import Iterable
 import torch
-from torch import nn
 import dearpygui.dearpygui as dpg
 import numpy as np
 from gymnasium.wrappers.flatten_observation import FlattenObservation
-from gymnasium.wrappers.transform_observation import TransformObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
 from analysis import Analyser
-from agents.mimic.agent import FootsiesAgent as OpponentModelAgent
 from agents.action import ActionMap
 from agents.a2c.agent import FootsiesAgent as A2CAgent
-from agents.a2c.a2c import A2CQLearner, ActorNetwork, CriticNetwork
-from agents.ql.ql import QTable
 from main import load_agent_model
 
 
 AGENT: A2CAgent = None
+SIMPLE_ACTION_LABELS = [(move.name, i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS)]
 
 
 class QTablePlot:
@@ -37,9 +32,9 @@ class QTablePlot:
             with dpg.plot(label=title, no_mouse_pos=True, height=400, width=-1) as plot: # height=400, width=-1
                 dpg.bind_colormap(plot, dpg.mvPlotColormap_Viridis)
                 x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Agent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True)
-                dpg.set_axis_ticks(x_axis, tuple([(move.name, i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS)]))
+                dpg.set_axis_ticks(x_axis, tuple(SIMPLE_ACTION_LABELS))
                 with dpg.plot_axis(dpg.mvYAxis, label="Opponent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True) as y_axis:
-                    dpg.set_axis_ticks(y_axis, tuple([(move.name, i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS)]))
+                    dpg.set_axis_ticks(y_axis, tuple(reversed(SIMPLE_ACTION_LABELS)))
                     initial_data = np.zeros((self.action_dim, self.opponent_action_dim))
                     self.series = dpg.add_heat_series(initial_data.flatten().tolist(), rows=self.opponent_action_dim, cols=self.action_dim, scale_min=-1.0, scale_max=1.0)
 

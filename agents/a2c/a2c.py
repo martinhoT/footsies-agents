@@ -3,7 +3,7 @@ from torch import nn
 from torch.distributions import Categorical
 from agents.torch_utils import create_layered_network, observation_invert_perspective_flattened
 from agents.utils import extract_sub_kwargs
-from agents.ql.ql import QTable
+from agents.ql.ql import QFunction, QTable
 from abc import ABC, abstractmethod
 from collections import deque
 
@@ -217,7 +217,7 @@ class A2CQLearner(A2CLearnerBase):
     def __init__(
         self,
         actor: ActorNetwork,
-        critic: QTable,
+        critic: QFunction,
         actor_entropy_loss_coef: float = 0.0,
         actor_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
         policy_cumulative_discount: bool = True,
