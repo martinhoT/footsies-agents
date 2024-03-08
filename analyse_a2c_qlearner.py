@@ -9,11 +9,13 @@ from footsies_gym.moves import FootsiesMove
 from analysis import Analyser
 from agents.action import ActionMap
 from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.ql.ql import QTable
 from main import load_agent_model
 
 
 AGENT: A2CAgent = None
-SIMPLE_ACTION_LABELS = [(move.name, i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS)]
+SIMPLE_ACTION_LABELS = tuple((move.name, i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS))
+SIMPLE_ACTION_LABELS_REVERSED = tuple((move.name, (ActionMap.n_simple() - 1) / ActionMap.n_simple() - i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS))
 
 
 class QTablePlot:
@@ -21,25 +23,35 @@ class QTablePlot:
         self,
         action_dim: int,
         opponent_action_dim: int,
+        add_color_scale: bool = True,
+        auto_scale: bool = False,
     ):
         self.action_dim = action_dim
         self.opponent_action_dim = opponent_action_dim
+        self.add_color_scale = add_color_scale
+        self.auto_scale = auto_scale
+        self.color_scale = None
         self.series = None
 
     def setup(self, title: str = "Q-table"):
         with dpg.group(horizontal=True):
-            dpg.add_colormap_scale(min_scale=-1.0, max_scale=1.0, colormap=dpg.mvPlotColormap_Viridis, height=400)
+            if self.add_color_scale:
+                self.color_scale = dpg.add_colormap_scale(min_scale=-1.0, max_scale=1.0, colormap=dpg.mvPlotColormap_Viridis, height=400)
             with dpg.plot(label=title, no_mouse_pos=True, height=400, width=-1) as plot: # height=400, width=-1
                 dpg.bind_colormap(plot, dpg.mvPlotColormap_Viridis)
                 x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Agent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True)
-                dpg.set_axis_ticks(x_axis, tuple(SIMPLE_ACTION_LABELS))
+                dpg.set_axis_ticks(x_axis, SIMPLE_ACTION_LABELS)
                 with dpg.plot_axis(dpg.mvYAxis, label="Opponent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True) as y_axis:
-                    dpg.set_axis_ticks(y_axis, tuple(reversed(SIMPLE_ACTION_LABELS)))
+                    dpg.set_axis_ticks(y_axis, SIMPLE_ACTION_LABELS_REVERSED)
                     initial_data = np.zeros((self.action_dim, self.opponent_action_dim))
                     self.series = dpg.add_heat_series(initial_data.flatten().tolist(), rows=self.opponent_action_dim, cols=self.action_dim, scale_min=-1.0, scale_max=1.0)
 
     def update(self, q_values: np.ndarray):
         dpg.set_value(self.series, [q_values.flatten().tolist(), [self.opponent_action_dim, self.action_dim]])
+        if self.auto_scale:
+            mn, mx = np.min(q_values), np.max(q_values)
+            dpg.configure_item(self.color_scale, min_scale=mn, max_scale=mx)
+            dpg.configure_item(self.series, scale_min=mn, scale_max=mx)
 
 
 class PolicyDistributionPlot:
@@ -84,7 +96,8 @@ class QLearnerAnalyserManager:
         self.action_dim = action_dim
         self.opponent_action_dim = opponent_action_dim
 
-        self.q_table_plot = QTablePlot(action_dim, opponent_action_dim)
+        self.q_table_plot = QTablePlot(action_dim, opponent_action_dim, auto_scale=False)
+        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, auto_scale=True) if isinstance(AGENT.critic, QTable) else None
         self.policy_plot = PolicyDistributionPlot()
         
         self.current_observation = None
@@ -93,8 +106,11 @@ class QLearnerAnalyserManager:
         self.predicted_opponent_action = None
 
     def add_custom_elements(self, analyser: Analyser):
-        self.q_table_plot.setup()
-        
+        self.q_table_plot.setup(title="Q-table values")
+    
+        if self.q_table_update_frequency_plot is not None:
+            self.q_table_update_frequency_plot.setup(title="Q-table update frequency")        
+
         dpg.add_separator()
         
         self.policy_plot.setup()
@@ -116,13 +132,14 @@ class QLearnerAnalyserManager:
         policy_distribution = AGENT.actor(obs_torch_with_opp).detach().numpy().flatten()
         self.policy_plot.update(policy_distribution)
 
-
     def on_state_update(self, analyser: Analyser):
         obs: np.ndarray = analyser.current_observation
         self.current_observation = obs
 
         q_values = AGENT.critic.q(obs)
         self.q_table_plot.update(q_values)
+        if self.q_table_update_frequency_plot is not None:
+            self.q_table_update_frequency_plot.update(AGENT.critic.update_frequency(obs))
 
         self.update_policy_distribution(obs)
 
@@ -153,7 +170,8 @@ if __name__ == "__main__":
         observation_space_size=env.observation_space.shape[0],
         action_space_size=env.action_space.n,
         use_simple_actions=True,
-        use_q_table=True,
+        use_q_table=False,
+        use_q_network=True,
         consider_opponent_action=True,
         actor_hidden_layer_sizes_specification="64,64",
         actor_hidden_layer_activation_specification="ReLU",
@@ -166,7 +184,7 @@ if __name__ == "__main__":
         }
     )
 
-    load_agent_model(AGENT, "a2c_qlearner")
+    load_agent_model(AGENT, "a2c_qlearner_network")
 
     def spammer():
         from itertools import cycle
@@ -189,8 +207,8 @@ if __name__ == "__main__":
 
     analyser = Analyser(
         env=env,
-        # p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
-        p1_action_source=lambda o, i: AGENT.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=manager.get_predicted_opponent_action()),
+        p1_action_source=lambda o, i: next(p1),
+        # p1_action_source=lambda o, i: AGENT.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=manager.get_predicted_opponent_action()),
         custom_elements_callback=manager.add_custom_elements,
         custom_state_update_callback=manager.on_state_update,
     )

@@ -10,7 +10,7 @@ class QFunction(ABC):
     """Abstract class for a Q-value function estimator."""
 
     @abstractmethod
-    def _update_q_value(self, obs: np.ndarray, td_error: float, action: int = None, opponent_action: int = None):
+    def _update_q_value(self, obs: np.ndarray, target: float, action: int = None, opponent_action: int = None):
         """Update the Q-value for the given state-action pair considering the provided TD error."""
 
     @abstractmethod
@@ -40,6 +40,11 @@ class QFunction(ABC):
     def discount(self) -> float:
         """The discount factor."""
 
+    @property
+    @abstractmethod
+    def considering_opponent(self) -> bool:
+        """Whether we are explicitly considering the opponent's next action as part of the observation when computing a Q-value."""
+
     def update(self, obs: np.ndarray, action: int, reward: float, next_obs: np.ndarray, terminated: bool, obs_opponent_action: int = None, next_obs_opponent_action: int = None) -> float | np.ndarray:
         """
         Perform a Q-value update. Returns the TD error.
@@ -55,13 +60,21 @@ class QFunction(ABC):
         # However, since small variations in the move progress determine whether a move is actionable or not, but here we are binning them into the same slot, we can't really have these expectations.
         # Therefore, we will just take the average.
         nxt_value = (self.discount * np.mean(nxt)) if not terminated else 0.0
-        td_error = (reward + nxt_value - self.q(obs, action, opponent_action=obs_opponent_action))
-        
+        cur_value = self.q(obs, action, opponent_action=obs_opponent_action).copy()
+        target = reward + nxt_value
+        td_error = (target - cur_value)
+
         # Don't even bother updating.
         if np.all(td_error == 0.0):
             return td_error
         
-        self._update_q_value(obs, td_error, action, obs_opponent_action)
+        # if target > 1.0:
+        #     print(f"At observation {obs}, agent action {action} and opponent action {obs_opponent_action} we have a Q-value of {cur_value}, which will be updated to {reward} + {nxt_value}")
+        
+        self._update_q_value(obs, target, action, obs_opponent_action)
+
+        # if np.any(self.q(obs, action, opponent_action=obs_opponent_action) > 1.0):
+        #     print(f"After update, at observation {obs}, agent action {action} and opponent action {obs_opponent_action} we had a Q-value of {cur_value}, now of {self.q(obs, action, opponent_action=obs_opponent_action)}, which was updated to {reward} + {nxt_value}")
 
         return td_error
 
@@ -215,8 +228,15 @@ class QTable(QFunction):
         
         return None
 
-    def _update_q_value(self, obs: np.ndarray, td_error: float, action: int = None, opponent_action: int = None):
+    def _update_q_value(self, obs: np.ndarray, target: float, action: int = None, opponent_action: int = None):
+        if action is None:
+            action = slice(None)
+        if opponent_action is None:
+            opponent_action = slice(None)
+
         obs_idx = self._obs_idx(obs)
+
+        td_error = (target - self.q(obs, action, opponent_action))
 
         if self.table_as_matrix:
             if self.considering_opponent:
@@ -253,6 +273,16 @@ class QTable(QFunction):
                 return self.table_empty_value[opponent_action, action]
             return self.table[self._obs_idx(obs)][opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs)][action]
 
+    def update_frequency(self, obs: np.ndarray) -> np.ndarray:
+        """Get the update frequency for the given observation."""
+        if self.table_as_matrix:
+            return self.update_frequency_table[self._obs_idx(obs), :, :] if self.considering_opponent else self.update_frequency_table[self._obs_idx(obs), :]
+        else:
+            obs_idx = self._obs_idx(obs)
+            if obs_idx not in self.update_frequency_table:
+                return np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.int32) if self.considering_opponent else np.zeros(self.action_dim, dtype=np.int32)
+            return self.update_frequency_table[obs_idx][:, :] if self.considering_opponent else self.update_frequency_table[obs_idx][:]
+
     def save(self, path: str):
         table_path = path + "_table"
         update_frequency_table_path = path + "_update_frequency_table"
@@ -267,7 +297,6 @@ class QTable(QFunction):
 
     @property
     def considering_opponent(self) -> bool:
-        """Whether we are explicitly considering the opponent's next action as part of the observation when computing a Q-value."""
         return self.opponent_action_dim is not None
 
     def sparsity(self) -> float:
@@ -371,7 +400,6 @@ class QNetwork(QFunction):
             self.velocity_bins = np.linspace(-0.07, 0.07, velocity_n_bins)
 
         self.network = self.Network(self.obs_dim + action_dim, action_dim, hidden_layer_sizes=hidden_layer_sizes, hidden_layer_activation=hidden_layer_activation)
-        self.network_loss_fn = nn.MSELoss()
         self.network_optimizer = torch.optim.Adam(self.network.parameters(), lr=learning_rate)
 
     def _transform_obs(self, obs: np.ndarray) -> torch.Tensor:
@@ -400,9 +428,8 @@ class QNetwork(QFunction):
         opponent_action_oh = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self.opponent_action_dim).float()
         return torch.hstack((obs, opponent_action_oh))
 
-    def _update_q_value(self, obs: np.ndarray, td_error: float | np.ndarray, action: int = None, opponent_action: int = None):        
+    def _update_q_value(self, obs: np.ndarray, target: float, action: int = None, opponent_action: int = None):        
         obs = self._transform_obs(obs)
-        td_error_torch = torch.tensor(td_error).float().squeeze()
 
         if action is None:
             action = slice(None)
@@ -415,14 +442,13 @@ class QNetwork(QFunction):
             for o in range(self.action_dim):
                 obs_with_opp = self._append_opponent_action(obs, o)
                 predicted = self.network(obs_with_opp)
-                loss += self.network_loss_fn(predicted[0, action], td_error_torch[o])
-
+                loss += torch.mean((target - predicted[0, action])**2)
             loss.backward()
         
         else:
             obs_with_opp = self._append_opponent_action(obs, opponent_action)
             predicted = self.network(obs_with_opp)
-            loss = self.network_loss_fn(predicted[0, action], td_error_torch)
+            loss = torch.mean((target - predicted[0, action])**2)
             loss.backward()
 
         self.network_optimizer.step()
@@ -467,3 +493,7 @@ class QNetwork(QFunction):
     @property
     def discount(self) -> float:
         return self._discount
+
+    @property
+    def considering_opponent(self) -> bool:
+        return self.opponent_action_dim is not None

@@ -2,6 +2,7 @@ import os
 import importlib
 import gymnasium as gym
 import torch
+import logging
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
@@ -25,6 +26,7 @@ from agents.torch_utils import hogwild
 from args import parse_args, EnvArgs
 from self_play import SelfPlayManager
 
+LOGGER = logging.getLogger("main")
 
 
 """
@@ -287,8 +289,8 @@ if __name__ == "__main__":
     if args.agent.is_sb3:
         try:
             from stable_baselines3.common.logger import configure
-            logger = configure(args.misc.log_dir, ["tensorboard"])
-            agent.set_logger(logger)
+            sb3_logger = configure(args.misc.log_dir, ["tensorboard"])
+            agent.set_logger(sb3_logger)
 
             # opponent_pool = deque([], maxlen=args.self_play_max_snapshots)
             # if will_footsies_self_play:

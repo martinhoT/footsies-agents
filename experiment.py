@@ -13,12 +13,12 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from args import parse_args_experiment
 
 
-def find_footsies_ports() -> tuple[int, int, int]:
+def find_footsies_ports(start: int = 11000, step: int = 1) -> tuple[int, int, int]:
     closed_ports = {p.laddr.port for p in psutil.net_connections(kind="tcp4")}
 
     ports = []
 
-    for port in count(start=11000, step=1):
+    for port in count(start=start, step=step):
         if port not in closed_ports:
             ports.append(port)
 

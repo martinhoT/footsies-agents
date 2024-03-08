@@ -353,7 +353,8 @@ class Analyser:
                     dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
                     dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
 
-            dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state, require_update=False))
+            if not state_change_apply_immediately:
+                dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state, require_update=False))
 
             dpg.add_separator()
 

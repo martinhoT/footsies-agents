@@ -13,12 +13,13 @@ python3 main.py a2c \
         a2c.actor_entropy_loss_coef 0.1 \
         a2c.actor_optimizer.lr 0.001 \
         critic.discount 1.0 \
-        critic.learning_rate 0.5 \
+        critic.learning_rate 0.001 \
     -mB \
-        use_q_table true \
+        use_q_table false \
+        use_q_network true \
         consider_opponent_action true \
         a2c.policy_cumulative_discount false \
     --log-frequency 1000 \
-    --log-dir runs/a2c_qlearner \
-    --model-name a2c_qlearner \
+    --log-dir runs/a2c_qlearner_network \
+    --model-name a2c_qlearner_network \
     "$@"
