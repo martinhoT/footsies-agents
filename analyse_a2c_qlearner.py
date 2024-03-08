@@ -50,7 +50,8 @@ class QTablePlot:
         dpg.set_value(self.series, [q_values.flatten().tolist(), [self.opponent_action_dim, self.action_dim]])
         if self.auto_scale:
             mn, mx = np.min(q_values), np.max(q_values)
-            dpg.configure_item(self.color_scale, min_scale=mn, max_scale=mx)
+            if self.color_scale is not None:
+                dpg.configure_item(self.color_scale, min_scale=mn, max_scale=mx)
             dpg.configure_item(self.series, scale_min=mn, scale_max=mx)
 
 
@@ -97,7 +98,7 @@ class QLearnerAnalyserManager:
         self.opponent_action_dim = opponent_action_dim
 
         self.q_table_plot = QTablePlot(action_dim, opponent_action_dim, auto_scale=False)
-        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, auto_scale=True) if isinstance(AGENT.critic, QTable) else None
+        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, add_color_scale=False, auto_scale=True) if isinstance(AGENT.critic, QTable) else None
         self.policy_plot = PolicyDistributionPlot()
         
         self.current_observation = None
@@ -170,21 +171,23 @@ if __name__ == "__main__":
         observation_space_size=env.observation_space.shape[0],
         action_space_size=env.action_space.n,
         use_simple_actions=True,
-        use_q_table=False,
-        use_q_network=True,
+        use_q_table=True,
+        use_q_network=False,
         consider_opponent_action=True,
         actor_hidden_layer_sizes_specification="64,64",
         actor_hidden_layer_activation_specification="ReLU",
+        critic_hidden_layer_sizes_specification="128,128",
+        critic_hidden_layer_activation_specification="ReLU",
         **{
             "a2c.policy_cumulative_discount": False,
             "critic.discount": 1.0,
-            "critic.learning_rate": 0.5,
+            "critic.learning_rate": 0.001,
             "a2c.actor_entropy_loss_coef": 0.1,
             "a2c.actor_optimizer.lr": 0.001,
         }
     )
 
-    load_agent_model(AGENT, "a2c_qlearner_network")
+    load_agent_model(AGENT, "a2c_qlearner_il")
 
     def spammer():
         from itertools import cycle
@@ -207,8 +210,8 @@ if __name__ == "__main__":
 
     analyser = Analyser(
         env=env,
-        p1_action_source=lambda o, i: next(p1),
-        # p1_action_source=lambda o, i: AGENT.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=manager.get_predicted_opponent_action()),
+        # p1_action_source=lambda o, i: next(p1),
+        p1_action_source=lambda o, i: AGENT.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=manager.get_predicted_opponent_action()),
         custom_elements_callback=manager.add_custom_elements,
         custom_state_update_callback=manager.on_state_update,
     )

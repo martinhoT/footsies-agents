@@ -116,6 +116,14 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_info = None
         self.current_action = None
 
+        # For better credit assignment, whenever frameskipping occurs we keep track of the observations that were either frameskipped *or* the observation before frameskipping happened.
+        # The list of observations is ordered, with the very first being the observation before frameskipping happened (the one that performed the action that caused it) and the rest being frameskipped.
+        # The list of player 2 updates is only done for the A2C Q-learner algorithm, since only there is the opponent's experience valid.
+        self.frameskipped_p1_updates = []
+        self.frameskipped_p1_updates_total_reward = 0.0
+        self.frameskipped_p2_updates = []
+        self.frameskipped_p2_updates_total_reward = 0.0
+
         # For logging
         self.cumulative_delta = 0
         self.cumulative_delta_n = 0
@@ -180,10 +188,28 @@ class FootsiesAgent(FootsiesAgentTorch):
             obs_opponent_action = None
         
         # Learn using P1's perspective
-        self.learner.learn(obs, next_obs, reward, terminated, truncated,
-            obs_agent_action=obs_agent_action,
-            obs_opponent_action=obs_opponent_action,
-        )
+        if obs_agent_action is not None:
+            # Perform the delayed, frameskipped updates
+            for o in self.frameskipped_p1_updates:
+                self.learner.learn(o, obs, self.frameskipped_p1_updates_total_reward, terminated, truncated,
+                   obs_agent_action=obs_agent_action,
+                    obs_opponent_action=obs_opponent_action,
+                )
+
+            self.frameskipped_p1_updates = []
+            self.frameskipped_p1_updates_total_reward = 0.0
+
+            # Perform the learning on the current transition
+            self.learner.learn(obs, next_obs, reward, terminated, truncated,
+                obs_agent_action=obs_agent_action,
+                obs_opponent_action=obs_opponent_action,
+            )
+        
+        else:
+            self.frameskipped_p1_updates.append(obs)
+            self.frameskipped_p1_updates_total_reward += reward
+
+        # P1 learning logging
         self.cumulative_delta += self.learner.delta
         self.cumulative_delta_n += 1
         if isinstance(self.learner, A2CQLearner):
@@ -193,17 +219,37 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Learn using P2's perspective
         # NOTE: only valid for FOOTSIES, since both players are using the same character
         if self.footsies:
+            # Switch perspectives
             p2_obs = observation_invert_perspective_flattened(obs)
             p2_next_obs = observation_invert_perspective_flattened(next_obs)
-            self.learner.learn(p2_obs, p2_next_obs, -reward, terminated, truncated,
-                obs_agent_action=obs_opponent_action,
-                obs_opponent_action=obs_agent_action,
-            )
-            self.cumulative_delta += self.learner.delta
-            self.cumulative_delta_n += 1
-            if isinstance(self.learner, A2CQLearner):
-                self.cumulative_qtable_error += np.mean(self.learner.td_error).item()
-                self.cumulative_qtable_error_n += 1
+
+            if obs_opponent_action is not None:
+                # Perform the delayed, frameskipped updates
+                for o in self.frameskipped_p2_updates:
+                    self.learner.learn(o, p2_obs, self.frameskipped_p2_updates_total_reward, terminated, truncated,
+                        obs_agent_action=obs_opponent_action,
+                        obs_opponent_action=obs_agent_action,
+                    )
+                
+                self.frameskipped_p2_updates = []
+                self.frameskipped_p2_updates_total_reward = 0.0
+
+                # Perform the learning on the current transition
+                self.learner.learn(p2_obs, p2_next_obs, reward, terminated, truncated,
+                    obs_agent_action=obs_agent_action,
+                    obs_opponent_action=obs_opponent_action,
+                )
+
+                # P2 learning logging
+                self.cumulative_delta += self.learner.delta
+                self.cumulative_delta_n += 1
+                if isinstance(self.learner, A2CQLearner):
+                    self.cumulative_qtable_error += np.mean(self.learner.td_error).item()
+                    self.cumulative_qtable_error_n += 1
+            
+            else:
+                self.frameskipped_p2_updates.append(p2_obs)
+                self.frameskipped_p2_updates_total_reward += -reward
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         model = deepcopy(self.actor_critic.actor)

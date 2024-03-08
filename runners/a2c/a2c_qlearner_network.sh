@@ -12,7 +12,7 @@ python3 main.py a2c \
     -mN \
         a2c.actor_entropy_loss_coef 0.1 \
         a2c.actor_optimizer.lr 0.001 \
-        critic.discount 1.0 \
+        critic.discount 0.95 \
         critic.learning_rate 0.001 \
     -mB \
         use_q_table false \
