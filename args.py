@@ -375,7 +375,7 @@ def parse_args() -> MainArgs:
 
     if is_sb3:
         if args.episodes is not None:
-            print("WARN: specifying a number of episodes for SB3 algorithms is not supported, will be ignored")
+            print("WARNING: specifying a number of episodes for SB3 algorithms is not supported, will be ignored")
 
     if will_footsies_self_play:
         # Set dummy opponent for now, and set later with a copy of the instanced agent

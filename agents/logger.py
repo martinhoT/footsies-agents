@@ -4,6 +4,9 @@ from torch.utils.tensorboard import SummaryWriter
 from agents.base import FootsiesAgentBase
 from typing import List, Callable, Any, Tuple
 from collections import deque
+import logging
+
+LOGGER = logging.getLogger("main.tensorboard")
 
 
 class TrainingLoggerWrapper(FootsiesAgentBase):
@@ -166,9 +169,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                             layer_name, layer, self.current_step
                         )
                     except ValueError as e:
-                        print(f"Oops, exception happened when adding network histogram: '{e}', here are the parameters:")
-                        print(layer)
-                        raise e
+                        raise RuntimeError(f"Oops, exception happened when adding network histogram: '%s', here are the parameters: %s", e, layer) from e
 
             for tag, evaluator in self.custom_evaluators:
                 self.summary_writer.add_scalar(tag, evaluator(), self.current_step)

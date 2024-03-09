@@ -1,9 +1,12 @@
 import os
 import numpy as np
 import torch
+import logging
 from torch import nn
 from abc import ABC, abstractmethod
 from agents.torch_utils import create_layered_network
+
+LOGGER = logging.getLogger("main.ql")
 
 
 class QFunction(ABC):
@@ -68,13 +71,9 @@ class QFunction(ABC):
         if np.all(td_error == 0.0):
             return td_error
         
-        # if target > 1.0:
-        #     print(f"At observation {obs}, agent action {action} and opponent action {obs_opponent_action} we have a Q-value of {cur_value}, which will be updated to {reward} + {nxt_value}")
-        
         self._update_q_value(obs, target, action, obs_opponent_action)
 
-        # if np.any(self.q(obs, action, opponent_action=obs_opponent_action) > 1.0):
-        #     print(f"After update, at observation {obs}, agent action {action} and opponent action {obs_opponent_action} we had a Q-value of {cur_value}, now of {self.q(obs, action, opponent_action=obs_opponent_action)}, which was updated to {reward} + {nxt_value}")
+        LOGGER.info(f"At observation {obs.flatten()}, agent action {action} and opponent action {obs_opponent_action} we had a Q-value of {cur_value}, now of {self.q(obs, action, opponent_action=obs_opponent_action)}, which was updated to {reward} + {nxt_value}")
 
         return td_error
 

@@ -1,11 +1,12 @@
 import torch
 import torch.multiprocessing as mp
+import logging
+from logging.handlers import RotatingFileHandler
 from typing import Callable
 from math import floor
 from torch import nn
 from itertools import pairwise
 from gymnasium import Env
-
 from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import extract_sub_kwargs
@@ -99,6 +100,24 @@ def hogwild(
         logging_wrapper: Callable[[FootsiesAgentTorch], TrainingLoggerWrapper] = None,
         **train_kwargs,
     ):
+        # Change the logging destination! logging using multiprocessing into the same file is not supported (but into the console works?)
+        main_logger = logging.getLogger("main")
+        for handler in list(main_logger.handlers):
+            if isinstance(handler, RotatingFileHandler):
+                new_filename = handler.baseFilename.replace(".log", f"_p{rank}.log")
+                
+                # The handler.maxBytes attribute seems to be a string, but the kwarg asks for an int
+                new_handler = RotatingFileHandler(new_filename, maxBytes=1e7, backupCount=handler.backupCount)
+                new_handler.setFormatter(handler.formatter)
+                new_handler.setLevel(handler.level)
+
+                # Substitute the previous log file handler with the new one
+                main_logger.removeHandler(handler)
+                main_logger.addHandler(new_handler)
+
+        # Create the logger instance that this method will use
+        worker_logger = logging.getLogger("main.worker")
+
         # Set up process
         torch.manual_seed(base_seed + rank)
         # Avoid CPU oversubscription
@@ -126,7 +145,7 @@ def hogwild(
             if len(ports) < 3:
                 raise RuntimeError(f"could not find 3 free ports for worker {rank}'s FOOTSIES instance")
 
-            print(f"[{rank}] I was assigned the ports: {ports}")
+            worker_logger.info("[%s] I was assigned the ports: %s", rank, ports)
             
             env = env_generator(
                 game_port=ports[0],
@@ -141,17 +160,17 @@ def hogwild(
 
         def log_episode(episode):
             if episode > 0 and episode % 100 == 0:
-                print(f"[{rank}] Reached episode {episode}")
+                worker_logger.info("[%s] Reached episode %s", rank, episode)
 
         # Overwrite keyword arguments with values that only make sense for asynchronous training
         kwargs_that_shouldnt_be_set = {"episode_finished_callback", "progress_bar"}
         kwargs_that_were_set_but_shouldnt_be = kwargs_that_shouldnt_be_set & train_kwargs.keys()
         if kwargs_that_were_set_but_shouldnt_be:
-            print(f"[{rank}] WARNING: I was supplied with training kwargs that shouldn't have been set ({kwargs_that_were_set_but_shouldnt_be}), will overwrite them")
+            worker_logger.warning(f"[%s] I was supplied with training kwargs that shouldn't have been set (%s), will overwrite them", rank, kwargs_that_were_set_but_shouldnt_be)
         train_kwargs["episode_finished_callback"] = log_episode
         train_kwargs["progress_bar"] = False
 
-        print(f"[{rank}] Started training")
+        worker_logger.info(f"[%s] Started training", rank)
         training_method(agent, env, **train_kwargs)
 
     processes = []

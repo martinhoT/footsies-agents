@@ -1,11 +1,10 @@
 import torch
 from torch import nn
 from torch.distributions import Categorical
-from agents.torch_utils import create_layered_network, observation_invert_perspective_flattened
+from agents.torch_utils import create_layered_network
 from agents.utils import extract_sub_kwargs
-from agents.ql.ql import QFunction, QTable
+from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
-from collections import deque
 
 
 class CriticNetwork(nn.Module):

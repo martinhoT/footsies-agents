@@ -3,6 +3,7 @@ from copy import deepcopy
 import os
 import numpy as np
 import torch
+import logging
 from torch import nn
 from agents.base import FootsiesAgentBase
 from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
@@ -10,8 +11,10 @@ from agents.action import ActionMap
 from gymnasium import Env
 from typing import Any, Callable, List, Tuple
 from collections.abc import Generator
-from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
+from footsies_gym.moves import FootsiesMove
 from agents.torch_utils import observation_invert_perspective_flattened
+
+LOGGER = logging.getLogger("main.mimic")
 
 
 # Sigmoid output is able to tackle action combinations.
@@ -229,14 +232,15 @@ class PlayerModel:
                 try:
                     return nonzeros[i, 1]
                 except IndexError as e:
-                    print("wrong indexing")
-                    print(" nonzeros:", nonzeros)
-                    print(" i:", i)
-                    print(" obs:", obs)
-                    print(" probs:", probs)
-                    print(" sampled:", sampled)
-                    print(" probs_cumulative:", probs_cumulative)
-                    raise e
+                    raise RuntimeError(
+                        "Wrong indexing:\n"
+                        f" nonzeros: {nonzeros}\n"
+                        f" i: {i}\n"
+                        f" obs: {obs}\n"
+                        f" probs: {probs}\n"
+                        f" sampled: {sampled}\n"
+                        f" probs_cumulative: {probs_cumulative}"
+                    ) from e
 
     # TODO: if over primitive actions, the model is prone to having great uncertainty (why, past me?)
     def probability_distribution(
@@ -247,9 +251,7 @@ class PlayerModel:
             if self.use_sigmoid_output:
                 snapped = torch.round(snap_to_fraction_of * out) / snap_to_fraction_of
                 if torch.all(snapped == 0):
-                    print(
-                        f"Oops, one distribution had all 0s ({out})! Will use uniform distribution"
-                    )
+                    LOGGER.warning("Oops, one distribution had all 0s (%s)! Will use uniform distribution", out)
                     probs = torch.ones(snapped.shape) / snapped.shape[1]
                 else:
                     probs = snapped / torch.sum(snapped, axis=1, keepdim=True)

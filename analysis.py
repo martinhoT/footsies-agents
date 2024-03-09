@@ -12,7 +12,6 @@ from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDis
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.state import FootsiesBattleState, FootsiesState
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE, FOOTSIES_MOVE_ID_TO_INDEX
-from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
 from collections import namedtuple
 

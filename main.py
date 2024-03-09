@@ -79,10 +79,10 @@ def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, 
             agent.load(agent_folder_path)
         else:
             agent.set_parameters(agent_folder_path)
-        print("Agent loaded")
+        LOGGER.info("Agent '%s' loaded", model_name)
 
     else:
-        print("Can't load agent, there was no agent saved!")
+        LOGGER.info("Can't load agent '%s', there was no agent saved!", model_name)
 
 
 def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
@@ -94,7 +94,7 @@ def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, 
 
     # Both FOOTSIES and SB3 agents use the same method and signature (mostly)
     agent.save(agent_folder_path)
-    print("Agent saved")
+    LOGGER.info("Agent '%s' saved", model_name)
 
 
 def train(
@@ -119,9 +119,8 @@ def train(
     - `episode_finished_callback`: function that will be called after each episode is finished
     - `progress_bar`: whether to display a progress bar (with `tqdm`)
     """
-    print("Preprocessing...", end=" ", flush=True)
     agent.preprocess(env)
-    print("done!")
+    LOGGER.info("Preprocessing done!")
 
     training_iterator = count() if n_episodes is None else range(n_episodes)
 
@@ -156,33 +155,24 @@ def train(
             episode_finished_callback(episode)
 
     except KeyboardInterrupt:
-        print("Training manually interrupted")
+        LOGGER.info("Training manually interrupted")
 
     except FootsiesGameClosedError as e:
-        print(f"Quitting training since game closed: '{e}'")
+        LOGGER.warning("Quitting training since game closed: '%s'", e)
 
     except Exception as e:
-        print(
-            f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training"
-        )
-        from traceback import print_exception
-
-        print_exception(e)
+        LOGGER.exception("Training stopped due to %s: '%s', ignoring and quitting training", type(e).__name__, e)
 
 
-def create_env(args: EnvArgs, print_: bool = False) -> Env:
+def create_env(args: EnvArgs) -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
         env = FootsiesEnv(**args.kwargs)
 
         if args.footsies_wrapper_norm:
-            if print_:
-                print(" Adding FootsiesNormalized wrapper")
             env = FootsiesNormalized(env)
 
         if args.footsies_wrapper_fs:
-            if print_:
-                print(" Adding FootsiesFrameSkipped wrapper")
             env = FootsiesFrameSkipped(env)
 
     else:
@@ -197,19 +187,13 @@ def create_env(args: EnvArgs, print_: bool = False) -> Env:
     # Final FOOTSIES wrappers
     if args.is_footsies:
         if args.footsies_wrapper_acd:
-            if print_:
-                print(" Adding FootsiesActionCombinationsDiscretized wrapper")
             env = FootsiesActionCombinationsDiscretized(env)
 
     if args.torch:
-        if print_:
-            print(" Adding PyTorch tensor wrapper")
         env = TransformObservation(env, lambda obs: torch.from_numpy(obs).float().unsqueeze(0))
 
     # Final miscellaneous wrappers
     if args.diayn:
-        if print_:
-            print(" Adding DIAYN wrapper")
         env = DIAYNWrapper(
             env,
             DIAYN(
@@ -227,17 +211,65 @@ def create_env(args: EnvArgs, print_: bool = False) -> Env:
     return env
 
 
+def setup_logger(agent_name: str, level: int = logging.DEBUG, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
+    from logging.handlers import RotatingFileHandler
+    from sys import stdout
+
+    logger = logging.getLogger("main")
+    logger.setLevel(level)
+
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+    
+    if multiprocessing:
+        formatter = logging.Formatter(
+            fmt="%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s",
+        )
+    else:
+        formatter = logging.Formatter(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        )
+    
+    ch = logging.StreamHandler(stdout)
+    ch.setFormatter(formatter)
+    ch.setLevel(logging.WARNING)
+
+    logger.addHandler(ch)
+
+    if log_to_file:
+        rfh = RotatingFileHandler(f"logs/{agent_name}.log", maxBytes=1e7, backupCount=9)
+        rfh.setFormatter(formatter)
+        rfh.setLevel(level)
+
+        logger.addHandler(rfh)
+
+    return logger
+
+
 if __name__ == "__main__":
     args = parse_args()
+    
+    setup_logger(args.agent.model_name, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
 
     # Prepare environment
 
-    print(f"Initializing {'FOOTSIES' if args.env.is_footsies else ('environment ' + args.env.name)}")
-    print(" Environment arguments:")
-    for k, v in args.env.kwargs.items():
-        print(f"  {k}: {v} ({type(v).__name__})")
+    if LOGGER.isEnabledFor(logging.INFO):
+        environment_initialization_msg = (
+            f"Initializing {'FOOTSIES' if args.env.is_footsies else ('environment ' + args.env.name)}\n"
+            " Environment arguments:\n"
+        )
+        environment_initialization_msg += "\n".join(f"  {k}: {v} ({type(v).__name__})" for k, v in args.env.kwargs.items())
+        LOGGER.info(environment_initialization_msg)
+    
+    env = create_env(args.env)
 
-    env = create_env(args.env, print_=True)
+    # Log which wrappers are being used
+    e = env
+    using_wrappers = "Using wrappers:"
+    while not isinstance(e, FootsiesEnv):
+        using_wrappers += f"\n {e.__class__.__name__}"
+        e = e.env
+    LOGGER.info(using_wrappers)
 
     # Prepare agent
     
@@ -247,10 +279,13 @@ if __name__ == "__main__":
     else:
         agent = import_agent(args.agent.name, env, args.agent.kwargs)
 
-    print(f"Imported agent '{args.agent.name + (' (SB3)' if args.agent.is_sb3 else '')}' with name '{args.agent.model_name}'")
-    print(f" Agent arguments:")
-    for k, v in args.agent.kwargs.items():
-        print(f"  {k}: {v} ({type(v).__name__})")
+    if LOGGER.isEnabledFor(logging.INFO):
+        agent_initialization_msg = (
+            f"Imported agent '{args.agent.name + (' (SB3)' if args.agent.is_sb3 else '')}' with name '{args.agent.model_name}'\n"
+            f" Agent arguments:\n"
+        )
+        agent_initialization_msg += "\n".join(f"  {k}: {v} ({type(v).__name__})" for k, v in args.agent.kwargs.items())
+        LOGGER.info(agent_initialization_msg)
 
     if args.misc.load:
         load_agent_model(agent, args.agent.model_name)
@@ -267,7 +302,7 @@ if __name__ == "__main__":
     agent_logging_wrapper = lambda a: a
     if args.misc.log and not args.agent.is_sb3:
         if not args.agent.is_sb3:
-            print("Logging enabled on the agent")
+            LOGGER.info("Logging enabled on the agent")
             loggables = import_loggables(args.agent.name, agent)
 
             agent_logging_wrapper = lambda a: TrainingLoggerWrapper(
@@ -305,15 +340,10 @@ if __name__ == "__main__":
 
         # NOTE: duplicated from train(...)
         except KeyboardInterrupt:
-            print("Training manually interrupted")
+            LOGGER.info("Training manually interrupted")
         
         except Exception as e:
-            print(
-                f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training"
-            )
-            from traceback import print_exception
-
-            print_exception(e)
+            LOGGER.exception(f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training")
 
     else:
         self_play_manager = SelfPlayManager(
@@ -347,7 +377,7 @@ if __name__ == "__main__":
                 # Indicate whether there are conflicting arguments before updating
                 conflicting_kwargs = env_args.kwargs.keys() & kwargs.keys()
                 if conflicting_kwargs:
-                    print(f"Will overwrite environment kwargs: {conflicting_kwargs}")
+                    LOGGER.warning(f"Will overwrite environment kwargs: {conflicting_kwargs}")
                 
                 env_args.kwargs.update(kwargs)
 

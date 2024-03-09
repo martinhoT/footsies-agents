@@ -1,5 +1,8 @@
 from collections import deque
 import random
+import logging
+
+LOGGER = logging.getLogger("main.self_play")
 
 
 class SelfPlayManager:
@@ -54,7 +57,7 @@ class SelfPlayManager:
         # Perform a snapshot of the agent at the current
         if self.episode % self.snapshot_frequency == 0:
             self._add_opponent(self.snapshot_method())
-            print("Agent snapshot created!")
+            LOGGER.info("Agent snapshot created!")
 
         self.mix_bot_counter += 1
         # Switch to the bot if the counter has surpassed the threshold
@@ -63,14 +66,14 @@ class SelfPlayManager:
             if self.mix_bot_playing:
                 self.mix_bot_counter = 0
                 self.mix_bot_playing = False
-                print("Will use opponents from the opponent pool now!")
+                LOGGER.info("Will use opponents from the opponent pool now!")
         
             # Start using the in-game bot instead
             else:
                 self._current_opponent = None
                 self.mix_bot_counter = 0
                 self.mix_bot_playing = True
-                print("Will use the in-game opponent now!")
+                LOGGER.info("Will use the in-game opponent now!")
         
         # As long as the in-game bot is not playing, we will switch opponent every game
         if not self.mix_bot_playing:

@@ -3,6 +3,7 @@ __pycache__
 sandbox
 runs
 saved
+logs
 /test*
 /runs_*
 /saved_*

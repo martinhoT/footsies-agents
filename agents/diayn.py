@@ -194,7 +194,6 @@ class DIAYNWrapper(gymnasium.Wrapper):
 
     def reset(self, *args, **kwargs) -> tuple[torch.Tensor, dict[str, Any]]:
         skill = self.diayn.sample_skill_uniform()
-        print("Using skill", skill)
         obs, info = self.env.reset(*args, **kwargs)
         obs_with_skill = torch.hstack([obs, skill])
         return obs_with_skill, info
