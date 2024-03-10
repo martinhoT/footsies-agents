@@ -1,5 +1,5 @@
 import os
-from agents.ql.ql import QTable
+from agents.ql.ql import QFunctionTable
 from agents.base import FootsiesAgentBase
 from gymnasium import Env
 from typing import Callable, Tuple
@@ -11,13 +11,13 @@ class FootsiesAgent(FootsiesAgentBase):
         self,
         observation_space_size: int,
         action_space_size: int,
-        q_table: QTable = None,
+        q_table: QFunctionTable = None,
         **kwargs,
     ):
         q_table_kwargs, = extract_sub_kwargs(kwargs, ("q_table",))
 
         if q_table is None:
-            self.q_table = QTable(
+            self.q_table = QFunctionTable(
                 action_dim=action_space_size,
                 **q_table_kwargs,
             )

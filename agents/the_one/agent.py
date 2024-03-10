@@ -8,8 +8,7 @@ from gymnasium import Env
 from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel, AbstractOpponentModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
-from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, ImitationLearner
-from agents.utils import extract_sub_kwargs
+from agents.a2c.agent import FootsiesAgent as A2CAgent
 from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
 from data import FootsiesDataset
 
@@ -21,108 +20,44 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Dimensions
         observation_space_size: int,
         action_space_size: int,
-        representation_dim: int,
-        # Representation module structure
-        representation_hidden_layer_sizes_specification: str = "",
-        representation_hidden_layer_activation_specification: nn.Module = nn.Identity,
+        # Modules
+        representation: RepresentationModule,
+        a2c: A2CAgent,
+        opponent_model: AbstractOpponentModel,
+        game_model: AbstractGameModel = None,
+        reaction_time_emulator: ReactionTimeEmulator = None,
         # Modifiers
-        consider_actions_in_representation: bool = False,
-        over_primitive_actions: bool = False,
-        game_model_double_grad: bool = False,   # let gradients flow both considering the prediction and target, and not just prediction (i.e. target is not detached)
+        over_simple_actions: bool = False,
         opponent_model_learn: bool = False,
-        actor_critic_frameskip: bool = True,
         opponent_model_frameskip: bool = True,
         # Learning
-        optimizer: torch.optim.Optimizer = torch.optim.Adam,
         game_model_learning_rate: float = 1e-4,
         opponent_model_learning_rate: float = 1e-4,
-        # Other modules
-        reaction_time_emulator: ReactionTimeEmulator = None,
-        #  these will only be applied if the `reaction_time_emulator` argument is None
-        reaction_time_emulator_minimum: int = 15,
-        reaction_time_emulator_maximum: int = 29,
-        **kwargs,
     ):
         # Validate arguments
-        if over_primitive_actions:
-            raise NotImplementedError("primitive actions are not yet supported")
+        if not over_simple_actions:
+            raise NotImplementedError("non-simple actions are not yet supported")
         
-        if game_model_double_grad:
-            raise NotImplementedError("backpropagation through targets for the game model is not (yet?) supported")
-
-        a2c_kwargs, actor_kwargs, critic_kwargs, reaction_time_emulator_kwargs = (
-            extract_sub_kwargs(kwargs, ("a2c", "actor", "critic", "reaction_time_emulator"))
-        )
-        
-        # Populate kwargs with default values
-        a2c_kwargs = {
-            "discount": 1.0,
-            "actor_lambda": 0.0,
-            "critic_lambda": 0.0,
-            "actor_entropy_loss_coef": 0.0,
-            "actor_optimizer.lr": 1e-4,
-            "critic_optimizer.lr": 1e-4,
-            **a2c_kwargs,
-        }
-
-        reaction_time_emulator_kwargs = {
-            "inaction_probability": 0.0,
-            "multiplier": 1.0,
-            "additive": 0.0,
-            "history_size": 30,
-            **reaction_time_emulator_kwargs,
-        }
-
         # Initialize necessary values according to passed arguments
         obs_dim = observation_space_size
-        action_dim = action_space_size if over_primitive_actions else ActionMap.n_simple()
-        opponent_action_dim = action_space_size if over_primitive_actions else ActionMap.n_simple()
-
-        if reaction_time_emulator is None:
-            reaction_time_emulator = ReactionTimeEmulator(**reaction_time_emulator_kwargs)
-            reaction_time_emulator.confine_to_range(reaction_time_emulator_minimum, reaction_time_emulator_maximum, action_dim)
+        action_dim = ActionMap.n_simple() if over_simple_actions else action_space_size
+        opponent_action_dim = ActionMap.n_simple() if over_simple_actions else action_space_size
 
         # Store required values
+        #  Dimensions
         self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.opponent_action_dim = opponent_action_dim
-        self.representation_dim = representation_dim
-        self.game_model_double_grad = game_model_double_grad
-        self.over_primitive_actions = over_primitive_actions
+        #  Modules
+        self.representation = representation
+        self.a2c = a2c
+        self.game_model = game_model
+        self.opponent_model = opponent_model
+        self.reaction_time_emulator = reaction_time_emulator
+        #  Modifiers
+        self.over_primitive_actions = over_simple_actions
         self.opponent_model_learn = opponent_model_learn
-        self.actor_critic_frameskip = actor_critic_frameskip
         self.opponent_model_frameskip = opponent_model_frameskip
-
-        # Create modules
-        self.representation_module = RepresentationModule(
-            obs_dim=obs_dim,
-            action_dim=action_dim if consider_actions_in_representation else 0,
-            opponent_action_dim=opponent_action_dim if consider_actions_in_representation else 0,
-            representation_dim=representation_dim,
-            hidden_layer_sizes=[int(n) for n in representation_hidden_layer_sizes_specification.split(",")] if representation_hidden_layer_sizes_specification else [],
-            hidden_layer_activation=getattr(nn, representation_hidden_layer_activation_specification),
-        )
-        self.game_model = AbstractGameModel(
-            action_dim=action_dim,
-            opponent_action_dim=opponent_action_dim,
-            obs_dim=representation_dim,
-            representation=self.representation_module,
-        )
-        self.opponent_model = AbstractOpponentModel(
-            obs_dim=representation_dim,
-            opponent_action_dim=opponent_action_dim,
-            representation=self.representation_module,
-        )
-
-        self.actor = ActorNetwork(
-            obs_dim=representation_dim,
-            action_dim=action_dim,
-            representation=self.representation_module,
-        )
-        self.critic = CriticNetwork(
-            obs_dim=representation_dim,
-            representation=self.representation_module,
-        )
 
         # To report in the `model` property
         self.full_model = FullModel(
@@ -132,22 +67,9 @@ class FootsiesAgent(FootsiesAgentTorch):
             critic=self.critic,
         )
 
-        # Learning managers
-        self.a2c = A2CLambdaLearner(
-            actor=self.actor,
-            critic=self.critic,
-            actor_optimizer=optimizer,
-            critic_optimizer=optimizer,
-            **a2c_kwargs,
-        )
-        self.imitator = ImitationLearner(
-            policy=self.actor,
-            optimizer=torch.optim.Adam,
-        )
-
         # Optimizers. The actor-critic module already takes care of its own optimizers.
-        self.game_model_optimizer = optimizer(self.game_model.parameters(), lr=game_model_learning_rate)
-        self.opponent_model_optimizer = optimizer(self.opponent_model.parameters(), lr=opponent_model_learning_rate)
+        self.game_model_optimizer = torch.optim.SGD(self.game_model.parameters(), lr=game_model_learning_rate)
+        self.opponent_model_optimizer = torch.optim.SGD(self.opponent_model.parameters(), lr=opponent_model_learning_rate)
 
         self.current_observation = None
         self.current_representation = None
@@ -156,8 +78,6 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_simple_action_frame = 0
 
         # Loss trackers
-        self.cumulative_delta = 0
-        self.cumulative_delta_n = 0
         self.cumulative_loss_game_model = 0
         self.cumulative_loss_game_model_n = 0
         self.cumulative_loss_opponent_model = 0
@@ -186,7 +106,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         if len(self.a2c.actor.actor_layers) > 1:
             raise ValueError("the actor must be linear to use this method")
 
-        obs_dim = self.representation_dim
+        obs_dim = self.representation.representation_dim if self.representation is not None else self.obs_dim
         action_dim = self.action_dim
         opponent_action_dim = self.opponent_action_dim
 
@@ -228,24 +148,7 @@ class FootsiesAgent(FootsiesAgentTorch):
     # It's in this function that the current observation and representation variables are updated
     def act(self, obs: torch.Tensor, info: dict) -> int:
         self.current_observation = obs
-
-        # In case a simple action was already being executed, just keep doing it
-        if self.current_simple_action is not None:
-            self.current_simple_action_frame += 1
-            if self.current_simple_action_frame < len(self.current_simple_action):
-                action = self.current_simple_action[self.current_simple_action_frame]
-                return action
-            else:
-                self.current_simple_action = None
-                self.current_simple_action_frame = 0
-        
-        action = self.a2c.sample_action(self.current_observation)
-
-        # Appropriately convert the action in case it is simplified (not primitive)
-        if not self.over_primitive_actions:
-            self.current_simple_action = ActionMap.simple_to_discrete(action)
-            action = self.current_simple_action[self.current_simple_action_frame]
-            
+        action = self.a2c.act(self.current_observation, info, predicted_opponent_action=None)
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
@@ -256,13 +159,12 @@ class FootsiesAgent(FootsiesAgentTorch):
             agent_action = ActionMap.simple_from_move_index(agent_action)
             opponent_action = ActionMap.simple_from_move_index(opponent_action)
         else:
-            raise NotImplementedError("primitive actions are not yet supported")
-        agent_action_onehot = torch.nn.functional.one_hot(torch.tensor(agent_action), num_classes=self.action_dim).unsqueeze(0)
-        opponent_action_onehot = torch.nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).unsqueeze(0)
+            raise NotImplementedError("non-simple actions are not yet supported")
+        agent_action_onehot = nn.functional.one_hot(torch.tensor(agent_action), num_classes=self.action_dim).unsqueeze(0)
+        opponent_action_onehot = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).unsqueeze(0)
 
         # Update the different models.
-        # The actor and critic are updated first since they already started the training loop in the act() method.
-        self._update_actor_critic(self.current_observation, next_obs, reward, terminated)
+        self.a2c.update(next_obs, reward, terminated, truncated, info)
         self._update_game_model(self.current_observation, agent_action_onehot, opponent_action_onehot, next_obs)
         self._update_opponent_model(self.current_observation, next_obs, opponent_action_onehot)
 
@@ -292,7 +194,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.game_model_optimizer.zero_grad()
 
         with torch.no_grad():
-            next_representation_target = self.representation_module(next_obs)
+            next_representation_target = self.representation(next_obs)
 
         next_representation_predicted = self.game_model(obs, agent_action_onehot, opponent_action_onehot)
         game_model_loss = torch.nn.functional.mse_loss(next_representation_predicted, next_representation_target)
@@ -302,21 +204,6 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         self.cumulative_loss_game_model += game_model_loss.item()
         self.cumulative_loss_game_model_n += 1
-
-    def _update_actor_critic(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool):
-        """Calculate the actor-critic loss, backpropagate and optimize"""
-        update_actor_critic = self.current_simple_action is None or self.current_simple_action_frame == 0
-        if update_actor_critic and self.actor_critic_frameskip:
-            # NOTE: this assumes learning is being done online, hence why we pick the first row only
-            previous_agent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[torch.argmax(self.current_observation[0, 2:17]).item()]
-            previous_agent_move_progress = self.current_observation[0, 32]
-            current_agent_move_progress = next_obs[0, 32]
-            update_actor_critic = ActionMap.is_state_actionable(previous_agent_move_state, previous_agent_move_progress, current_agent_move_progress)
-
-        if update_actor_critic:
-            self.a2c.learn(obs, next_obs, reward, terminated)
-            self.cumulative_delta += self.a2c.delta
-            self.cumulative_delta_n += 1
 
     def initialize(
         self,
@@ -367,16 +254,6 @@ class FootsiesAgent(FootsiesAgentTorch):
     @property
     def model(self) -> nn.Module:
         return self.full_model
-
-    def evaluate_average_delta(self) -> float:
-        res = (
-            self.cumulative_delta / self.cumulative_delta_n
-        ) if self.cumulative_delta_n != 0 else 0
-
-        self.cumulative_delta = 0
-        self.cumulative_delta_n = 0
-
-        return res
     
     def evaluate_average_loss_game_model(self) -> float:
         res = (

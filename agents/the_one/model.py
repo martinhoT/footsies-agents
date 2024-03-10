@@ -34,11 +34,17 @@ class RepresentationModule(nn.Module):
         if recurrent:
             raise ValueError("a recurrent architecture is not supported")
 
+        self._representation_dim = representation_dim
+
         self.representation_layers = create_layered_network(obs_dim + action_dim + opponent_action_dim, representation_dim, hidden_layer_sizes, hidden_layer_activation)
     
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.representation_layers(obs)
     
+    @property
+    def representation_dim(self) -> int:
+        return self._representation_dim
+
 
 class AbstractGameModel(nn.Module):
     def __init__(

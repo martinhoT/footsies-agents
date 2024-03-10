@@ -1,13 +1,15 @@
 import torch
+import logging
 from torch import nn
 from torch.distributions import Categorical
 from agents.torch_utils import create_layered_network
-from agents.utils import extract_sub_kwargs
-from agents.ql.ql import QFunction
+from agents.ql.ql import QFunction, QFunctionNetwork
 from abc import ABC, abstractmethod
 
+LOGGER = logging.getLogger("main.a2c")
 
-class CriticNetwork(nn.Module):
+
+class ValueNetwork(nn.Module):
     def __init__(
         self,
         obs_dim: int,
@@ -63,26 +65,35 @@ class A2CLearnerBase(ABC):
     def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, **kwargs):
         pass
 
+    @property
+    @abstractmethod
+    def actor(self) -> nn.Module | None:
+        """The actor module, if it exists."""
+
+    @property
+    @abstractmethod
+    def critic(self) -> nn.Module | None:
+        """The critic module, if it exists."""
+
 
 class A2CLambdaLearner(A2CLearnerBase):
     def __init__(
         self,
         actor: ActorNetwork,
-        critic: CriticNetwork,
+        critic: ValueNetwork,
         discount: float = 1.0,
         actor_lambda: float = 0.0,
         critic_lambda: float = 0.0,
         actor_entropy_loss_coef: float = 0.0,
-        actor_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
-        critic_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        actor_learning_rate: float = 1e-4,
+        critic_learning_rate: float = 1e-4,
         policy_improvement_steps: int = 1,
         policy_evaluation_steps: int = 1,
         policy_cumulative_discount: bool = True,
-        **kwargs,
     ):
         """Implementation of the advantage actor-critic algorithm with eligibility traces, from the Sutton & Barto book"""
-        self.actor = actor
-        self.critic = critic
+        self._actor = actor
+        self._critic = critic
         self.discount = discount
         self.actor_lambda = actor_lambda
         self.critic_lambda = critic_lambda
@@ -100,20 +111,9 @@ class A2CLambdaLearner(A2CLearnerBase):
             for parameter in critic.parameters()
         ]
 
-        actor_optimizer_kwargs, critic_optimizer_kwargs = extract_sub_kwargs(kwargs, ("actor_optimizer", "critic_optimizer"))
-
-        actor_optimizer_kwargs = {
-            "lr": 1e-4,
-            **actor_optimizer_kwargs,
-        }
-        critic_optimizer_kwargs = {
-            "lr": 1e-4,
-            **critic_optimizer_kwargs,
-        }
-
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients' sign unchanged)
-        self.actor_optimizer = actor_optimizer(self.actor.parameters(), maximize=True, **actor_optimizer_kwargs)
-        self.critic_optimizer = critic_optimizer(self.critic.parameters(), maximize=True, **critic_optimizer_kwargs)
+        self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), maximize=True, lr=actor_learning_rate)
+        self.critic_optimizer = torch.optim.SGD(self._critic.parameters(), maximize=True, lr=critic_learning_rate)
 
         self.action_distribution = None
         self.action = None
@@ -131,7 +131,7 @@ class A2CLambdaLearner(A2CLearnerBase):
 
     def sample_action(self, obs: torch.Tensor, **kwargs) -> int:
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
-        action_probabilities = self.actor(obs)
+        action_probabilities = self._actor(obs)
         self.action_distribution = Categorical(probs=action_probabilities)
         self.action = self.action_distribution.sample()
         
@@ -148,10 +148,10 @@ class A2CLambdaLearner(A2CLearnerBase):
     def _update_critic(self, obs: torch.Tensor):
         self.critic_optimizer.zero_grad()
 
-        critic_score = self.critic(obs)
+        critic_score = self._critic(obs)
         critic_score.backward()
         with torch.no_grad():
-            for critic_trace, parameter in zip(self.critic_traces, self.critic.parameters()):
+            for critic_trace, parameter in zip(self.critic_traces, self._critic.parameters()):
                 critic_trace.copy_(self.discount * self.critic_lambda * critic_trace + parameter.grad)
                 parameter.grad.copy_(self.delta * critic_trace)
 
@@ -163,7 +163,7 @@ class A2CLambdaLearner(A2CLearnerBase):
         actor_score = self.cumulative_discount * self.action_distribution.log_prob(self.action)
         actor_score.backward(retain_graph=True)
         with torch.no_grad():
-            for actor_trace, parameter in zip(self.actor_traces, self.actor.parameters()):
+            for actor_trace, parameter in zip(self.actor_traces, self._actor.parameters()):
                 actor_trace.copy_(self.discount * self.actor_lambda * actor_trace + parameter.grad)
                 parameter.grad.copy_(self.delta * actor_trace * (1 - self.actor_entropy_loss_coef))
         # Add the entropy score gradient
@@ -178,9 +178,9 @@ class A2CLambdaLearner(A2CLearnerBase):
             if terminated:
                 target = reward
             else:
-                target = reward + self.discount * self.critic(next_obs)
+                target = reward + self.discount * self._critic(next_obs)
             
-            delta = (target - self.critic(obs)).item()
+            delta = (target - self._critic(obs)).item()
     
         return delta
 
@@ -210,6 +210,14 @@ class A2CLambdaLearner(A2CLearnerBase):
             for critic_trace in self.critic_traces:
                 critic_trace.zero_()
 
+    @property
+    def actor(self):
+        return self._actor
+
+    @property
+    def critic(self):
+        return self._critic
+
 
 # NOTE: we can use both players' perspectives when updating the Q-value function. This is left to the training loop to manage
 class A2CQLearner(A2CLearnerBase):
@@ -218,28 +226,20 @@ class A2CQLearner(A2CLearnerBase):
         actor: ActorNetwork,
         critic: QFunction,
         actor_entropy_loss_coef: float = 0.0,
-        actor_optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
+        actor_learning_rate: float = 1e-4,
         policy_cumulative_discount: bool = True,
         consider_opponent_action: bool = False,
-        **kwargs,
     ):
         """Implementation of a custom actor-critic algorithm with a Q-value table for the critic"""
-        self.actor = actor
-        self.critic = critic
+        self._actor = actor
+        self._critic = critic
         self.discount = critic.discount
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
         self.policy_cumulative_discount = policy_cumulative_discount
         self.consider_opponent_action = consider_opponent_action
 
-        actor_optimizer_kwargs, = extract_sub_kwargs(kwargs, ("actor_optimizer",))
-
-        actor_optimizer_kwargs = {
-            "lr": 1e-4,
-            **actor_optimizer_kwargs,
-        }
-
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients' sign unchanged)
-        self.actor_optimizer = actor_optimizer(self.actor.parameters(), maximize=True, **actor_optimizer_kwargs)
+        self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), lr=actor_learning_rate, maximize=True)
 
         self.action_distribution = None
         self.action = None
@@ -252,15 +252,16 @@ class A2CQLearner(A2CLearnerBase):
         self.delta = 0.0
         self.td_error = 0.0
 
-    def compute_action_distribution(self, obs: torch.Tensor, next_opponent_action: int) -> torch.distributions.Distribution:
+    def compute_action_probabilities(self, obs: torch.Tensor, next_opponent_action: int) -> torch.Tensor:
         """Get the action probability distribution for the given observation and predicted opponent action."""
         obs = self._append_opponent_action_if_needed(obs, next_opponent_action)
-        action_probabilities = self.actor(obs)
-        return Categorical(probs=action_probabilities)
+        action_probabilities = self._actor(obs)
+        return action_probabilities
 
     def sample_action(self, obs: torch.Tensor, *, next_opponent_action: int, **kwargs) -> int:
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
-        self.action_distribution = self.compute_action_distribution(obs, next_opponent_action)
+        action_probabilities = self.compute_action_probabilities(obs, next_opponent_action)
+        self.action_distribution = Categorical(probs=action_probabilities)
         self.action = self.action_distribution.sample()
         return self.action.item()
 
@@ -271,7 +272,7 @@ class A2CQLearner(A2CLearnerBase):
         if self.consider_opponent_action and opponent_action is None:
                 raise ValueError("a prediction for the opponent's next action must be provided when choosing how to act, since we are considering opponent actions")
 
-        opponent_action_onehot = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self.critic.opponent_action_dim)
+        opponent_action_onehot = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self._critic.opponent_action_dim)
         return torch.hstack((obs, opponent_action_onehot))
 
     def _update_actor(self, obs: torch.Tensor, agent_action: int, opponent_action: int):
@@ -280,7 +281,8 @@ class A2CQLearner(A2CLearnerBase):
         self.delta = delta
         
         # Calculate the probability distribution at obs considering opponent action, and consider we did the given action
-        action_distribution = self.compute_action_distribution(obs, opponent_action)
+        action_probabilities = self.compute_action_probabilities(obs, opponent_action)
+        action_distribution = Categorical(probs=action_probabilities)
         action_tensor = torch.tensor(agent_action, dtype=torch.int64)
         
         # Update the actor network
@@ -291,26 +293,32 @@ class A2CQLearner(A2CLearnerBase):
 
         self.actor_optimizer.step()
 
+        if LOGGER.isEnabledFor(logging.INFO):
+            new_action_probabilities = self.compute_action_probabilities(obs, opponent_action)
+            new_action_probabilities = new_action_probabilities.detach()
+            new_action_distribution = Categorical(probs=new_action_probabilities)
+            LOGGER.info("Actor was updated using delta %s, going from a distribution of %s with entropy %s to a distribution of %s with entropy %s", delta, action_probabilities, action_distribution.entropy().item(), new_action_probabilities, new_action_distribution.entropy().item())
+
     def compute_advantage(self, obs: torch.Tensor, agent_action: int, opponent_action: int) -> float:
         """Compute the TD delta (a.k.a. advantage)."""
         # If the opponent's action doesn't matter, since it's ineffectual, then compute the advantage considering all possible opponent actions.
         # NOTE: another possibility would be to perform random sampling? But then it would probably take a long time before convergence...
         if opponent_action is None:
-            obs_with_opp = torch.vstack(self._append_opponent_action_if_needed(obs, o) for o in range(self.critic.opponent_action_dim))
+            obs_with_opp = torch.vstack(self._append_opponent_action_if_needed(obs, o) for o in range(self._critic.opponent_action_dim))
         else:
             obs_with_opp = self._append_opponent_action_if_needed(obs, opponent_action)
 
         # NOTE: since the tensors are always on CPU, we don't need to call .numpy() with force=True
         # A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi.T Q(s, o, .)
-        q_soa = self.critic.q(obs.numpy().squeeze(), agent_action, opponent_action)
-        pi = self.actor(obs_with_opp).detach().numpy()
-        q_so = self.critic.q(obs.numpy().squeeze(), opponent_action=opponent_action)
+        q_soa = self._critic.q(obs.numpy().squeeze(), agent_action, opponent_action)
+        pi = self._actor(obs_with_opp).detach().numpy()
+        q_so = self._critic.q(obs.numpy().squeeze(), opponent_action=opponent_action)
         return q_soa - (pi @ q_so).item()
     
     def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, obs_agent_action: int, obs_opponent_action: int, next_obs_opponent_action: int):
         """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the opponent's actual action on the next observation `next_obs`."""
         # Update the Q-table. Save the TD error in case the caller wants to check it
-        self.td_error = self.critic.update(obs.numpy().squeeze(), obs_agent_action, reward, next_obs.numpy().squeeze(), terminated, obs_opponent_action, next_obs_opponent_action)
+        self.td_error = self._critic.update(obs.numpy().squeeze(), obs_agent_action, reward, next_obs.numpy().squeeze(), terminated, obs_opponent_action, next_obs_opponent_action)
 
         # If the agent action is None then that means the agent couldn't act, so it doesn't make sense to update the actor
         if obs_agent_action is None:
@@ -323,7 +331,7 @@ class A2CQLearner(A2CLearnerBase):
             # If the opponent is being frameskipped, then we consider them as doing any of their actions, and update accordingly
             if obs_opponent_action is None:
                 # TODO: how about considering it to be 0? (i.e. STAND, the action of doing nothing)
-                for opponent_action in range(self.critic.opponent_action_dim):
+                for opponent_action in range(self._critic.opponent_action_dim):
                     self._update_actor(obs, obs_agent_action, opponent_action)
             # We have to recalculate the policy's action distribution since the opponent action is likely different
             else:
@@ -362,3 +370,13 @@ class A2CQLearner(A2CLearnerBase):
             "obs_agent_action": obs_agent_action,
             "obs_opponent_action": obs_opponent_action,
         }
+
+    @property
+    def actor(self):
+        return self.actor
+    
+    @property
+    def critic(self):
+        if isinstance(self._critic, QFunctionNetwork):
+            return self._critic.q_network
+        return None

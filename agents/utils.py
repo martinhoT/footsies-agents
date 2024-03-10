@@ -74,6 +74,8 @@ def extract_sub_kwargs(kwargs: dict, subkeys: tuple[str], strict: bool = True) -
     
     NOTE: multiple periods `'.'` are supported in subkey names, with the first period delimiting the subkey name
 
+    NOTE: shouldn't be used anymore. This was used to specify arguments through the command line, but it's better to just specify initialization in the models folder
+
     Example:
     ```
     >>> kwargs = {

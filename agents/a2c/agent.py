@@ -8,9 +8,8 @@ from copy import deepcopy
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
-from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, A2CLearnerBase, A2CQLearner
-from agents.ql.ql import QTable, QNetwork
-from agents.utils import extract_sub_kwargs
+from agents.a2c.a2c import A2CLearnerBase, A2CQLearner
+from agents.ql.ql import QFunctionTable
 from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
 from agents.action import ActionMap
 
@@ -18,93 +17,26 @@ from agents.action import ActionMap
 class FootsiesAgent(FootsiesAgentTorch):
     def __init__(
         self,
-        observation_space_size: int,
+        learner: A2CLearnerBase,
         action_space_size: int,
-        learner: A2CLearnerBase = None,
-        use_simple_actions: bool = True,
-        use_q_table: bool = False,
-        use_q_network: bool = False,
-        consider_opponent_action: bool = False,
-        actor_hidden_layer_sizes_specification: str = "",
-        critic_hidden_layer_sizes_specification: str = "",
-        actor_hidden_layer_activation_specification: str = "ReLU",
-        critic_hidden_layer_activation_specification: str = "ReLU",
         footsies: bool = True,
-        **kwargs,
     ):
         """
         Footsies agent using the A2C algorithm, potentially with some modifications.
+        This implementation assumes simplified actions.
 
         Parameters
         ----------
-        - `observation_space_size`: the size of the observation space
         - `action_space_size`: the size of the action space
         - `learner`: the A2C algorithm class to use. If `None`, one will be created
-        - `use_simple_actions`: whether to use simple actions rather than discrete actions
-        - `use_q_table`: whether to use a Q-table instead of a neural network for the critic
-        - `use_q_network`: whether to use a Q-network instead of a neural network for the critic
-        - `consider_opponent_action`: whether to consider the opponent's action as part of the observation. We consider the opponent's action space to be the same as the agent's
-        - `actor_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the actor network
-        - `critic_hidden_layer_sizes_specification`: a string specifying the hidden layer sizes for the critic network
-        - `actor_hidden_layer_activation_specification`: a string specifying the hidden layer activation for the actor network
-        - `critic_hidden_layer_activation_specification`: a string specifying the hidden layer activation for the critic network
         - `footsies`: whether to consider the FOOTSIES environment is being used. If `False`, the agent will not do any special treatment
         """
-        if use_q_table and use_q_network:
-            raise ValueError("can only use either a Q-table or a Q-network, can't ask for both")
-        self.action_space_size = ActionMap.n_simple() if use_simple_actions else action_space_size
-        self.use_simple_actions = use_simple_actions
-        self.consider_opponent_action = consider_opponent_action
+        self.action_space_size = action_space_size
         self.footsies = footsies
 
-        a2c_kwargs, actor_kwargs, critic_kwargs = extract_sub_kwargs(kwargs, ("a2c", "actor", "critic"), strict=True)
-
-        if learner is None:
-            actor = ActorNetwork(
-                obs_dim=observation_space_size + (self.action_space_size if consider_opponent_action else 0),
-                action_dim=self.action_space_size,
-                hidden_layer_sizes=[int(n) for n in actor_hidden_layer_sizes_specification.split(",")] if actor_hidden_layer_sizes_specification else [],
-                hidden_layer_activation=getattr(nn, actor_hidden_layer_activation_specification),
-                **actor_kwargs,
-            )
-
-            if use_q_table:
-                critic = QTable(
-                    action_dim=self.action_space_size,
-                    opponent_action_dim=self.action_space_size,
-                    **critic_kwargs,
-                )
-                learner_class = A2CQLearner
-            
-            elif use_q_network:
-                critic = QNetwork(
-                    action_dim=self.action_space_size,
-                    opponent_action_dim=self.action_space_size,
-                    hidden_layer_sizes=[int(n) for n in critic_hidden_layer_sizes_specification.split(",")] if critic_hidden_layer_sizes_specification else [],
-                    hidden_layer_activation=getattr(nn, critic_hidden_layer_activation_specification),
-                    **critic_kwargs,
-                )
-                learner_class = A2CQLearner
-
-            else:
-                critic = CriticNetwork(
-                    obs_dim=observation_space_size,
-                    hidden_layer_sizes=[int(n) for n in critic_hidden_layer_sizes_specification.split(",")] if critic_hidden_layer_sizes_specification else [],
-                    hidden_layer_activation=getattr(nn, critic_hidden_layer_activation_specification),
-                    **critic_kwargs,
-                )
-                learner_class = A2CLambdaLearner
-
-            learner = learner_class(
-                actor=actor,
-                critic=critic,
-                consider_opponent_action=consider_opponent_action,
-                **a2c_kwargs,
-            )
-
         self.learner = learner
-        self.actor = learner.actor
-        self.critic = learner.critic
+        self.actor = learner._actor
+        self.critic = learner._critic
 
         models = {"actor": self.actor}
         # Could be a QTable
@@ -193,7 +125,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             for o in self.frameskipped_p1_updates:
                 self.learner.learn(o, obs, self.frameskipped_p1_updates_total_reward, terminated, truncated,
                    obs_agent_action=obs_agent_action,
-                    obs_opponent_action=obs_opponent_action,
+                   obs_opponent_action=obs_opponent_action,
                 )
 
             self.frameskipped_p1_updates = []
@@ -268,14 +200,14 @@ class FootsiesAgent(FootsiesAgentTorch):
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model")
         self.model.load_state_dict(torch.load(model_path))
-        if isinstance(self.critic, QTable):
+        if isinstance(self.critic, QFunctionTable):
             qtable_path = os.path.join(folder_path, "q")
             self.critic.load(qtable_path)
 
     def save(self, folder_path: str):
         model_path = os.path.join(folder_path, "model")
         torch.save(self.model.state_dict(), model_path)
-        if isinstance(self.critic, QTable):
+        if isinstance(self.critic, QFunctionTable):
             qtable_path = os.path.join(folder_path, "q")
             self.critic.save(qtable_path)
 

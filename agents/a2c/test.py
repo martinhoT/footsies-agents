@@ -11,7 +11,7 @@ from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium import ObservationWrapper
 from gymnasium.spaces import Box
 from tqdm import tqdm
-from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, ValueNetwork
 from agents.icm import IntrinsicCuriosityModule, AbstractEnvironmentEncoder, InverseEnvironmentModel, ForwardEnvironmentModel, NoveltyTable
 from agents.tile import TileCoding, Tiling
 from itertools import combinations, count
@@ -189,7 +189,7 @@ learner = A2CLambdaLearner(
         hidden_layer_sizes=[32],
         hidden_layer_activation=nn.ReLU,
     ),
-    critic=CriticNetwork(
+    critic=ValueNetwork(
         obs_dim=obs_dim,
         hidden_layer_sizes=[32],
         hidden_layer_activation=nn.ReLU,
@@ -239,7 +239,7 @@ if ENVIRONMENT == "MountainCar-v0":
     heatmap_grid = torch.meshgrid(x, y, indexing="xy")
     heatmap_states = torch.stack(heatmap_grid, dim=-1)
     heatmap = Heatmap(
-        learner.critic(heatmap_states).detach().numpy().squeeze(),
+        learner._critic(heatmap_states).detach().numpy().squeeze(),
         xlabel="Position",
         ylabel="Velocity",
         xticks=[f"{v.item():.2f}" for v in x],
@@ -295,7 +295,7 @@ try:
                 print("VICTORY!!!")
 
             if heatmap and step % heatmap_update_interval == 0:
-                heatmap.update(learner.critic(heatmap_states).detach().numpy().squeeze())
+                heatmap.update(learner._critic(heatmap_states).detach().numpy().squeeze())
 
         obs, info = env.reset()
         terminated, truncated = False, False

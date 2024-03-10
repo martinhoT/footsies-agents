@@ -21,7 +21,6 @@ class MiscArgs:
     save: bool
     load: bool
     log: bool
-    log_dir: str
     log_frequency: int
     log_test_states_number: int
     log_step_start: int
@@ -34,8 +33,8 @@ class MiscArgs:
 @dataclass
 class AgentArgs:
     kwargs: dict
+    model: str
     name: str
-    model_name: str
     is_sb3: bool
 
 
@@ -123,8 +122,8 @@ def extract_kwargs(n_kwargs: list[str], s_kwargs: list[str], b_kwargs: list[str]
 
 def add_agent_argument(parser: argparse.ArgumentParser):
     available_agents = [
-        file.name
-        for file in os.scandir("agents")
+        file.name[:-3] # remove the .py extension
+        for file in os.scandir("models")
         if file.is_dir() and file.name != "__pycache__"
     ]
     available_agents_str = ", ".join(available_agents)
@@ -132,7 +131,7 @@ def add_agent_argument(parser: argparse.ArgumentParser):
     parser.add_argument(
         "agent",
         type=str,
-        help=f"agent implementation to use (available: {available_agents_str}). If name is in the form 'sb3.<agent>', then the Stable-Baselines3 algorithm <agent> will be used instead",
+        help=f"agent initializer/model to use (available: {available_agents_str}). If name is in the form 'sb3.<agent>', then the Stable-Baselines3 algorithm <agent> will be used instead",
     )
 
 
@@ -273,75 +272,69 @@ def parse_args() -> MainArgs:
     parser.add_argument(
         "--no-save",
         action="store_true",
-        help="if passed, the model won't be saved to disk after training",
+        help="if passed, the agent won't be saved to disk after training",
     )
     parser.add_argument(
         "--no-load",
         action="store_true",
-        help="if passed, the model won't be loaded from disk before training",
+        help="if passed, the agent won't be loaded from disk before training",
     )
     parser.add_argument(
-        "--model-name",
+        "--name",
         type=str,
-        help="the name of the model for saving and loading",
+        help="the name of the agent, for saving, loading and logging",
         default=None,
     )
     parser.add_argument(
         "-mN",
-        "--model-N-kwargs",
+        "--agent-N-kwargs",
         action="extend",
         nargs="+",
         type=str,
-        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as numbers",
+        help="key-value pairs to pass as keyword arguments to the agent initializer. Values are treated as numbers",
     )
     parser.add_argument(
         "-mS",
-        "--model-S-kwargs",
+        "--agent-S-kwargs",
         action="extend",
         nargs="+",
         type=str,
-        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as strings",
+        help="key-value pairs to pass as keyword arguments to the agent initializer. Values are treated as strings",
     )
     parser.add_argument(
         "-mB",
-        "--model-B-kwargs",
+        "--agent-B-kwargs",
         action="extend",
         nargs="+",
         type=str,
-        help="key-value pairs to pass as keyword arguments to the agent implementation. Values are treated as booleans",
+        help="key-value pairs to pass as keyword arguments to the agent initializer. Values are treated as booleans",
     )
     parser.add_argument(
-        "--no-log", action="store_true", help="if passed, the model won't be logged"
+        "--no-log", action="store_true", help="if passed, the agent won't be logged (neither standard not Tensorboard logs)"
     )
     parser.add_argument(
         "--log-frequency",
         type=int,
         default=5000,
-        help="number of time steps between each log",
+        help="number of time steps between each Tensorboard log",
     )
     parser.add_argument(
         "--log-test-states-number",
         type=int,
         default=5000,
-        help="number of test states to use when evaluating some metrics for logging",
-    )
-    parser.add_argument(
-        "--log-dir",
-        type=str,
-        default=None,
-        help="directory to which Tensorboard logs will be written",
+        help="number of test states to use when evaluating some metrics for Tensorboard logging",
     )
     parser.add_argument(
         "--log-step-start",
         type=int,
         default=0,
-        help="value at which the logging time step will start, useful for appending to existing logs",
+        help="value at which the logging time step will start, useful for appending to existing Tensorboard logs",
     )
     parser.add_argument(
         "--log-episode-start",
         type=int,
         default=0,
-        help="value at which the logging episode will start, useful for appending to existing logs",
+        help="value at which the logging episode will start, useful for appending to existing Tensorboard logs",
     )
     parser.add_argument(
         "--hogwild",
@@ -366,7 +359,7 @@ def parse_args() -> MainArgs:
     # Prepare various variables, including keyword arguments
     env_kwargs = extract_kwargs(args.env_N_kwargs, args.env_S_kwargs, args.env_B_kwargs)
     model_kwargs = extract_kwargs(
-        args.model_N_kwargs, args.model_S_kwargs, args.model_B_kwargs
+        args.agent_N_kwargs, args.agent_S_kwargs, args.agent_B_kwargs
     )
 
     is_sb3 = args.agent.startswith("sb3.")
@@ -403,7 +396,6 @@ def parse_args() -> MainArgs:
             save=not args.no_save,
             load=not args.no_load,
             log=not args.no_log,
-            log_dir=args.log_dir,
             log_frequency=args.log_frequency,
             log_test_states_number=args.log_test_states_number,
             log_step_start=args.log_step_start,
@@ -414,8 +406,8 @@ def parse_args() -> MainArgs:
         ),
         agent=AgentArgs(
             kwargs=model_kwargs,
-            name=args.agent[4:] if is_sb3 else args.agent,
-            model_name=args.agent if args.model_name is None else args.model_name,
+            model=args.agent[4:] if is_sb3 else args.agent,
+            name=args.name if args.name is not None else args.agent,
             is_sb3=is_sb3,
         ),
         env=EnvArgs(
@@ -433,7 +425,6 @@ def parse_args() -> MainArgs:
                 "discriminator_learning_rate": args.diayn_discriminator_learning_rate,
                 "discriminator_hidden_layer_sizes": diayn_discriminator_hidden_layer_sizes,
                 "discriminator_hidden_layer_activation": diayn_discriminator_hidden_layer_activation,
-                "log_dir": args.log_dir,
                 "log_frequency": args.log_frequency,
             },
             torch=args.torch,

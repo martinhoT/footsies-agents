@@ -39,9 +39,9 @@ Practical considerations:
 # TODO: try adding noise to some observation variables (such as position) for better generalization?
 
 
-def import_sb3(agent_name: str, env: Env, parameters: dict) -> BaseAlgorithm:
+def import_sb3(agent_model: str, env: Env, parameters: dict) -> BaseAlgorithm:
     import stable_baselines3
-    agent_class = stable_baselines3.__dict__[agent_name.upper()]
+    agent_class = stable_baselines3.__dict__[agent_model.upper()]
     return agent_class(
         policy="MlpPolicy", # we assume we will never need the CnnPolicy
         env=env,
@@ -49,20 +49,13 @@ def import_sb3(agent_name: str, env: Env, parameters: dict) -> BaseAlgorithm:
     )
 
 
-def import_agent(agent_name: str, env: Env, parameters: dict) -> FootsiesAgentBase:
-    agent_module_str = ".".join(("agents", agent_name, "agent"))
-    agent_module = importlib.import_module(agent_module_str)
-    return agent_module.FootsiesAgent(
-        observation_space_size=env.observation_space.shape[0],
-        action_space_size=env.action_space.n,
-        **parameters,
-    )
+def import_agent(agent_model: str, env: Env, parameters: dict) -> tuple[FootsiesAgentBase, dict[str, list]]:
+    model_init_module_str = ".".join(("models", agent_model))
+    model_init_module = importlib.import_module(model_init_module_str)
 
+    agent, loggables = model_init_module.model_init(observation_space_size=env.observation_space.shape[0], action_space_size=env.action_space.n, **parameters)
 
-def import_loggables(agent_name: str, agent: FootsiesAgentBase) -> List[Any]:
-    loggables_module_str = ".".join(("agents", agent_name, "loggables"))
-    loggables_module = importlib.import_module(loggables_module_str)
-    return loggables_module.get_loggables(agent)
+    return agent, loggables
 
 
 def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
@@ -248,8 +241,11 @@ def setup_logger(agent_name: str, level: int = logging.DEBUG, log_to_file: bool 
 
 if __name__ == "__main__":
     args = parse_args()
+    # Perform some argument post-processing
+    log_dir = os.path.join("runs", args.agent.name)
+    args.env.diayn_kwargs["log_dir"] = log_dir
     
-    setup_logger(args.agent.model_name, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
+    setup_logger(args.agent.name, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
 
     # Prepare environment
 
@@ -274,21 +270,21 @@ if __name__ == "__main__":
     # Prepare agent
     
     if args.agent.is_sb3:
-        agent = import_sb3(args.agent.name, env, args.agent.kwargs)
+        agent = import_sb3(args.agent.model, env, args.agent.kwargs)
             
     else:
-        agent = import_agent(args.agent.name, env, args.agent.kwargs)
+        agent, loggables = import_agent(args.agent.model, env, args.agent.kwargs)
 
     if LOGGER.isEnabledFor(logging.INFO):
         agent_initialization_msg = (
-            f"Imported agent '{args.agent.name + (' (SB3)' if args.agent.is_sb3 else '')}' with name '{args.agent.model_name}'\n"
+            f"Imported agent '{args.agent.model + (' (SB3)' if args.agent.is_sb3 else '')}' with name '{args.agent.name}'\n"
             f" Agent arguments:\n"
         )
         agent_initialization_msg += "\n".join(f"  {k}: {v} ({type(v).__name__})" for k, v in args.agent.kwargs.items())
         LOGGER.info(agent_initialization_msg)
 
     if args.misc.load:
-        load_agent_model(agent, args.agent.model_name)
+        load_agent_model(agent, args.agent.name)
 
     # Set a good default agent for self-play (FOOTSIES only)
     if args.self_play.enabled:
@@ -301,30 +297,28 @@ if __name__ == "__main__":
     # Identity function, used when logging is disabled
     agent_logging_wrapper = lambda a: a
     if args.misc.log and not args.agent.is_sb3:
-        if not args.agent.is_sb3:
-            LOGGER.info("Logging enabled on the agent")
-            loggables = import_loggables(args.agent.name, agent)
+        LOGGER.info("Logging enabled on the agent")
 
-            agent_logging_wrapper = lambda a: TrainingLoggerWrapper(
-                a,
-                log_frequency=args.misc.log_frequency,
-                log_dir=args.misc.log_dir,
-                episode_reward=True,
-                average_reward=True,
-                average_reward_coef=0.99,
-                win_rate=True,
-                truncation=True,
-                episode_length=True,
-                test_states_number=args.misc.log_test_states_number,
-                step_start_value=args.misc.log_step_start,
-                episode_start_value=args.misc.log_episode_start,
-                **loggables,
-            )
+        agent_logging_wrapper = lambda a: TrainingLoggerWrapper(
+            a,
+            log_frequency=args.misc.log_frequency,
+            log_dir=log_dir,
+            episode_reward=True,
+            average_reward=True,
+            average_reward_coef=0.99,
+            win_rate=True,
+            truncation=True,
+            episode_length=True,
+            test_states_number=args.misc.log_test_states_number,
+            step_start_value=args.misc.log_step_start,
+            episode_start_value=args.misc.log_episode_start,
+            **loggables,
+        )
 
     if args.agent.is_sb3:
         try:
             from stable_baselines3.common.logger import configure
-            sb3_logger = configure(args.misc.log_dir, ["tensorboard"])
+            sb3_logger = configure(log_dir, ["tensorboard"])
             agent.set_logger(sb3_logger)
 
             # opponent_pool = deque([], maxlen=args.self_play_max_snapshots)
@@ -333,7 +327,7 @@ if __name__ == "__main__":
 
             agent.learn(
                 total_timesteps=args.time_steps,
-                tb_log_name=args.misc.log_dir,
+                tb_log_name=log_dir,
                 reset_num_timesteps=False,
                 progress_bar=True,
             )
@@ -399,6 +393,6 @@ if __name__ == "__main__":
             train(agent, env, **train_kwargs)
 
     if args.misc.save:
-        save_agent_model(agent, args.agent.model_name)
+        save_agent_model(agent, args.agent.name)
 
     env.close()

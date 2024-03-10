@@ -9,7 +9,7 @@ from footsies_gym.moves import FootsiesMove
 from analysis import Analyser
 from agents.action import ActionMap
 from agents.a2c.agent import FootsiesAgent as A2CAgent
-from agents.ql.ql import QTable
+from agents.ql.ql import QFunctionTable
 from main import load_agent_model
 
 
@@ -98,7 +98,7 @@ class QLearnerAnalyserManager:
         self.opponent_action_dim = opponent_action_dim
 
         self.q_table_plot = QTablePlot(action_dim, opponent_action_dim, auto_scale=False)
-        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, add_color_scale=False, auto_scale=True) if isinstance(AGENT.critic, QTable) else None
+        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, add_color_scale=False, auto_scale=True) if isinstance(AGENT.critic, QFunctionTable) else None
         self.policy_plot = PolicyDistributionPlot()
         
         self.current_observation = None

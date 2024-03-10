@@ -8,7 +8,7 @@ from torch import nn
 from tqdm import tqdm
 from rps.rps import RPS
 from rps.plotter import AnimatedPlot
-from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, CriticNetwork, A2CLearnerBase
+from agents.a2c.a2c import A2CLambdaLearner, ActorNetwork, ValueNetwork, A2CLearnerBase
 from itertools import starmap, count
 
 
@@ -40,8 +40,8 @@ def print_results(game: RPS, agent: A2CLambdaLearner):
 
     results = {
         observation: (
-            agent.critic(observation).item(),
-            agent.actor(observation).detach().squeeze(),
+            agent._critic(observation).item(),
+            agent._actor(observation).detach().squeeze(),
         )
         for observation in observations
     }
@@ -146,7 +146,7 @@ def main(
             hidden_layer_sizes=actor_hidden_layer_sizes,
             hidden_layer_activation=actor_hidden_layer_activation,
         ),
-        critic=CriticNetwork(
+        critic=ValueNetwork(
             obs_dim=game.observation_dim,
             hidden_layer_sizes=critic_hidden_layer_sizes,
             hidden_layer_activation=critic_hidden_layer_activation,
