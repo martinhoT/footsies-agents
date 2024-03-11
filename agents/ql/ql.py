@@ -496,6 +496,9 @@ class QFunctionNetwork(QFunction):
             else:
                 for target_param, q_param in zip(self.target_network.parameters(), self.q_network.parameters()):
                     target_param.data.copy_(q_param.data)
+            
+            # Disable gradient computation to get speed boost.
+            self.target_network.requires_grad_(False)
         else:
             self.target_network = self.q_network
         

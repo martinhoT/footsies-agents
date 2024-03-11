@@ -3,7 +3,6 @@ import gymnasium
 from torch import nn
 from agents.torch_utils import create_layered_network
 from typing import Any
-from collections import defaultdict
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -162,7 +161,7 @@ class DIAYNWrapper(gymnasium.Wrapper):
         env: gymnasium.Env,
         diayn: DIAYN,
         log_dir: str = None,
-        log_frequency: int = 1000,
+        log_interval: int = 1000,
     ):
         """
         Wrapper on a Gymnasium environment to incorporate the DIAYN algorithm.
@@ -172,7 +171,7 @@ class DIAYNWrapper(gymnasium.Wrapper):
         - `env`: the environment to wrap
         - `diayn`: the DIAYN instance to use
         - `log_dir`: the directory where to save the logs of the discriminator's training using Tensorboard. If `None`, then no logs are saved
-        - `log_frequency`: the frequency with which to perform logging, in number of environment steps
+        - `log_interval`: the frequency with which to perform logging, in number of environment steps
         """
         super().__init__(env)
 
@@ -183,14 +182,14 @@ class DIAYNWrapper(gymnasium.Wrapper):
 
         # Logging
         self.summary_writer = SummaryWriter(log_dir=log_dir) if log_dir is not None else None
-        self.log_frequency = log_frequency
+        self.log_interval = log_interval
         self.current_step = 0
 
         # Tracking exponentially weighted averages
         self._discriminator_entropy_avg = 0.0
         self._discriminator_loss_avg = 0.0
         self._skill_rewards_avg = {skill: 0.0 for skill in range(self.diayn.skill_dim)}
-        self._avg_factor = 1 - 1 / log_frequency
+        self._avg_factor = 1 - 1 / log_interval
 
     def reset(self, *args, **kwargs) -> tuple[torch.Tensor, dict[str, Any]]:
         skill = self.diayn.sample_skill_uniform()
@@ -213,7 +212,7 @@ class DIAYNWrapper(gymnasium.Wrapper):
             self._skill_rewards_avg[self.diayn.current_skill_id] = (self._avg_factor) * self._skill_rewards_avg[self.diayn.current_skill_id] + (1 - self._avg_factor) * reward
             self.current_step += 1
             
-            if self.current_step % self.log_frequency == 0:
+            if self.current_step % self.log_interval == 0:
                 self.summary_writer.add_scalar(
                     "DIAYN/Discriminator entropy",
                     self._discriminator_entropy_avg,

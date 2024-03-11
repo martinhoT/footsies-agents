@@ -302,7 +302,9 @@ class A2CQLearner(A2CLearnerBase):
         # Update the actor network
         self.actor_optimizer.zero_grad()
 
-        actor_score = (1 - self.actor_entropy_loss_coef) * self.cumulative_discount * delta * action_distribution.log_prob(action_tensor) + self.actor_entropy_loss_coef * action_distribution.entropy()
+        actor_entropy_score = action_distribution.entropy()
+        actor_delta_score = self.cumulative_discount * delta * action_distribution.log_prob(action_tensor)
+        actor_score = (1 - self.actor_entropy_loss_coef) * actor_delta_score + self.actor_entropy_loss_coef * actor_entropy_score
         actor_score.backward()
 
         self.actor_optimizer.step()
@@ -408,7 +410,7 @@ class A2CQLearner(A2CLearnerBase):
 
     @property
     def actor(self):
-        return self.actor
+        return self._actor
     
     @property
     def critic(self):

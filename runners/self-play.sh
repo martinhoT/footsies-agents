@@ -4,9 +4,9 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 
 $agent_script \
     --footsies-self-play \
-    --footsies-self-play-snapshot-freq 1000 \
-    --footsies-self-play-max-snapshots 100 \
-    --footsies-self-play-mix-bot 50 \
-    --footsies-self-play-port 11001 \
+    --footsies-self-play-max-snapshots 10 \
+    --footsies-self-play-snapshot-interval 2000 \
+    --footsies-self-play-switch-interval 100 \
+    --footsies-self-play-mix-bot 1 \
     --wrapper-time-limit 1000 \
     "$@"

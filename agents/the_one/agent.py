@@ -19,8 +19,9 @@ class FootsiesAgent(FootsiesAgentTorch):
     def __init__(
         self,
         # Dimensions
-        observation_space_size: int,
-        action_space_size: int,
+        obs_dim: int,
+        action_dim: int,
+        opponent_action_dim: int,
         # Modules
         representation: RepresentationModule,
         a2c: A2CAgent,
@@ -38,11 +39,6 @@ class FootsiesAgent(FootsiesAgentTorch):
         if not over_simple_actions:
             raise NotImplementedError("non-simple actions are not yet supported")
         
-        # Initialize necessary values according to passed arguments
-        obs_dim = observation_space_size
-        action_dim = ActionMap.n_simple() if over_simple_actions else action_space_size
-        opponent_action_dim = ActionMap.n_simple() if over_simple_actions else action_space_size
-
         # Store required values
         #  Dimensions
         self.obs_dim = obs_dim

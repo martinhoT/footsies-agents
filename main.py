@@ -130,6 +130,7 @@ def train(
 
             terminated = False
             truncated = False
+            total_reward = 0.0
             while not (terminated or truncated):
                 action = agent.act(obs, info)
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -138,10 +139,11 @@ def train(
                     reward = penalize_truncation
                 
                 agent.update(obs, reward, terminated, truncated, info)
+                total_reward += reward
 
             # Set a new opponent from the opponent pool
             if self_play_manager is not None:
-                should_change = self_play_manager.update_at_episode()
+                should_change = self_play_manager.update_at_episode(round(total_reward))
                 if should_change:
                     env.unwrapped.set_opponent(self_play_manager.current_opponent)
             
@@ -198,7 +200,7 @@ def create_env(args: EnvArgs) -> Env:
                 discriminator_hidden_layer_activation=args.diayn_kwargs["discriminator_hidden_layer_activation"],
             ),
             log_dir=args.diayn_kwargs["log_dir"],
-            log_frequency=args.diayn_kwargs["log_frequency"],
+            log_interval=args.diayn_kwargs["log_frequency"],
         )
 
     return env
@@ -342,9 +344,13 @@ if __name__ == "__main__":
     else:
         self_play_manager = SelfPlayManager(
             snapshot_method=(lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env)),
-            snapshot_frequency=args.self_play.snapshot_freq,
             max_snapshots=args.self_play.max_snapshots,
+            snapshot_interval=args.self_play.snapshot_interval,
+            switch_interval=args.self_play.switch_interval,
             mix_bot=args.self_play.mix_bot,
+            log_elo=True,
+            log_dir=log_dir,
+            log_interval=1,
         ) if args.self_play.enabled else None
 
         train_kwargs = {

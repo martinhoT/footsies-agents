@@ -13,14 +13,15 @@ CONSIDER_OPPONENT_ACTION = True
 
 def model_init(observation_space_size: int, action_space_size: int, **kwargs) -> tuple[TheOneAgent, dict[str, list]]:
     obs_dim = observation_space_size
-    action_dim = ActionMap.n_simple()
+    action_dim = ActionMap.n_simple() - 2
+    opponent_action_dim = ActionMap.n_simple()
 
     actor = ActorNetwork(
         obs_dim=obs_dim,
         action_dim=action_dim,
         hidden_layer_sizes=[64, 64],
         hidden_layer_activation=nn.LeakyReLU,
-        opponent_action_dim=action_dim if CONSIDER_OPPONENT_ACTION else None,
+        opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
     )
 
     critic_network = QNetwork(
@@ -32,7 +33,7 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         # TODO: put to true after making sure that including the target network avoids divergence
         is_footsies=False,
         use_dense_reward=True,
-        opponent_action_dim=action_dim if CONSIDER_OPPONENT_ACTION else None,
+        opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
     )
 
     target_network = deepcopy(critic_network)
@@ -40,7 +41,7 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
     critic = QFunctionNetwork(
         q_network=critic_network,
         action_dim=action_dim,
-        opponent_action_dim=action_dim,
+        opponent_action_dim=opponent_action_dim,
         discount=0.99,
         learning_rate=1e-2,
         target_network=target_network,
@@ -59,7 +60,7 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
 
     a2c = A2CAgent(
         learner=learner,
-        opponent_action_dim=action_dim if CONSIDER_OPPONENT_ACTION else None,
+        opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
         footsies=True,
         use_opponents_perspective=False,
     )
@@ -67,7 +68,7 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
     agent = TheOneAgent(
         obs_dim=obs_dim,
         action_dim=action_dim,
-        opponent_action_dim=action_dim if CONSIDER_OPPONENT_ACTION else None,
+        opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
         representation=None,
         a2c=a2c,
         opponent_model=None,

@@ -55,8 +55,9 @@ class EnvArgs:
 @dataclass
 class SelfPlayArgs:
     enabled: bool
-    snapshot_freq: int
     max_snapshots: int
+    snapshot_interval: int
+    switch_interval: int
     mix_bot: int
 
 
@@ -198,22 +199,28 @@ def parse_args() -> MainArgs:
         help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper",
     )
     parser.add_argument(
-        "--footsies-self-play-snapshot-freq",
-        type=int,
-        default=1000,
-        help="the frequency with which to take snapshots of the current agent for the opponent pool, in number of episodes",
-    )
-    parser.add_argument(
         "--footsies-self-play-max-snapshots",
         type=int,
-        default=100,
+        default=10,
         help="maximum number of snapshots to hold at once in the opponent pool",
+    )
+    parser.add_argument(
+        "--footsies-self-play-snapshot-interval",
+        type=int,
+        default=2000,
+        help="the interval between snapshots of the current policy for the opponent pool, in number of episodes",
+    )
+    parser.add_argument(
+        "--footsies-self-play-switch-interval",
+        type=int,
+        default=100,
+        help="the interval between opponent switched, in number of episodes"
     )
     parser.add_argument(
         "--footsies-self-play-mix-bot",
         type=int,
-        default=None,
-        help="the frequency, in number of episodes, with which the opponent during self-play will be the in-game bot",
+        default=1,
+        help="how many opponents will the in-game opponent count as, when sampling from the opponent pool. In-game bot won't be sampled if 0",
     )
     parser.add_argument(
         "--footsies-self-play-port",
@@ -431,8 +438,9 @@ def parse_args() -> MainArgs:
         ),
         self_play=SelfPlayArgs(
             enabled=will_footsies_self_play,
-            snapshot_freq=args.footsies_self_play_snapshot_freq,
             max_snapshots=args.footsies_self_play_max_snapshots,
+            snapshot_interval=args.footsies_self_play_snapshot_interval,
+            switch_interval=args.footsies_self_play_switch_interval,
             mix_bot=args.footsies_self_play_mix_bot,
         )
     )

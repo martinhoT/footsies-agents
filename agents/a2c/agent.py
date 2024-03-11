@@ -18,7 +18,7 @@ class FootsiesAgent(FootsiesAgentTorch):
     def __init__(
         self,
         learner: A2CLearnerBase,
-        action_space_size: int,
+        opponent_action_dim: int,
         footsies: bool = True,
         use_opponents_perspective: bool = False,
     ):
@@ -28,7 +28,7 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         Parameters
         ----------
-        - `action_space_size`: the size of the action space
+        - `opponent_action_dim`: the number of opponent actions
         - `learner`: the A2C algorithm class to use. If `None`, one will be created
         - `footsies`: whether to consider the FOOTSIES environment is being used. If `False`, the agent will not do any special treatment
         - `use_opponents_perspective`: whether to use the opponent's perspective for learning.
@@ -38,7 +38,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         if use_opponents_perspective:
             raise NotImplementedError("using the opponent's perspective for learning is not supported, mainly because it has not been figured out if it's valid or not")
 
-        self.action_space_size = action_space_size
+        self.opponent_action_dim = opponent_action_dim
         self.footsies = footsies
         self.use_opponents_perspective = use_opponents_perspective
 
@@ -73,7 +73,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             return self.current_action
 
         if predicted_opponent_action is None:
-            predicted_opponent_action = random.randint(0, self.action_space_size - 1)
+            predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
 
         if self.current_action is not None:
             try:
