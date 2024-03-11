@@ -229,6 +229,17 @@ class DebugStoreRecent(nn.Module):
         return x
 
 
+class ToMatrix(nn.Module):
+    def __init__(self, rows: int, cols: int):
+        """Reshaped the output vector to be a matrix"""
+        super().__init__()
+        self.rows = rows
+        self.cols = cols
+    
+    def forward(self, x: torch.Tensor):
+        return x.view(-1, self.rows, self.cols)
+
+
 class AggregateModule(nn.Module):
     def __init__(self, modules: dict[str, nn.Module]):
         """

@@ -204,7 +204,7 @@ def create_env(args: EnvArgs) -> Env:
     return env
 
 
-def setup_logger(agent_name: str, level: int = logging.DEBUG, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
+def setup_logger(agent_name: str, level: int = logging.INFO, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
     from logging.handlers import RotatingFileHandler
     from sys import stdout
 

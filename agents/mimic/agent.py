@@ -64,6 +64,7 @@ class PlayerModel:
         n_moves: int,
         obs_mask: torch.Tensor = None,
         mini_batch_size: int = 1,
+        player_model_network: PlayerModelNetwork = None,
         use_sigmoid_output: bool = False,
         input_clip: bool = False,
         input_clip_leaky_coef: float = 0,
@@ -112,12 +113,8 @@ class PlayerModel:
             hidden_layer_activation=hidden_layer_activation,
         )
 
-        # Mean squared error
-        if self.use_sigmoid_output:
-            self.loss_function = lambda predicted, target: torch.mean((predicted - target)**2, dim=1)
         # Cross entropy loss
-        else:
-            self.loss_function = lambda predicted, target: -torch.sum(torch.log2(predicted) * target, dim=1)
+        self.loss_function = lambda predicted, target: -torch.sum(torch.log2(predicted) * target, dim=1)
 
         self.optimizer = torch.optim.Adam(params=self.network.parameters(), lr=learning_rate)
 
@@ -210,10 +207,9 @@ class PlayerModel:
         self,
         obs: torch.Tensor,
         deterministic: bool = False,
-        snap_to_fraction_of: int = 10,
     ) -> "any":
         with torch.no_grad():
-            probs = self.probability_distribution(obs, snap_to_fraction_of)
+            probs = self.probability_distribution(obs)
 
             if deterministic:
                 return torch.argmax(probs, axis=1)
@@ -243,23 +239,8 @@ class PlayerModel:
                     ) from e
 
     # TODO: if over primitive actions, the model is prone to having great uncertainty (why, past me?)
-    def probability_distribution(
-        self, obs: torch.Tensor, snap_to_fraction_of: int = 10
-    ):
-        with torch.no_grad():
-            out = self.network(obs)
-            if self.use_sigmoid_output:
-                snapped = torch.round(snap_to_fraction_of * out) / snap_to_fraction_of
-                if torch.all(snapped == 0):
-                    LOGGER.warning("Oops, one distribution had all 0s (%s)! Will use uniform distribution", out)
-                    probs = torch.ones(snapped.shape) / snapped.shape[1]
-                else:
-                    probs = snapped / torch.sum(snapped, axis=1, keepdim=True)
-            
-            else:
-                probs = out
-
-        return probs
+    def probability_distribution(self, obs: torch.Tensor):
+        return self.network(obs)
 
     def learnable_layers(self) -> Generator[nn.Module, None, None]:
         for i, layer in enumerate(self.network.layers):

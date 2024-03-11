@@ -9,6 +9,7 @@ from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel, AbstractOpponentModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.mimic.agent import PlayerModel
 from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
 from data import FootsiesDataset
 
@@ -23,12 +24,11 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Modules
         representation: RepresentationModule,
         a2c: A2CAgent,
-        opponent_model: AbstractOpponentModel,
+        opponent_model: PlayerModel = None,
         game_model: AbstractGameModel = None,
         reaction_time_emulator: ReactionTimeEmulator = None,
         # Modifiers
         over_simple_actions: bool = False,
-        opponent_model_learn: bool = False,
         opponent_model_frameskip: bool = True,
         # Learning
         game_model_learning_rate: float = 1e-4,
@@ -55,21 +55,22 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.opponent_model = opponent_model
         self.reaction_time_emulator = reaction_time_emulator
         #  Modifiers
-        self.over_primitive_actions = over_simple_actions
-        self.opponent_model_learn = opponent_model_learn
+        self.over_simple_actions = over_simple_actions
         self.opponent_model_frameskip = opponent_model_frameskip
 
         # To report in the `model` property
         self.full_model = FullModel(
             game_model=self.game_model,
             opponent_model=self.opponent_model,
-            actor=self.actor,
-            critic=self.critic,
+            actor=self.a2c.actor,
+            critic=self.a2c.critic,
         )
 
         # Optimizers. The actor-critic module already takes care of its own optimizers.
-        self.game_model_optimizer = torch.optim.SGD(self.game_model.parameters(), lr=game_model_learning_rate)
-        self.opponent_model_optimizer = torch.optim.SGD(self.opponent_model.parameters(), lr=opponent_model_learning_rate)
+        if self.game_model is not None:
+            self.game_model_optimizer = torch.optim.SGD(self.game_model.parameters(), lr=game_model_learning_rate)
+        if self.opponent_model is not None:
+            self.opponent_model_optimizer = torch.optim.SGD(self.opponent_model.parameters(), lr=opponent_model_learning_rate)
 
         self.current_observation = None
         self.current_representation = None
@@ -148,12 +149,17 @@ class FootsiesAgent(FootsiesAgentTorch):
     # It's in this function that the current observation and representation variables are updated
     def act(self, obs: torch.Tensor, info: dict) -> int:
         self.current_observation = obs
-        action = self.a2c.act(self.current_observation, info, predicted_opponent_action=None)
+        if self.opponent_model is not None:
+            predicted_opponent_action = self.opponent_model.predict(obs)
+        else:
+            predicted_opponent_action = None
+
+        action = self.a2c.act(self.current_observation, info, predicted_opponent_action=predicted_opponent_action)
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
         # The actions are from info dictionary at the next step, but that's because it contains which action was performed in the *previous* step
-        if not self.over_primitive_actions:
+        if self.over_simple_actions:
             agent_action = info["p1_move"]
             opponent_action = info["p2_move"]
             agent_action = ActionMap.simple_from_move_index(agent_action)
@@ -165,32 +171,16 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         # Update the different models.
         self.a2c.update(next_obs, reward, terminated, truncated, info)
-        self._update_game_model(self.current_observation, agent_action_onehot, opponent_action_onehot, next_obs)
-        self._update_opponent_model(self.current_observation, next_obs, opponent_action_onehot)
-
-    # NOTE: the opponent model is also updating the representation function, but it shouldn't
-    def _update_opponent_model(self, obs: torch.Tensor, next_obs: torch.Tensor, opponent_action_onehot: torch.Tensor):
-        """Calculate the opponent model loss, backpropagate and optimize"""
-        if self.opponent_model_learn:
-            # NOTE: this assumes learning is being done online, hence why we pick the first row only
-            previous_opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[torch.argmax(obs[0, 17:32]).item()]
-            previous_opponent_move_progress = obs[0, 33]
-            current_opponent_move_progress = next_obs[0, 33]
-
-            if not self.opponent_model_frameskip or ActionMap.is_state_actionable(previous_opponent_move_state, previous_opponent_move_progress, current_opponent_move_progress):
-                self.opponent_model_optimizer.zero_grad()
-
-                opponent_action_probabilities = self.opponent_model(obs)
-                opponent_model_loss = torch.nn.functional.cross_entropy(opponent_action_probabilities, opponent_action_onehot)
-                opponent_model_loss.backward(retain_graph=True)
-
-                self.opponent_model_optimizer.step()
-
-                self.cumulative_loss_opponent_model += opponent_model_loss.item()
-                self.cumulative_loss_opponent_model_n += 1
+        if self.game_model is not None:
+            self._update_game_model(self.current_observation, agent_action_onehot, opponent_action_onehot, next_obs)
+        if self.opponent_model is not None:
+            self.opponent_model.update(self.current_observation, opponent_action_onehot)
 
     def _update_game_model(self, obs: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action_onehot: torch.Tensor, next_obs: torch.Tensor):
         """Calculate the game model loss, backpropagate and optimize"""
+        if self.game_model is None:
+            raise ValueError("agent wasn't instantiated with a game model, can't learn it")
+        
         self.game_model_optimizer.zero_grad()
 
         with torch.no_grad():

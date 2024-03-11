@@ -2,7 +2,7 @@ import torch
 import logging
 from torch import nn
 from torch.distributions import Categorical
-from agents.torch_utils import create_layered_network
+from agents.torch_utils import create_layered_network, ToMatrix
 from agents.ql.ql import QFunction, QFunctionNetwork
 from abc import ABC, abstractmethod
 
@@ -39,11 +39,18 @@ class ActorNetwork(nn.Module):
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.Identity,
         representation: nn.Module = None,
+        opponent_action_dim: int = None,
     ):
         super().__init__()
+        consider_opponent_action = opponent_action_dim is not None
+        
+        self._consider_opponent_action = consider_opponent_action
 
-        self.actor_layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
-        self.actor_layers.append(nn.Softmax(dim=1))
+        output_dim = action_dim * (opponent_action_dim if consider_opponent_action else 0)
+        self.actor_layers = create_layered_network(obs_dim, output_dim, hidden_layer_sizes, hidden_layer_activation)
+        if consider_opponent_action:
+            self.actor_layers.append(ToMatrix(opponent_action_dim, action_dim))
+        self.actor_layers.append(nn.Softmax(dim=-1))
         self.representation = nn.Identity() if representation is None else representation
         self.action_dim = action_dim
 
@@ -54,6 +61,10 @@ class ActorNetwork(nn.Module):
     
     def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
         return self.actor_layers(rep)
+    
+    @property
+    def consider_opponent_action(self) -> bool:
+        return self._consider_opponent_action
 
 
 class A2CLearnerBase(ABC):
@@ -228,22 +239,33 @@ class A2CQLearner(A2CLearnerBase):
         actor_entropy_loss_coef: float = 0.0,
         actor_learning_rate: float = 1e-4,
         policy_cumulative_discount: bool = True,
-        consider_opponent_action: bool = False,
+        update_style: str = "expected-sarsa",
     ):
         """Implementation of a custom actor-critic algorithm with a Q-value table for the critic"""
+        if update_style not in ("sarsa", "expected-sarsa", "q-learning"):
+            raise ValueError("'update_style' must be one of 'sarsa', 'expected-sarsa', or 'q-learning'")
+        
         self._actor = actor
         self._critic = critic
         self.discount = critic.discount
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
         self.policy_cumulative_discount = policy_cumulative_discount
-        self.consider_opponent_action = consider_opponent_action
+        self.consider_opponent_action = actor.consider_opponent_action
+        # TODO: use
+        self.update_style = update_style
+
+        self.action_dim = self._critic.action_dim
+        self.opponent_action_dim = self._critic.opponent_action_dim
 
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients' sign unchanged)
         self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), lr=actor_learning_rate, maximize=True)
 
+        self.action_probabilities = None
         self.action_distribution = None
         self.action = None
         self.postponed_learn: dict = None
+        self.frameskipped_critic_updates = []
+        self.frameskipped_critic_updates_cumulative_reward = 0.0
 
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
@@ -254,26 +276,18 @@ class A2CQLearner(A2CLearnerBase):
 
     def compute_action_probabilities(self, obs: torch.Tensor, next_opponent_action: int) -> torch.Tensor:
         """Get the action probability distribution for the given observation and predicted opponent action."""
-        obs = self._append_opponent_action_if_needed(obs, next_opponent_action)
-        action_probabilities = self._actor(obs)
+        if next_opponent_action is None:
+            next_opponent_action = slice(None)
+
+        action_probabilities = self._actor(obs)[:, next_opponent_action, :]
         return action_probabilities
 
     def sample_action(self, obs: torch.Tensor, *, next_opponent_action: int, **kwargs) -> int:
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
-        action_probabilities = self.compute_action_probabilities(obs, next_opponent_action)
-        self.action_distribution = Categorical(probs=action_probabilities)
+        self.action_probabilities = self.compute_action_probabilities(obs, next_opponent_action)
+        self.action_distribution = Categorical(probs=self.action_probabilities)
         self.action = self.action_distribution.sample()
         return self.action.item()
-
-    def _append_opponent_action_if_needed(self, obs: torch.Tensor, opponent_action: int) -> torch.Tensor:
-        if not self.consider_opponent_action:
-            return obs
-        
-        if self.consider_opponent_action and opponent_action is None:
-                raise ValueError("a prediction for the opponent's next action must be provided when choosing how to act, since we are considering opponent actions")
-
-        opponent_action_onehot = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self._critic.opponent_action_dim)
-        return torch.hstack((obs, opponent_action_onehot))
 
     def _update_actor(self, obs: torch.Tensor, agent_action: int, opponent_action: int):
         # Compute the TD delta
@@ -293,45 +307,67 @@ class A2CQLearner(A2CLearnerBase):
 
         self.actor_optimizer.step()
 
-        if LOGGER.isEnabledFor(logging.INFO):
+        if LOGGER.isEnabledFor(logging.DEBUG):
             new_action_probabilities = self.compute_action_probabilities(obs, opponent_action)
             new_action_probabilities = new_action_probabilities.detach()
             new_action_distribution = Categorical(probs=new_action_probabilities)
-            LOGGER.info("Actor was updated using delta %s, going from a distribution of %s with entropy %s to a distribution of %s with entropy %s", delta, action_probabilities, action_distribution.entropy().item(), new_action_probabilities, new_action_distribution.entropy().item())
+            LOGGER.debug("Actor was updated using delta %s for action %s, going from a distribution of %s with entropy %s to a distribution of %s with entropy %s", delta, agent_action, action_probabilities, action_distribution.entropy().item(), new_action_probabilities, new_action_distribution.entropy().item())
 
     def compute_advantage(self, obs: torch.Tensor, agent_action: int, opponent_action: int) -> float:
         """Compute the TD delta (a.k.a. advantage)."""
         # If the opponent's action doesn't matter, since it's ineffectual, then compute the advantage considering all possible opponent actions.
         # NOTE: another possibility would be to perform random sampling? But then it would probably take a long time before convergence...
         if opponent_action is None:
-            obs_with_opp = torch.vstack(self._append_opponent_action_if_needed(obs, o) for o in range(self._critic.opponent_action_dim))
-        else:
-            obs_with_opp = self._append_opponent_action_if_needed(obs, opponent_action)
+            opponent_action = slice(None)
 
-        # NOTE: since the tensors are always on CPU, we don't need to call .numpy() with force=True
         # A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi.T Q(s, o, .)
-        q_soa = self._critic.q(obs.numpy().squeeze(), agent_action, opponent_action)
-        pi = self._actor(obs_with_opp).detach().numpy()
-        q_so = self._critic.q(obs.numpy().squeeze(), opponent_action=opponent_action)
-        return q_soa - (pi @ q_so).item()
+        q_soa = self._critic.q(obs, agent_action, opponent_action).detach()
+        pi = self._actor(obs)[:, opponent_action, :].detach()
+        q_so = self._critic.q(obs, opponent_action=opponent_action).detach()
+        return q_soa - (pi @ q_so.T).item()
     
-    def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, obs_agent_action: int, obs_opponent_action: int, next_obs_opponent_action: int):
-        """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the opponent's actual action on the next observation `next_obs`."""
-        # Update the Q-table. Save the TD error in case the caller wants to check it
-        self.td_error = self._critic.update(obs.numpy().squeeze(), obs_agent_action, reward, next_obs.numpy().squeeze(), terminated, obs_opponent_action, next_obs_opponent_action)
+    def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, obs_agent_action: int, obs_opponent_action: int, next_obs_agent_action: int, next_obs_opponent_action: int):
+        """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the agent's and opponent's actual action on the next observation `next_obs`."""
+        # Update the Q-table. Save the TD error in case the caller wants to check it. The TD error is None if no critic update was performed
+        self.td_error = None
+        if obs_agent_action is not None:
+            next_obs_action_probabilities = self.compute_action_probabilities(next_obs, next_opponent_action=None).detach().squeeze().T
+        else:
+            next_obs_action_probabilities = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
+        self.frameskipped_critic_updates.append((obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_action_probabilities))
+        if next_obs_agent_action is not None:
+            # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
+            previous_discount = self._critic.discount
+            self._critic.discount = 1.0
+            total_td_error = torch.tensor(0.0)
+
+            # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
+            for frameskipped_update in reversed(self.frameskipped_critic_updates):
+                obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_action_probabilities_ = frameskipped_update
+                total_td_error = total_td_error + self._critic.update(
+                    obs=obs_,
+                    reward=reward_,
+                    next_obs=next_obs_,
+                    terminated=terminated_,
+                    agent_action=obs_agent_action_,
+                    opponent_action=obs_opponent_action_,
+                    next_opponent_action=None, # We ignore what the opponent actually did, so that we would not need importance sampling. This will assume that the opponent behaves uniformly randomly
+                    next_agent_policy=next_obs_action_probabilities_,
+                )
+            
+            self.td_error = total_td_error.mean().item()
+            self._critic.discount = previous_discount
+            self.frameskipped_critic_updates.clear()
 
         # If the agent action is None then that means the agent couldn't act, so it doesn't make sense to update the actor
         if obs_agent_action is None:
-            # TODO: save in a buffer for later update
-            # self.agent_action_buffer.append(obs, next_obs, reward)
-            
             pass
         # If the agent did perform an action, then update the actor
         else:
             # If the opponent is being frameskipped, then we consider them as doing any of their actions, and update accordingly
             if obs_opponent_action is None:
-                # TODO: how about considering it to be 0? (i.e. STAND, the action of doing nothing)
-                for opponent_action in range(self._critic.opponent_action_dim):
+                # TODO: how about considering it to be 0? (i.e. STAND, the action of doing nothing) The problem is that it would be dependent on the opponent model correctly predicting STAND, which is probably not likely ;_;
+                for opponent_action in range(self.opponent_action_dim):
                     self._update_actor(obs, obs_agent_action, opponent_action)
             # We have to recalculate the policy's action distribution since the opponent action is likely different
             else:
@@ -343,7 +379,6 @@ class A2CQLearner(A2CLearnerBase):
         if terminated or truncated:
             self.cumulative_discount = 1.0
 
-    # TODO: can we use importance sampling weights to make the update of the Q-value more efficient by not explicitly considering just one action from the opponent but all of them? Of course, we need access to the opponent's policy, which we do during training supposedly
     def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, *, obs_agent_action: int, obs_opponent_action: int, **kwargs):
         """
         Update the actor and critic in this environment step. Should be preceded by an environment interaction with `sample_action()`.
@@ -356,7 +391,7 @@ class A2CQLearner(A2CLearnerBase):
         - `obs_opponent_action`: which action the opponent actually performed. May not match what was used at the time of sampling
         """
         if self.postponed_learn is not None:
-            self._learn_complete(**self.postponed_learn, next_obs_opponent_action=obs_opponent_action)
+            self._learn_complete(**self.postponed_learn, next_obs_agent_action=obs_agent_action, next_obs_opponent_action=obs_opponent_action)
             
             if terminated or truncated:
                 self.postponed_learn = None

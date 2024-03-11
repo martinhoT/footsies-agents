@@ -2,9 +2,11 @@ import os
 import numpy as np
 import torch
 import logging
+import copy
 from torch import nn
 from abc import ABC, abstractmethod
 from agents.torch_utils import create_layered_network
+from agents.torch_utils import ToMatrix
 
 LOGGER = logging.getLogger("main.ql")
 
@@ -17,7 +19,7 @@ class QFunction(ABC):
         """Update the Q-value for the given state-action pair considering the provided TD error."""
 
     @abstractmethod
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> torch.Tensor:
         """Get the Q-value for the given action and observation. If an action is `None`, then return Q-values considering all actions."""
 
     @abstractmethod
@@ -35,8 +37,18 @@ class QFunction(ABC):
 
     @property
     @abstractmethod
+    def opponent_action_dim(self) -> int:
+        """The number of possible actions from the opponent."""
+
+    @property
+    @abstractmethod
     def discount(self) -> float:
         """The discount factor."""
+
+    @discount.setter
+    @abstractmethod
+    def discount(self):
+        """Change the discount factor."""
 
     @property
     @abstractmethod
@@ -46,75 +58,91 @@ class QFunction(ABC):
     def update(
         self,
         obs: torch.Tensor,
-        action: int,
         reward: float,
         next_obs: torch.Tensor,
         terminated: bool,
-        obs_opponent_action: int = None,
-        next_obs_opponent_action: int = None,
-        next_obs_agent_action: int = None,
-        policy: torch.Tensor = None,
-        opponent_policy: torch.Tensor = None,
-    ) -> float | torch.Tensor:
+        agent_action: int = None,
+        opponent_action: int = None,
+        next_agent_action: int = None,
+        next_opponent_action: int = None,
+        next_agent_policy: torch.Tensor = None,
+        next_opponent_policy: torch.Tensor = None,
+    ) -> torch.Tensor:
         """
         Perform a Q-value update. Returns the TD error.
         
-        Special cases
-        -------------
-        - If `opponent_action` is `None` and considering the opponent, then will perform an update for all opponent actions. This is useful for frame skipping;
-        - If `next_obs_agent_action` is not `None`, will consider the next Q-value for that action. This corresponds to SARSA;
-        - If `policy` is not `None`, will consider the next Q-values weighted by the current policy. This corresponds to Expected SARSA;
-        - If `opponent_policy` is not `None` and `next_obs_opponent_action` is `None`, importance sampling will be performed on the next Q-values considering how the opponent's policy differs from a uniform random opponent.
-
-        In the absence of `next_obs_agent_action` and `policy`, this method performs a Q-learning update.
+        Parameters
+        ----------
+        - `obs`: the current observation
+        - `reward`: the reward obtained after taking the action `agent_action` and the opponent taking the action `opponent_action`
+        - `next_obs`: the next observation
+        - `terminated`: whether the episode has terminated normally (i.e. `next_obs` is a terminal observation)
+        - `agent_action`: the action taken by the agent. If `None`, will perform frameskipping, considering all actions
+        - `opponent_action`: the action taken by the opponent. If `None`, will perform frameskipping, considering all actions
+        - `next_agent_action`: the action taken by the agent in the next step. If not `None`, will consider the next Q-value for that action. This corresponds to SARSA
+        - `next_opponent_action`: the action taken by the opponent in the next step. If not `None`, will consider the next Q-value for that opponent action.
+        WARNING: probably requires importance sampling, so it should not be used
+        - `next_agent_policy`: the agent's policy evaluated at the next observation. If not `None`, will consider the next Q-values weighted by the current policy.
+        This corresponds to Expected SARSA, or Q-learning if `agent_policy` happens to be greedy.
+        Should be a matrix with agent actions in the rows and opponent actions in the columns
+        - `next_opponent_policy`: the opponent's policy evaluated at the next observation. Should be a column vector
+        If not `None`, will weight the next Q-values according to how likely they are to happen under the opponent's policy.
+        If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a unifrom random policy in the next observation
         """
-        if next_obs_agent_action is not None and policy is not None:
-            raise ValueError("'next_obs_agent_action' and 'policy' are mutually exclusive, as they dictate which kind of Q-value update to perform, but both were not None")
-    
-        next_q_values = self.q(next_obs, opponent_action=next_obs_opponent_action)
-        if policy is not None:
-            # We perform a weighted average of the next Q-values, corresponding to Expected SARSA.
-            nxt = next_q_values @ policy
-        elif next_obs_agent_action is not None:
-            # We consider the next Q-value for the action that the agent took in the next step, corresponding to SARSA.
-            nxt = next_q_values[:, next_obs_agent_action]
-        else:
-            # Performing the maximum over axis -1 is equivalent to performing the maximum over the last axis, which pertains to the axis of agent actions.
-            # This corresponds to Q-learning.
-            nxt = np.max(next_q_values, axis=-1, keepdims=True)
+        if terminated:
+            nxt_value = 0.0
         
-        
-        if next_obs_opponent_action is None:
-            # Importance sampling considering the opponent's behavior (policy).
-            if opponent_policy is not None:
-                nxt = self.discount * nxt @ (1 / (self.action_dim * opponent_policy))
-            # This is a degenerate case. We will just take the average of the next Q-values, which is the same as giving a uniform random policy for the opponent policy.
-            else:
-                nxt = np.mean(nxt)
         else:
-            # Importance sampling considering the opponent's behavior (policy).
-            if opponent_policy is not None:
-                nxt = self.action_dim * nxt[next_obs_opponent_action] / opponent_policy[next_obs_opponent_action]
-            # If the opponent's behavior is not considered, then we will simply use the action the opponent took in the next step.
-            else:
-                nxt = nxt[next_obs_opponent_action]
+            if next_agent_action is not None and next_agent_policy is not None:
+                raise ValueError("'next_agent_action' and 'next_agent_policy' are mutually exclusive, as they dictate which kind of Q-value update to perform, but both were not None")
             
-        if opponent_policy is not None and next_obs_opponent_action is None:
-            nxt = nxt
-        nxt
+            if next_opponent_action is not None and next_opponent_policy is not None:
+                raise ValueError("'next_opponent_action' and 'next_opponent_policy' are mutually exclusive, as they dictate which kind of Q-value update to perform, but both were not None")
+            
+            # Lazy formulation to save lines of code
+            if next_opponent_action is not None:
+                next_opponent_policy = nn.functional.one_hot(torch.tensor([next_opponent_action]), num_classes=self.action_dim).unsqueeze(1).float()
+                LOGGER.debug("Will consider a single action from the opponent in the update")
+            elif next_opponent_policy is None:
+                next_opponent_policy = torch.ones(self.action_dim).unsqueeze(1) / self.action_dim
+                LOGGER.debug("Will consider the opponent to be following a uniform random policy in the update")
+            else:
+                LOGGER.debug("Will consider a custom opponent's policy in the update")
+            if next_agent_action is not None:
+                next_agent_policy = nn.functional.one_hot(torch.tensor([next_agent_action]), num_classes=self.action_dim).unsqueeze(1).float()
+                LOGGER.debug("Will perform a SARSA update")
 
-        nxt_value = (self.discount * np.mean(nxt)) if not terminated else 0.0
-        cur_value = self.q(obs, action, opponent_action=obs_opponent_action).clone().detach()
+            # The target doesn't need gradients to flow through. We also squeeze, assuming only one observation is being considered in next_obs
+            next_qs = self.q(next_obs).detach().squeeze(dim=0)
+            # Perform SARSA-like update
+            if next_agent_policy is not None:
+                next_q = next_opponent_policy.T @ torch.diag(next_qs @ next_agent_policy).unsqueeze(1)
+                LOGGER.debug("Setup SARSA-like update")
+            # Perform Q-learning update
+            else:
+                next_q = next_opponent_policy @ np.max(next_qs, axis=-1, keepdims=True)
+                LOGGER.debug("Setup Q-learning update")
+
+            nxt_value = self.discount * next_q
+
         target = reward + nxt_value
-        td_error = (target - cur_value)
+        cur_value = self.q(obs, agent_action, opponent_action=opponent_action).detach()
+        td_error = target - cur_value
+
+        if torch.any(torch.isnan(td_error)):
+            LOGGER.critical("Q-values are NaN! Training probably got unstable due to improper targets or high learning rate")
 
         # Don't even bother updating.
         if torch.all(td_error == 0.0):
             return td_error
         
-        self._update_q_value(obs, target, action, obs_opponent_action)
+        self._update_q_value(obs, target, agent_action, opponent_action)
 
-        LOGGER.info(f"At an observation with agent action {action} and opponent action {obs_opponent_action} we had a Q-value of {cur_value}, now of {self.q(obs, action, opponent_action=obs_opponent_action)}, which was updated to {reward} + {nxt_value}")
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            new_value = self.q(obs, agent_action, opponent_action=opponent_action)
+            LOGGER.debug(f"At an observation with agent action %s and opponent action %s we had a Q-value of %s, now of %s, which was updated to %s + %s",
+                agent_action, opponent_action, cur_value, new_value, reward, nxt_value
+            )
 
         return td_error
 
@@ -189,7 +217,7 @@ class QFunctionTable(QFunction):
             raise ValueError(f"environment '{environment}' not supported")
 
         self._action_dim = action_dim
-        self.opponent_action_dim = opponent_action_dim
+        self._opponent_action_dim = opponent_action_dim
         self.learning_rate = learning_rate
         self._discount = discount
         self.table_as_matrix = table_as_matrix
@@ -216,8 +244,8 @@ class QFunctionTable(QFunction):
 
         if self.table_as_matrix:
             if self.considering_opponent:
-                self.table = np.zeros((self.obs_dim, self.opponent_action_dim, self.action_dim), dtype=np.float32)
-                self.update_frequency_table = np.zeros((self.obs_dim, self.opponent_action_dim, self.action_dim), dtype=np.int32)
+                self.table = np.zeros((self.obs_dim, self._opponent_action_dim, self.action_dim), dtype=np.float32)
+                self.update_frequency_table = np.zeros((self.obs_dim, self._opponent_action_dim, self.action_dim), dtype=np.int32)
             else:
                 self.table = np.zeros((self.obs_dim, self.action_dim), dtype=np.float32)
                 self.update_frequency_table = np.zeros((self.obs_dim, self.action_dim), dtype=np.int32)
@@ -225,7 +253,7 @@ class QFunctionTable(QFunction):
             if self.considering_opponent:
                 self.table = {}
                 self.update_frequency_table = {}
-                self.table_empty_value = np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.float32)
+                self.table_empty_value = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.float32)
             else:
                 self.table = {}
                 self.update_frequency_table = {}
@@ -288,8 +316,8 @@ class QFunctionTable(QFunction):
         else:
             if self.considering_opponent:
                 if obs_idx not in self.table:
-                    self.table[obs_idx] = np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.float32)
-                    self.update_frequency_table[obs_idx] = np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.int32)
+                    self.table[obs_idx] = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.float32)
+                    self.update_frequency_table[obs_idx] = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.int32)
                 self.table[obs_idx][opponent_action, action] += self.learning_rate * td_error
                 self.update_frequency_table[obs_idx][opponent_action, action] += 1
             else:
@@ -320,7 +348,7 @@ class QFunctionTable(QFunction):
         else:
             obs_idx = self._obs_idx(obs)
             if obs_idx not in self.update_frequency_table:
-                return np.zeros((self.opponent_action_dim, self.action_dim), dtype=np.int32) if self.considering_opponent else np.zeros(self.action_dim, dtype=np.int32)
+                return np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.int32) if self.considering_opponent else np.zeros(self.action_dim, dtype=np.int32)
             return self.update_frequency_table[obs_idx][:, :] if self.considering_opponent else self.update_frequency_table[obs_idx][:]
 
     def save(self, path: str):
@@ -337,7 +365,7 @@ class QFunctionTable(QFunction):
 
     @property
     def considering_opponent(self) -> bool:
-        return self.opponent_action_dim is not None
+        return self._opponent_action_dim is not None
 
     def sparsity(self) -> float:
         """Calculate how sparse the Q-table is (i.e. how many entries are 0)."""
@@ -359,8 +387,16 @@ class QFunctionTable(QFunction):
         return self._action_dim
 
     @property
+    def opponent_action_dim(self) -> int:
+        return self._opponent_action_dim
+
+    @property
     def discount(self) -> float:
         return self._discount
+    
+    @discount.setter
+    def discount(self, discount: float):
+        self._discount = discount
         
 
 class QNetwork(nn.Module):
@@ -371,22 +407,34 @@ class QNetwork(nn.Module):
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: nn.Module = nn.Identity,
         representation: nn.Module = None,
+        is_footsies: bool = False,
+        use_dense_reward: bool = True, # Dictates the range of possible output values
+        opponent_action_dim: int = None,
     ):
         super().__init__()
 
         self._obs_dim = obs_dim
         self._action_dim = action_dim
+        self._opponent_action_dim = opponent_action_dim
 
-        self.q_layers = create_layered_network(obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation)
+        self._output_multiplier = 2.0 if use_dense_reward else 1.0
+
+        output_dim = action_dim * (opponent_action_dim if opponent_action_dim is not None else 0)
+        self.q_layers = create_layered_network(obs_dim, output_dim, hidden_layer_sizes, hidden_layer_activation)
+        if opponent_action_dim is not None:
+            self.q_layers.append(ToMatrix(opponent_action_dim, action_dim))
+        if is_footsies:
+            self.q_layers.append(nn.Tanh())
         self.representation = nn.Identity() if representation is None else representation
     
     def forward(self, obs: torch.Tensor):
         rep = self.representation(obs)
-
-        return self.q_layers(rep)
+        qs = self.q_layers(rep)
+        return qs * self._output_multiplier
 
     def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
-        return self.q_layers(rep)
+        qs = self.q_layers(rep)
+        return qs * self._output_multiplier
 
     @property
     def obs_dim(self) -> int:
@@ -395,6 +443,10 @@ class QNetwork(nn.Module):
     @property
     def action_dim(self) -> int:
         return self._action_dim
+    
+    @property
+    def opponent_action_dim(self) -> int:
+        return self._opponent_action_dim
 
 
 class QFunctionNetwork(QFunction):
@@ -407,6 +459,9 @@ class QFunctionNetwork(QFunction):
         opponent_action_dim: int = None,
         discount: float = 1.0,
         learning_rate: float = 1e-2,
+        target_network: QNetwork = None,
+        target_network_blank: bool = False,
+        target_network_update_interval: int = 1000,
     ):
         """
         Instantiate a Q-value network.
@@ -420,62 +475,60 @@ class QFunctionNetwork(QFunction):
         and action-values will be of the form `Q(s, o, a)`
         - `discount`: the discount factor
         - `learning_rate`: the learning rate
+        - `target_network`: an extra, slower-changing, target network to stabilize learning. If `None`, it won't be used
+        - `target_network_blank`: if `True`, the target network will be a copy the Q-network, but with all parameters set to 0, otherwise it's just a copy
+        - `target_network_update_interval`: the interval between target network updates, in terms of update steps
         """
         self._action_dim = action_dim
         self._opponent_action_dim = opponent_action_dim
         self._discount = discount
+        self._use_target_network = target_network is not None
+        self._target_network_update_interval = target_network_update_interval
 
         self.q_network = q_network
         self.q_network_optimizer = torch.optim.SGD(self.q_network.parameters(), lr=learning_rate)
-
-    def _append_opponent_action(self, obs: torch.Tensor, opponent_action: int) -> torch.Tensor:
-        """Append the opponent's action to the observation."""
-        opponent_action_oh = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self._opponent_action_dim).float()
-        return torch.hstack((obs, opponent_action_oh))
+        if self._use_target_network:
+            # Make a copy of the Q-network, but with parameters set to 0 to remove any noise that the Q-network would pick up
+            self.target_network = target_network
+            if target_network_blank:
+                for param in self.target_network.parameters():
+                    param.data.zero_()
+            else:
+                for target_param, q_param in zip(self.target_network.parameters(), self.q_network.parameters()):
+                    target_param.data.copy_(q_param.data)
+        else:
+            self.target_network = self.q_network
+        
+        # Target network update tracker
+        self._current_update_step = 0
 
     def _update_q_value(self, obs: torch.Tensor, target: float, action: int = None, opponent_action: int = None):        
-        obs = self._transform_obs(obs)
-
         if action is None:
             action = slice(None)
+        if opponent_action is None:
+            opponent_action = slice(None)
 
         self.q_network_optimizer.zero_grad()
 
-        if opponent_action is None:
-            loss = 0.0
-
-            for o in range(self.action_dim):
-                obs_with_opp = self._append_opponent_action(obs, o)
-                predicted = self.q_network(obs_with_opp)
-                loss += torch.mean((target - predicted[0, action])**2)
-            loss.backward()
-        
-        else:
-            obs_with_opp = self._append_opponent_action(obs, opponent_action)
-            predicted = self.q_network(obs_with_opp)
-            loss = torch.mean((target - predicted[0, action])**2)
-            loss.backward()
+        predicted = self.q_network(obs)
+        loss = torch.mean((target - predicted[:, opponent_action, action])**2)
+        loss.backward()
 
         self.q_network_optimizer.step()
+
+        self._current_update_step += 1
+        if self._use_target_network and self._current_update_step >= self._target_network_update_interval:
+            for target_param, q_param in zip(self.target_network.parameters(), self.q_network.parameters()):
+                target_param.data.copy_(q_param.data)
+            self._current_update_step = 0
     
     def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
         if action is None:
             action = slice(None)
-
         if opponent_action is None:
-            q_values = []
-            for o in range(self.action_dim):
-                obs_with_opp = self._append_opponent_action(obs, o)
-                qs = self.q_network(obs_with_opp)[action]
-                q_values.append(qs)
+            opponent_action = slice(None)
 
-            q_values = np.vstack(q_values)
-
-        else:
-            obs_with_opp = self._append_opponent_action(obs, opponent_action)
-            q_values = self.q_network(obs_with_opp)[action]
-
-        return q_values
+        return self.target_network(obs)[:, opponent_action, action]
 
     def save(self, path: str):
         model_path = os.path.join(path, "qnetwork")
@@ -483,15 +536,26 @@ class QFunctionNetwork(QFunction):
     
     def load(self, path: str):
         model_path = os.path.join(path, "qnetwork")
-        self.q_network.load_state_dict(torch.load(model_path))
+        state_dict = torch.load(model_path)
+        self.q_network.load_state_dict(state_dict)
+        if self._use_target_network:
+            self.target_network.load_state_dict(state_dict)
 
     @property
     def action_dim(self) -> int:
         return self._action_dim
 
     @property
+    def opponent_action_dim(self) -> int:
+        return self._opponent_action_dim
+
+    @property
     def discount(self) -> float:
         return self._discount
+
+    @discount.setter
+    def discount(self, discount: float):
+        self._discount = discount
 
     @property
     def considering_opponent(self) -> bool:

@@ -20,6 +20,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         learner: A2CLearnerBase,
         action_space_size: int,
         footsies: bool = True,
+        use_opponents_perspective: bool = False,
     ):
         """
         Footsies agent using the A2C algorithm, potentially with some modifications.
@@ -30,9 +31,16 @@ class FootsiesAgent(FootsiesAgentTorch):
         - `action_space_size`: the size of the action space
         - `learner`: the A2C algorithm class to use. If `None`, one will be created
         - `footsies`: whether to consider the FOOTSIES environment is being used. If `False`, the agent will not do any special treatment
+        - `use_opponents_perspective`: whether to use the opponent's perspective for learning.
+        Only valid for FOOTSIES, since it's an environment with 2 players on the same conditions (characters, more specifically)
         """
+        # NOTE: we *could* use the opponent's perspective if we use the opponent model as the policy, but that makes this whole thing more iffy than it already is
+        if use_opponents_perspective:
+            raise NotImplementedError("using the opponent's perspective for learning is not supported, mainly because it has not been figured out if it's valid or not")
+
         self.action_space_size = action_space_size
         self.footsies = footsies
+        self.use_opponents_perspective = use_opponents_perspective
 
         self.learner = learner
         self.actor = learner._actor
@@ -47,14 +55,6 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_observation = None
         self.current_info = None
         self.current_action = None
-
-        # For better credit assignment, whenever frameskipping occurs we keep track of the observations that were either frameskipped *or* the observation before frameskipping happened.
-        # The list of observations is ordered, with the very first being the observation before frameskipping happened (the one that performed the action that caused it) and the rest being frameskipped.
-        # The list of player 2 updates is only done for the A2C Q-learner algorithm, since only there is the opponent's experience valid.
-        self.frameskipped_p1_updates = []
-        self.frameskipped_p1_updates_total_reward = 0.0
-        self.frameskipped_p2_updates = []
-        self.frameskipped_p2_updates_total_reward = 0.0
 
         # For logging
         self.cumulative_delta = 0
@@ -118,70 +118,31 @@ class FootsiesAgent(FootsiesAgentTorch):
         else:
             obs_agent_action = self.current_action
             obs_opponent_action = None
-        
-        # Learn using P1's perspective
-        if obs_agent_action is not None:
-            # Perform the delayed, frameskipped updates
-            for o in self.frameskipped_p1_updates:
-                self.learner.learn(o, obs, self.frameskipped_p1_updates_total_reward, terminated, truncated,
-                   obs_agent_action=obs_agent_action,
-                   obs_opponent_action=obs_opponent_action,
-                )
 
-            self.frameskipped_p1_updates = []
-            self.frameskipped_p1_updates_total_reward = 0.0
-
-            # Perform the learning on the current transition
-            self.learner.learn(obs, next_obs, reward, terminated, truncated,
-                obs_agent_action=obs_agent_action,
-                obs_opponent_action=obs_opponent_action,
-            )
-        
-        else:
-            self.frameskipped_p1_updates.append(obs)
-            self.frameskipped_p1_updates_total_reward += reward
+        self.learner.learn(obs, next_obs, reward, terminated, truncated,
+            obs_agent_action=obs_agent_action,
+            obs_opponent_action=obs_opponent_action,
+        )
 
         # P1 learning logging
         self.cumulative_delta += self.learner.delta
         self.cumulative_delta_n += 1
         if isinstance(self.learner, A2CQLearner):
-            self.cumulative_qtable_error += np.mean(self.learner.td_error).item()
-            self.cumulative_qtable_error_n += 1
+            if self.learner.td_error is not None:
+                self.cumulative_qtable_error += self.learner.td_error
+                self.cumulative_qtable_error_n += 1
 
         # Learn using P2's perspective
         # NOTE: only valid for FOOTSIES, since both players are using the same character
-        if self.footsies:
+        if self.footsies and self.use_opponents_perspective:
             # Switch perspectives
             p2_obs = observation_invert_perspective_flattened(obs)
             p2_next_obs = observation_invert_perspective_flattened(next_obs)
 
-            if obs_opponent_action is not None:
-                # Perform the delayed, frameskipped updates
-                for o in self.frameskipped_p2_updates:
-                    self.learner.learn(o, p2_obs, self.frameskipped_p2_updates_total_reward, terminated, truncated,
-                        obs_agent_action=obs_opponent_action,
-                        obs_opponent_action=obs_agent_action,
-                    )
-                
-                self.frameskipped_p2_updates = []
-                self.frameskipped_p2_updates_total_reward = 0.0
-
-                # Perform the learning on the current transition
-                self.learner.learn(p2_obs, p2_next_obs, reward, terminated, truncated,
-                    obs_agent_action=obs_agent_action,
-                    obs_opponent_action=obs_opponent_action,
-                )
-
-                # P2 learning logging
-                self.cumulative_delta += self.learner.delta
-                self.cumulative_delta_n += 1
-                if isinstance(self.learner, A2CQLearner):
-                    self.cumulative_qtable_error += np.mean(self.learner.td_error).item()
-                    self.cumulative_qtable_error_n += 1
-            
-            else:
-                self.frameskipped_p2_updates.append(p2_obs)
-                self.frameskipped_p2_updates_total_reward += -reward
+            self.learner.learn(p2_obs, p2_next_obs, reward, terminated, truncated,
+                obs_agent_action=obs_agent_action,
+                obs_opponent_action=obs_opponent_action,
+            )
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         model = deepcopy(self.actor_critic.actor)
@@ -235,18 +196,11 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self._test_observations is None:
             test_observations, _ = zip(*test_states)
             self._test_observations = torch.vstack(test_observations)
-            # Append random opponent actions merely for evaluation of policy entropy (in case opponent action are being considered, of course)
-            if self.consider_opponent_action:
-                random_opponent_actions = nn.functional.one_hot(
-                    torch.randint(0, self.action_space_size, (len(test_states),)),
-                    num_classes=9,
-                ).float()
-                self._test_observations = torch.hstack((self._test_observations, random_opponent_actions))
 
     def evaluate_average_policy_entropy(self, test_states: list[tuple[Any, Any]]) -> float:
         self._initialize_test_states(test_states)
 
         with torch.no_grad():
             probs = self.actor(self._test_observations)
-            entropies = -torch.sum(torch.log(probs + 1e-8) * probs, dim=1)
+            entropies = -torch.sum(torch.log(probs + 1e-8) * probs, dim=-1)
             return torch.mean(entropies).item()
