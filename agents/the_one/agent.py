@@ -1,4 +1,5 @@
 import torch
+import logging
 from torch import nn
 from torch.distributions import Categorical
 from copy import deepcopy
@@ -6,12 +7,14 @@ from agents.action import ActionMap
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Callable, Tuple
-from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel, AbstractOpponentModel
+from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.a2c.a2c import A2CQLearner
 from agents.mimic.agent import PlayerModel
-from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE
 from data import FootsiesDataset
+
+LOGGER = logging.getLogger("main.the_one")
 
 
 # TODO: use reaction time emulator
@@ -30,6 +33,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         reaction_time_emulator: ReactionTimeEmulator = None,
         # Modifiers
         over_simple_actions: bool = False,
+        remove_special_moves: bool = False,
         opponent_model_frameskip: bool = True,
         # Learning
         game_model_learning_rate: float = 1e-4,
@@ -52,6 +56,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.reaction_time_emulator = reaction_time_emulator
         #  Modifiers
         self.over_simple_actions = over_simple_actions
+        self.remove_agent_special_moves = remove_special_moves
         self.opponent_model_frameskip = opponent_model_frameskip
 
         # To report in the `model` property
@@ -156,23 +161,24 @@ class FootsiesAgent(FootsiesAgentTorch):
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
         # The actions are from info dictionary at the next step, but that's because it contains which action was performed in the *previous* step
         if self.over_simple_actions:
-            agent_action = info["p1_move"]
-            opponent_action = info["p2_move"]
-            agent_action = ActionMap.simple_from_move_index(agent_action)
-            opponent_action = ActionMap.simple_from_move_index(opponent_action)
+            agent_action, opponent_action = ActionMap.simples_from_torch_transition(self.current_observation, next_obs)
+            if self.remove_agent_special_moves:
+                # Convert the detected special move input (how did it even happen??) to a simple action
+                if agent_action == 8 or agent_action == 7:
+                    LOGGER.warning("We detected the agent performing a special move, even though they can't perform special moves! Will convert to the respective attack action.\nCurrent observation: %s\nNext observation: %s", self.current_observation, next_obs)
+                    agent_action -= 2
         else:
             raise NotImplementedError("non-simple actions are not yet supported")
-        agent_action_onehot = nn.functional.one_hot(torch.tensor(agent_action), num_classes=self.action_dim).unsqueeze(0)
-        opponent_action_onehot = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).unsqueeze(0)
 
         # Update the different models.
         self.a2c.update(next_obs, reward, terminated, truncated, info)
         if self.game_model is not None:
-            self._update_game_model(self.current_observation, agent_action_onehot, opponent_action_onehot, next_obs)
-        if self.opponent_model is not None:
+            self._update_game_model(self.current_observation, agent_action, opponent_action, next_obs)
+        if self.opponent_model is not None and opponent_action is not None:
+            opponent_action_onehot = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).unsqueeze(0)
             self.opponent_model.update(self.current_observation, opponent_action_onehot)
 
-    def _update_game_model(self, obs: torch.Tensor, agent_action_onehot: torch.Tensor, opponent_action_onehot: torch.Tensor, next_obs: torch.Tensor):
+    def _update_game_model(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
         """Calculate the game model loss, backpropagate and optimize"""
         if self.game_model is None:
             raise ValueError("agent wasn't instantiated with a game model, can't learn it")
@@ -182,7 +188,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         with torch.no_grad():
             next_representation_target = self.representation(next_obs)
 
-        next_representation_predicted = self.game_model(obs, agent_action_onehot, opponent_action_onehot)
+        next_representation_predicted = self.game_model(obs, agent_action, opponent_action)
         game_model_loss = torch.nn.functional.mse_loss(next_representation_predicted, next_representation_target)
         game_model_loss.backward()
 
@@ -229,11 +235,28 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     # NOTE: literally extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        model = deepcopy(self.actor)
+        actor = self.a2c.actor.clone()
 
         def internal_policy(obs):
-            probs = model(obs)
-            return Categorical(probs=probs).sample().item()
+            nonlocal actor
+
+            opp_action = None
+            previous_observation = getattr(actor, "previous_observation__") if hasattr(actor, "previous_observation__") else None
+            if previous_observation is not None:
+                # Weak, rollback-inspired opponent model: if the opponent did action X, then they will keep doing X
+                _, opp_action = ActionMap.simples_from_torch_transition(actor.previous_observation__, obs)
+            
+            # When in doubt, assume the opponent is standing
+            if opp_action is None:
+                opp_action = 0
+
+            # Sample the action
+            action = actor.sample_action(obs, next_opponent_action=opp_action).item()
+
+            # Save the current observation in an attribute that *surely* won't overlap with an existing one
+            actor.previous_observation__ = obs
+            
+            return action
 
         return super()._extract_policy(env, internal_policy)
 

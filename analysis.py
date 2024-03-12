@@ -1,6 +1,6 @@
 import copy
 import dearpygui.dearpygui as dpg
-import numpy as np
+import torch
 import pprint
 import threading
 from datetime import datetime
@@ -19,8 +19,8 @@ from collections import namedtuple
 AnalyserState = namedtuple("AnalyserSavedState", ["battle_state", "observation", "info", "reward"])
 
 
-def footsies_move_from_one_hot(one_hot: np.ndarray) -> FootsiesMove:
-    return FOOTSIES_MOVE_INDEX_TO_MOVE[np.where(one_hot == 1.0)[0].item()]
+def footsies_move_from_one_hot(one_hot: torch.Tensor) -> FootsiesMove:
+    return FOOTSIES_MOVE_INDEX_TO_MOVE[torch.where(one_hot == 1.0)[0].item()]
 
 
 def editable_dpg_value(item: int | str):
@@ -158,23 +158,23 @@ class Analyser:
         self.current_observation = observation
 
         if self.previous_observation is not None:
-            self.p1_guard_prev = round(self.previous_observation[0] * 3)
-            self.p2_guard_prev = round(self.previous_observation[1] * 3)
-            self.p1_move_prev = footsies_move_from_one_hot(self.previous_observation[2:17])
-            self.p2_move_prev = footsies_move_from_one_hot(self.previous_observation[17:32])
-            self.p1_move_progress_prev = self.previous_observation[32]
-            self.p2_move_progress_prev = self.previous_observation[33]
-            self.p1_position_prev = self.previous_observation[34] * 4.4
-            self.p2_position_prev = self.previous_observation[35] * 4.4
+            self.p1_guard_prev = round(self.previous_observation[0, 0].item() * 3)
+            self.p2_guard_prev = round(self.previous_observation[0, 1].item() * 3)
+            self.p1_move_prev = footsies_move_from_one_hot(self.previous_observation[0, 2:17])
+            self.p2_move_prev = footsies_move_from_one_hot(self.previous_observation[0, 17:32])
+            self.p1_move_progress_prev = self.previous_observation[0, 32].item()
+            self.p2_move_progress_prev = self.previous_observation[0, 33].item()
+            self.p1_position_prev = self.previous_observation[0, 34].item() * 4.4
+            self.p2_position_prev = self.previous_observation[0, 35].item() * 4.4
 
-        self.p1_guard = round(self.current_observation[0] * 3)
-        self.p2_guard = round(self.current_observation[1] * 3)
-        self.p1_move = footsies_move_from_one_hot(self.current_observation[2:17])
-        self.p2_move = footsies_move_from_one_hot(self.current_observation[17:32])
-        self.p1_move_progress = self.current_observation[32]
-        self.p2_move_progress = self.current_observation[33]
-        self.p1_position = self.current_observation[34] * 4.4
-        self.p2_position = self.current_observation[35] * 4.4
+        self.p1_guard = round(self.current_observation[0, 0].item() * 3)
+        self.p2_guard = round(self.current_observation[0, 1].item() * 3)
+        self.p1_move = footsies_move_from_one_hot(self.current_observation[0, 2:17])
+        self.p2_move = footsies_move_from_one_hot(self.current_observation[0, 17:32])
+        self.p1_move_progress = self.current_observation[0, 32].item()
+        self.p2_move_progress = self.current_observation[0, 33].item()
+        self.p1_position = self.current_observation[0, 34].item() * 4.4
+        self.p2_position = self.current_observation[0, 35].item() * 4.4
 
         # Info
         self.previous_info = self.current_info

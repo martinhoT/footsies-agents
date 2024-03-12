@@ -1,5 +1,5 @@
 from .agent import FootsiesAgent
-from agents.ql.ql import QFunctionTable, QFunctionNetworkDiscretized
+from agents.ql.ql import QFunctionTable, QFunctionNetwork
 from agents.a2c.a2c import ValueNetwork, A2CQLearner
 
 
@@ -23,7 +23,7 @@ def get_loggables(agent: FootsiesAgent) -> dict[str, list]:
     if isinstance(agent.learner, A2CQLearner):
         custom_evaluators.append(("Learning/Q-learner error", agent.evaluate_average_qtable_error))
 
-    if isinstance(agent.critic, QFunctionNetworkDiscretized):
+    if isinstance(agent.critic, QFunctionNetwork):
         network_histograms.append(agent.critic.q_network)
 
     if isinstance(agent.critic, ValueNetwork):

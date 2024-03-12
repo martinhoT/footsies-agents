@@ -1,0 +1,5 @@
+# Just for convenience
+from .a2c_qlearner_table import model_init as a2c_qlearner_table_
+from .the_one_vanilla_no_specials_opp import model_init as the_one_vanilla_no_specials_opp_
+from .the_one_vanilla_no_specials import model_init as the_one_vanilla_no_specials_
+from .the_one_vanilla import model_init as the_one_vanilla_

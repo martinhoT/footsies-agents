@@ -64,6 +64,8 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         use_opponents_perspective=False,
     )
 
+    opponent_model = PlayerModel(...)
+
     agent = TheOneAgent(
         obs_dim=obs_dim,
         action_dim=action_dim,

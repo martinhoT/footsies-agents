@@ -1,3 +1,4 @@
+from collections import deque
 import torch
 import torch.multiprocessing as mp
 import logging
@@ -10,6 +11,7 @@ from gymnasium import Env
 from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import extract_sub_kwargs
+from agents.action import ActionMap
 
 
 def create_layered_network(
@@ -326,3 +328,32 @@ class ImitationLearner:
         self.optimizer.step()
 
         return loss.item()
+
+
+class ActionHistoryAugmentation:
+    def __init__(self, n: int, action_dim: int, distinct: bool):
+        self.action_dim = action_dim
+        self.distinct = distinct
+        # Fill history with no-ops
+        self.history = deque([0] * n, maxlen=n)
+    
+    def __call__(self, obs: torch.Tensor, action: int):
+        if not self.distinct or (self.history[-1] != action):
+            self.history.append(action)
+        
+        action_oh = nn.functional.one_hot(torch.tensor(self.history), num_classes=self.action_dim).flatten().float()
+        return torch.hstack((obs, action_oh))
+
+
+class TimeSinceLastCommitAugmentation:
+    def __init__(self, steps: int):
+        self.steps = steps
+        self.t = 0.0
+    
+    def __call__(self, obs: torch.Tensor, action: int):
+        if action is not None:
+            commital = ActionMap.is_simple_action_commital(action)
+            self.t = 0.0 if commital else (self.t + 1) % self.steps
+        
+        t_tensor = torch.tensor([[self.t / self.steps]]).float()
+        return torch.hstack((obs, t_tensor))

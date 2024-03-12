@@ -13,9 +13,11 @@ from agents.ql.ql import QFunctionTable
 from main import load_agent_model
 
 
-AGENT: A2CAgent = None
-SIMPLE_ACTION_LABELS = tuple((move.name, i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS))
-SIMPLE_ACTION_LABELS_REVERSED = tuple((move.name, (ActionMap.n_simple() - 1) / ActionMap.n_simple() - i / ActionMap.n_simple() + (1 / (ActionMap.n_simple() * 2))) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS))
+SIMPLE_ACTION_LABELS_GEN = lambda labels, n: tuple((move.name, i / n + (1 / (n * 2))) for i, move in enumerate(labels))
+SIMPLE_ACTION_LABELS_REVERSED_GEN = lambda labels, n: tuple((move.name, (n - 1) / n - i / n + (1 / (n * 2))) for i, move in enumerate(labels))
+
+SIMPLE_ACTION_LABELS = SIMPLE_ACTION_LABELS_GEN(ActionMap.SIMPLE_ACTIONS, ActionMap.n_simple())
+SIMPLE_ACTION_LABELS_REVERSED = SIMPLE_ACTION_LABELS_REVERSED_GEN(ActionMap.SIMPLE_ACTIONS, ActionMap.n_simple())
 
 
 class QTablePlot:
@@ -40,10 +42,10 @@ class QTablePlot:
             with dpg.plot(label=title, no_mouse_pos=True, height=400, width=-1) as plot: # height=400, width=-1
                 dpg.bind_colormap(plot, dpg.mvPlotColormap_Viridis)
                 x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Agent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True)
-                dpg.set_axis_ticks(x_axis, SIMPLE_ACTION_LABELS)
+                dpg.set_axis_ticks(x_axis, SIMPLE_ACTION_LABELS_GEN(ActionMap.SIMPLE_ACTIONS[:self.action_dim], self.action_dim))
                 with dpg.plot_axis(dpg.mvYAxis, label="Opponent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True) as y_axis:
-                    dpg.set_axis_ticks(y_axis, SIMPLE_ACTION_LABELS_REVERSED)
-                    initial_data = np.zeros((self.action_dim, self.opponent_action_dim))
+                    dpg.set_axis_ticks(y_axis, SIMPLE_ACTION_LABELS_REVERSED_GEN(ActionMap.SIMPLE_ACTIONS[:self.opponent_action_dim], self.opponent_action_dim))
+                    initial_data = np.zeros((self.opponent_action_dim, self.action_dim))
                     self.series = dpg.add_heat_series(initial_data.flatten().tolist(), rows=self.opponent_action_dim, cols=self.action_dim, scale_min=-1.0, scale_max=1.0)
 
     def update(self, q_values: np.ndarray):
@@ -58,11 +60,13 @@ class QTablePlot:
 class PolicyDistributionPlot:
     def __init__(
         self,
+        action_dim: int,
         bar_width: int = 0.2,
     ):
         self.bar_width = bar_width
         
-        self.x = np.arange(ActionMap.n_simple())
+        self.action_dim = action_dim
+        self.x = np.arange(action_dim)
 
         # DPG items
         self.x_axis = None
@@ -70,12 +74,12 @@ class PolicyDistributionPlot:
         self.series = None
     
     def setup(self, title: str = "Policy distribution", width: int = 1050):
-        y = np.zeros((ActionMap.n_simple(),))
+        y = np.zeros((self.action_dim,))
 
         with dpg.plot(label=title, width=width) as plot:
             self.x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Move")
-            dpg.set_axis_ticks(self.x_axis, tuple([(move.name, i + 1) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS)]))
-            dpg.set_axis_limits(self.x_axis, 0.0, ActionMap.n_simple() + 1) # the + 1 is padding
+            dpg.set_axis_ticks(self.x_axis, tuple([(move.name, i + 1) for i, move in enumerate(ActionMap.SIMPLE_ACTIONS[:self.action_dim])]))
+            dpg.set_axis_limits(self.x_axis, 0.0, self.action_dim + 1) # the + 1 is padding
 
             self.y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Probability")
             dpg.set_axis_limits(self.y_axis, 0.0, 1.0)
@@ -90,16 +94,18 @@ class PolicyDistributionPlot:
 class QLearnerAnalyserManager:
     def __init__(
         self,
+        agent: A2CAgent,
         action_dim: int,
         opponent_action_dim: int,
     ):
+        self.agent = agent
         self.q_table = None
         self.action_dim = action_dim
         self.opponent_action_dim = opponent_action_dim
 
         self.q_table_plot = QTablePlot(action_dim, opponent_action_dim, auto_scale=False)
-        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, add_color_scale=False, auto_scale=True) if isinstance(AGENT.critic, QFunctionTable) else None
-        self.policy_plot = PolicyDistributionPlot()
+        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, add_color_scale=False, auto_scale=True) if isinstance(self.agent.critic, QFunctionTable) else None
+        self.policy_plot = PolicyDistributionPlot(action_dim)
         
         self.current_observation = None
 
@@ -127,20 +133,17 @@ class QLearnerAnalyserManager:
             obs = self.current_observation
         
         opponent_action = self.get_predicted_opponent_action()
-        opponent_action_oh = torch.nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=self.opponent_action_dim).float()
-        obs_torch = torch.from_numpy(obs).float().unsqueeze(0)
-        obs_torch_with_opp = torch.hstack((obs_torch, opponent_action_oh))
-        policy_distribution = AGENT.actor(obs_torch_with_opp).detach().numpy().flatten()
+        policy_distribution = self.agent.actor.probabilities(obs, opponent_action).detach().numpy().flatten()
         self.policy_plot.update(policy_distribution)
 
     def on_state_update(self, analyser: Analyser):
-        obs: np.ndarray = analyser.current_observation
+        obs: torch.Tensor = analyser.current_observation
         self.current_observation = obs
 
-        q_values = AGENT.critic.q(obs)
+        q_values = self.agent.critic.q(obs)
         self.q_table_plot.update(q_values)
         if self.q_table_update_frequency_plot is not None:
-            self.q_table_update_frequency_plot.update(AGENT.critic.update_frequency(obs))
+            self.q_table_update_frequency_plot.update(self.agent.critic.update_frequency(obs))
 
         self.update_policy_distribution(obs)
 
@@ -167,7 +170,7 @@ if __name__ == "__main__":
         )
     )
 
-    AGENT = A2CAgent(
+    agent = A2CAgent(
         observation_space_size=env.observation_space.shape[0],
         action_space_size=env.action_space.n,
         use_simple_actions=True,
@@ -187,7 +190,7 @@ if __name__ == "__main__":
         }
     )
 
-    load_agent_model(AGENT, "a2c_qlearner_il")
+    load_agent_model(agent, "a2c_qlearner_il")
 
     def spammer():
         from itertools import cycle
@@ -204,6 +207,7 @@ if __name__ == "__main__":
     p1 = idle()
 
     manager = QLearnerAnalyserManager(
+        agent,
         action_dim=ActionMap.n_simple(),
         opponent_action_dim=ActionMap.n_simple(),
     )
@@ -211,7 +215,7 @@ if __name__ == "__main__":
     analyser = Analyser(
         env=env,
         # p1_action_source=lambda o, i: next(p1),
-        p1_action_source=lambda o, i: AGENT.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=manager.get_predicted_opponent_action()),
+        p1_action_source=lambda o, i: agent.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=manager.get_predicted_opponent_action()),
         custom_elements_callback=manager.add_custom_elements,
         custom_state_update_callback=manager.on_state_update,
     )

@@ -1,17 +1,19 @@
 import os
-import numpy as np
 import torch
 import random
+import logging
 from torch import nn
 from torch.distributions import Categorical
 from copy import deepcopy
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
-from agents.a2c.a2c import A2CLearnerBase, A2CQLearner
+from agents.a2c.a2c import A2CLearnerBase, A2CQLearner, ActorNetwork
 from agents.ql.ql import QFunctionTable
 from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
 from agents.action import ActionMap
+
+LOGGER = logging.getLogger("main.a2c.agent")
 
 
 class FootsiesAgent(FootsiesAgentTorch):
@@ -43,8 +45,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.use_opponents_perspective = use_opponents_perspective
 
         self.learner = learner
-        self.actor = learner._actor
-        self.critic = learner._critic
+        self.actor: ActorNetwork = learner.actor
+        self.critic = learner.critic
 
         models = {"actor": self.actor}
         # Could be a QTable
@@ -55,6 +57,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_observation = None
         self.current_info = None
         self.current_action = None
+        self.current_action_iterator = None # only needed if using simple actions
 
         # For logging
         self.cumulative_delta = 0
@@ -77,43 +80,28 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         if self.current_action is not None:
             try:
-                action = next(self.current_action)
+                action = next(self.current_action_iterator)
         
             except StopIteration:
                 self.current_action = None
         
         if self.current_action is None:
-            simple_action = self.learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
-            self.current_action = iter(ActionMap.simple_to_discrete(simple_action))
-            action = next(self.current_action)
+            self.current_action = self.learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
+            self.current_action_iterator = iter(ActionMap.simple_to_discrete(self.current_action))
+            action = next(self.current_action_iterator)
         
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
         obs = self.current_observation
 
-        # NOTE: with the way frameskipping is being done we are updating Q-values throughout the duration of moves, not "skipping" them
         if self.footsies:
-            p1_move_progress = obs[0, 32].item()
-            p2_move_progress = obs[0, 33].item()
-            p1_move_index = torch.argmax(obs[0, 2:17]).item()
-            p2_move_index = torch.argmax(obs[0, 17:32]).item()
-            p1_next_move_index = torch.argmax(next_obs[0, 2:17]).item()
-            p2_next_move_index = torch.argmax(next_obs[0, 17:32]).item()
-            obs_agent_action = ActionMap.simple_from_transition(
-                previous_player_move_index=p1_move_index,
-                previous_opponent_move_index=p2_move_index,
-                previous_player_move_progress=p1_move_progress,
-                previous_opponent_move_progress=p2_move_progress,
-                player_move_index=p1_next_move_index,
-            )
-            obs_opponent_action = ActionMap.simple_from_transition(
-                previous_player_move_index=p2_move_index,
-                previous_opponent_move_index=p1_move_index,
-                previous_player_move_progress=p2_move_progress,
-                previous_opponent_move_progress=p1_move_progress,
-                player_move_index=p2_next_move_index,
-            )
+            # We only use this method to determine whether the agent's action was frameskipped or not, and to get the opponent's action of course.
+            # We treat the agent specially because we may want to use a different action space for them (e.g. remove special moves).
+            obs_agent_action, obs_opponent_action = ActionMap.simples_from_torch_transition(obs, next_obs)
+            obs_agent_action = obs_agent_action if obs_agent_action is None else self.current_action
+            if obs_agent_action is not None and obs_agent_action != self.current_action:
+                LOGGER.warning("From a transition, we determined that the agent's action was %s, but it was actually %s! There is a significant discrepancy here", obs_agent_action, self.current_action)
 
         else:
             obs_agent_action = self.current_action

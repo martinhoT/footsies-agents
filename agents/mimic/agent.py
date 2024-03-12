@@ -32,7 +32,7 @@ class PlayerModelNetwork(nn.Module):
         input_clip: bool = False,
         input_clip_leaky_coef: float = 0,
         hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.LeakyReLU,
+        hidden_layer_activation: type[nn.Module] = nn.LeakyReLU,
     ):
         super().__init__()
 
@@ -60,16 +60,7 @@ class PlayerModelNetwork(nn.Module):
 class PlayerModel:
     def __init__(
         self,
-        obs_size: int,
-        n_moves: int,
-        obs_mask: torch.Tensor = None,
-        mini_batch_size: int = 1,
-        player_model_network: PlayerModelNetwork = None,
-        use_sigmoid_output: bool = False,
-        input_clip: bool = False,
-        input_clip_leaky_coef: float = 0,
-        hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.LeakyReLU,
+        player_model_network: PlayerModelNetwork,
         move_transition_scale: float = 1.0,
         learning_rate: float = 1e-2,
         # Reinforcement: keep training on problematic examples.
@@ -93,30 +84,16 @@ class PlayerModel:
         scar_detection_threshold: float = float("+inf"),
         smoothed_loss_coef: float = 0.0,
     ):
-        if obs_mask is None:
-            obs_mask = torch.ones((obs_size,), dtype=torch.bool)
-        
-        self.obs_mask = obs_mask
-        self.mini_batch_size = mini_batch_size
-        self.use_sigmoid_output = use_sigmoid_output
         self.move_transition_scale = move_transition_scale
         self.reinforce_max_loss = reinforce_max_loss
         self.reinforce_max_iters = reinforce_max_iters
 
-        self.network = PlayerModelNetwork(
-            input_dim=obs_size,
-            output_dim=n_moves,
-            use_sigmoid_output=self.use_sigmoid_output,
-            input_clip=input_clip,
-            input_clip_leaky_coef=input_clip_leaky_coef,
-            hidden_layer_sizes=hidden_layer_sizes,
-            hidden_layer_activation=hidden_layer_activation,
-        )
-
         # Cross entropy loss
-        self.loss_function = lambda predicted, target: -torch.sum(torch.log2(predicted) * target, dim=1)
+        self.loss_function = lambda predicted, target: -torch.sum(torch.log(predicted + 1e-8) * target, dim=-1)
 
-        self.optimizer = torch.optim.Adam(params=self.network.parameters(), lr=learning_rate)
+        self.network = player_model_network
+
+        self.optimizer = torch.optim.SGD(params=self.network.parameters(), lr=learning_rate)
 
         # Just to make training easier, know which layers actually have learnable parameters
         self.is_learnable_layer = [
@@ -137,8 +114,6 @@ class PlayerModel:
         self.y_batch_as_list = []
         self.move_transition_as_list = []
         self.step = 0
-        self.cumulative_loss = 0
-        self.cumulative_loss_n = 0
         
         # Exponentially averaged loss for scar detection
         self.smoothed_loss = 0
@@ -146,7 +121,7 @@ class PlayerModel:
         self.scar_detection_threshold = scar_detection_threshold
 
         # For tracking purposes
-        self.most_recent_loss = 0.0
+        self._most_recent_loss = 0.0
 
     def _scar_update(self, loss: float):
         self.smoothed_loss = self.smoothed_loss_coef * self.smoothed_loss + (1 - self.smoothed_loss_coef) * loss
@@ -154,15 +129,17 @@ class PlayerModel:
     def mask_environment_observation(self, obs: torch.Tensor) -> torch.Tensor:
         return obs[:, self.obs_mask]
 
-    def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False):
+    def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False) -> float:
+        total_loss = 0.0
+        
         self.x_batch_as_list.append(obs)
         self.y_batch_as_list.append(action)
         self.move_transition_as_list.append(move_transition)
         self.step += 1
 
         if self.step >= self.mini_batch_size:
-            batch_x = torch.cat(self.x_batch_as_list, 0)
-            batch_y = torch.cat(self.y_batch_as_list, 0)
+            batch_x = torch.vstack(self.x_batch_as_list)
+            batch_y = torch.vstack(self.y_batch_as_list)
 
             move_transition_multiplier = 1 + torch.tensor(self.move_transition_as_list) * (self.move_transition_scale - 1)
 
@@ -178,22 +155,19 @@ class PlayerModel:
                 loss.backward()
                 self.optimizer.step()
 
-                self.cumulative_loss += loss.item()
-                self.cumulative_loss_n += 1
+                total_loss += loss.item()
 
                 # Check whether learning is dead
                 if all(
                     not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
                     for layer in self.learnable_layers()
                 ):
-                    raise RuntimeError(
-                        f"learning is dead, gradients are 0! (loss: {loss.item()})"
-                    )
-
+                    LOGGER.warning("Learning is dead, gradients are 0! (loss: %s)", loss.item())
+                
                 i += 1
 
             self._scar_update(loss.item())
-            self.most_recent_loss = individual_loss[-1].item()
+            self._most_recent_loss = individual_loss[-1].item()
 
             # Check which of the current training examples classify as scars
             is_scar = individual_loss > (1 + self.scar_detection_threshold) * self.smoothed_loss
@@ -201,7 +175,8 @@ class PlayerModel:
             self.y_batch_as_list = [y for y, scar in zip(self.y_batch_as_list, is_scar) if scar]
             self.move_transition_as_list = [t for t, scar in zip(self.move_transition_as_list, is_scar) if scar]
             self.step = 0
-            self.first_obs_of_batch_had_move_transition = None
+        
+        return total_loss
 
     def predict(
         self,
@@ -238,8 +213,7 @@ class PlayerModel:
                         f" probs_cumulative: {probs_cumulative}"
                     ) from e
 
-    # TODO: if over primitive actions, the model is prone to having great uncertainty (why, past me?)
-    def probability_distribution(self, obs: torch.Tensor):
+    def probability_distribution(self, obs: torch.Tensor) -> torch.Tensor:
         return self.network(obs)
 
     def learnable_layers(self) -> Generator[nn.Module, None, None]:
@@ -255,6 +229,11 @@ class PlayerModel:
 
     def set_learning_rate(self, learning_rate: float):
         self.optimizer.param_groups[0]["lr"] = learning_rate
+    
+    @property
+    def most_recent_loss(self) -> float:
+        """The loss of the most recent training example."""
+        return self._most_recent_loss
 
 
 # TODO: there are three different ways we can predict actions: primitive actions discretized, primitive actions as tuple, and moves. Are all supported?
@@ -263,28 +242,12 @@ class FootsiesAgent(FootsiesAgentBase):
         self,
         observation_space_size: int,
         action_space_size: int,
-        frameskipping: bool = True,
         tile_coding: bool = False,
         append_last_actions_n: int = 0,
         append_last_actions_distinct: bool = True,
         by_primitive_actions: bool = False,
-        use_sigmoid_output: bool = False,
-        input_clip: bool = False,
-        input_clip_leaky_coef: float = 0,
-        hidden_layer_sizes_specification: str = "64,64",
-        hidden_layer_activation_specification: str = "LeakyReLU",
-        move_transition_scale: float = 10.0,
-        mini_batch_size: int = 1,
-        learning_rate: float = 1e-2,
-        reinforce_max_loss: float = float("+inf"),
-        reinforce_max_iters: int = float("+inf"),
-        scar_max_size: int = 1000,
-        scar_loss_coef: float = 1.0,
-        scar_recency_coef: float = 0.0,
-        scar_detection_threshold: float = float("+inf"),
-        smoothed_loss_coef: float = 0.0,
-        learn_p1: bool = True,
-        learn_p2: bool = True,
+        p1_model: PlayerModel = None,
+        p2_model: PlayerModel = None,
     ):
         if by_primitive_actions:
             raise NotImplementedError("imitating primitive actions is not supported yet")
@@ -292,15 +255,16 @@ class FootsiesAgent(FootsiesAgentBase):
         if tile_coding:
             raise NotImplementedError("tile coding is not supported yet")
 
-        if not frameskipping:
-            raise NotImplementedError("Not using frame skipping is not supported yet")
+        if p1_model is None and p2_model is None:
+            raise ValueError("at least one model should be learnt, but both players' models are None")
 
-        self.frameskipping = frameskipping
         self.append_last_actions_n = append_last_actions_n
         self.append_last_actions_distinct = append_last_actions_distinct
         self.by_primitive_actions = by_primitive_actions
-        self.learn_p1 = learn_p1
-        self.learn_p2 = learn_p2
+        self.p1_model = p1_model
+        self.p2_model = p2_model
+        self.learn_p1 = p1_model is not None
+        self.learn_p2 = p2_model is not None
 
         # This full observation size doesn't consider primitive actions yet
         full_observation_size = observation_space_size + append_last_actions_n * ActionMap.n_simple()
@@ -313,44 +277,11 @@ class FootsiesAgent(FootsiesAgentBase):
             p1_observation_mask[32] = False
             p2_observation_mask[33] = False
 
-        # Both models have mostly the same structure and training regime
-        player_model_kwargs = {
-            # We don't consider the move progress of the player themselves (e.g. if I'm modeling player 2, then I don't need to know its move progress)
-            "obs_size": full_observation_size - (1 if self.frameskipping else 0),
-            "n_moves": self.n_moves,
-            "mini_batch_size": mini_batch_size,
-            "use_sigmoid_output": use_sigmoid_output,
-            "input_clip": input_clip,
-            "input_clip_leaky_coef": input_clip_leaky_coef,
-            "hidden_layer_sizes": [int(n) for n in hidden_layer_sizes_specification.split(",")] if hidden_layer_sizes_specification else [],
-            "hidden_layer_activation": getattr(nn, hidden_layer_activation_specification),
-            "move_transition_scale": move_transition_scale,
-            "learning_rate": learning_rate,
-            "reinforce_max_loss": reinforce_max_loss,
-            "reinforce_max_iters": reinforce_max_iters,
-            "scar_max_size": scar_max_size,
-            "scar_loss_coef": scar_loss_coef,
-            "scar_recency_coef": scar_recency_coef,
-            "scar_detection_threshold": scar_detection_threshold,
-            "smoothed_loss_coef": smoothed_loss_coef,
-        }
-        self.p1_model = PlayerModel(
-            **player_model_kwargs,
-            obs_mask=p1_observation_mask,
-        )
-        self.p2_model = PlayerModel(
-            **player_model_kwargs,
-            obs_mask=p2_observation_mask,
-        )
-
         self.previous_observation = None
         self.previous_p1_move_state: FootsiesMove = None
         self.previous_p2_move_state: FootsiesMove = None
         self.previous_p1_move_state: int = None
         self.previous_p2_move_state: int = None
-        # Fill the action history with STANDs
-        self.p1_action_history: deque[int] = deque([0] * self.append_last_actions_n, maxlen=self.append_last_actions_n)
-        self.p2_action_history: deque[int] = deque([0] * self.append_last_actions_n, maxlen=self.append_last_actions_n)
 
         self._test_observations = None
         self._test_actions = None
@@ -388,11 +319,11 @@ class FootsiesAgent(FootsiesAgentBase):
         p1_observation = self.craft_observation(self.previous_observation, True, True, True)
         p2_observation = self.craft_observation(self.previous_observation, False, False, False)
 
-        if self.learn_p1 and (not self.frameskipping or p1_simple is not None):
+        if self.learn_p1 and p1_simple is not None:
             p1_simple_oh = self._action_onehot(p1_simple)
             self.p1_model.update(p1_observation, p1_simple_oh, self.previous_p1_move_state != p1_simple)# and ActionMap.is_simple_action_commital(p1_simple))
         
-        if self.learn_p2 and (not self.frameskipping or p2_simple is not None):
+        if self.learn_p2 and p2_simple is not None:
             p2_simple_oh = self._action_onehot(p2_simple)
             self.p2_model.update(p2_observation, p2_simple_oh, self.previous_p2_move_state != p2_simple)# and ActionMap.is_simple_action_commital(p2_simple))
 

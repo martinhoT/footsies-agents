@@ -1,7 +1,13 @@
+import torch
+from collections import deque
+from torch import nn
 from copy import copy
 from typing import Any, Callable, Iterable
 from gymnasium import Env, ObservationWrapper, ActionWrapper
+from gymnasium import spaces
 from stable_baselines3.common.base_class import BaseAlgorithm
+from agents.action import ActionMap
+from footsies_gym.moves import FootsiesMove
 
 # Some wrappers need to be handled in a special manner when extracting a policy for the FOOTSIES environment
 from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
@@ -103,3 +109,55 @@ def extract_sub_kwargs(kwargs: dict, subkeys: tuple[str], strict: bool = True) -
     ]
 
     return extracted
+
+
+class AppendSimpleHistoryWrapper(ObservationWrapper):
+    """Observation wrapper for appending the action history of one of the players. Must be put after `FootsiesNormalized`."""
+    def __init__(self, env, p1: bool, n: int, action_dim: int, distinct: bool):
+        super().__init__(env)
+
+        e = env
+        has_normalized = False
+        while e != e.unwrapped:
+            if isinstance(env, FootsiesNormalized):
+                has_normalized = True
+                break
+            e = e.env
+        
+        if not has_normalized:
+            raise ValueError("AppendSimpleHistoryWrapper must be put after FootsiesNormalized")
+
+        self.observation_space: spaces.Dict = env.observation_space
+        self.observation_space.spaces[f"p{1 if p1 else 2}_history"] = spaces.MultiDiscrete([action_dim] * n)
+
+        self.p1 = p1
+        self.action_dim = action_dim
+        self.distinct = distinct
+        # Fill history with no-ops
+        self.history = deque([0] * n, maxlen=n)
+
+        self.prev_obs = None
+    
+    def observation(self, obs: dict) -> dict:
+        obs = obs.copy()
+        
+        # Determine which action the player performed into `obs`
+        if self.prev_obs is not None:
+            action = ActionMap.simple_from_transition(
+                previous_player_move_index=self.prev_obs["move"][0 if self.p1 else 1],
+                previous_opponent_move_index=self.prev_obs["move"][1 if self.p1 else 0],
+                previous_player_move_progress=self.prev_obs["move_frame"][0 if self.p1 else 1],
+                previous_opponent_move_progress=self.prev_obs["move_frame"][1 if self.p1 else 0],
+                current_player_move_index=obs["move"][0 if self.p1 else 1],
+            )
+
+            if not self.distinct or (self.history[-1] != action):
+                self.history.append(action)
+
+        self.prev_obs = obs
+
+        # Append the history of actions so far to the observation
+        obs[f"p{1 if self.p1 else 2}_history"] = list(self.history)
+
+        return obs
+    

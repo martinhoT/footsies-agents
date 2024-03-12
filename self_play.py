@@ -73,7 +73,7 @@ class SelfPlayManager:
         self._opponent_elos[opponent] = 1200
 
     def _sample_opponent(self) -> "any":
-        full_pool = [None] + self.opponent_pool
+        full_pool = [None] + list(self.opponent_pool)
         counts = [self.mix_bot] + [1] * len(self.opponent_pool)
         return random.sample(full_pool, counts=counts, k=1)[0]
 
@@ -85,7 +85,6 @@ class SelfPlayManager:
         ----------
         - `game_result`: the result of the game, in terms of the agent's perspective. 1 for win, 0 for draw, -1 for loss
         """
-        self.episode += 1
         previous_opponent = self._current_opponent
 
         # Update the agent's and opponent's ELO
@@ -112,6 +111,8 @@ class SelfPlayManager:
                     self.elo,
                     self.episode,
                 )
+        
+        self.episode += 1
 
         return self._current_opponent != previous_opponent
 

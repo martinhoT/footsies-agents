@@ -2,7 +2,6 @@ import os
 import numpy as np
 import torch
 import logging
-import copy
 from torch import nn
 from abc import ABC, abstractmethod
 from agents.torch_utils import create_layered_network
@@ -101,10 +100,10 @@ class QFunction(ABC):
             
             # Lazy formulation to save lines of code
             if next_opponent_action is not None:
-                next_opponent_policy = nn.functional.one_hot(torch.tensor([next_opponent_action]), num_classes=self.action_dim).unsqueeze(1).float()
+                next_opponent_policy = nn.functional.one_hot(torch.tensor([next_opponent_action]), num_classes=self.opponent_action_dim).unsqueeze(1).float()
                 LOGGER.debug("Will consider a single action from the opponent in the update")
             elif next_opponent_policy is None:
-                next_opponent_policy = torch.ones(self.action_dim).unsqueeze(1) / self.action_dim
+                next_opponent_policy = torch.ones(self.opponent_action_dim).unsqueeze(1) / self.opponent_action_dim
                 LOGGER.debug("Will consider the opponent to be following a uniform random policy in the update")
             else:
                 LOGGER.debug("Will consider a custom opponent's policy in the update")
@@ -521,6 +520,7 @@ class QFunctionNetwork(QFunction):
 
         self._current_update_step += 1
         if self._use_target_network and self._current_update_step >= self._target_network_update_interval:
+            LOGGER.debug("Target network has been updated")
             for target_param, q_param in zip(self.target_network.parameters(), self.q_network.parameters()):
                 target_param.data.copy_(q_param.data)
             self._current_update_step = 0
