@@ -605,7 +605,6 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
         discount: float = 1.0,
         learning_rate: float = 1e-2,
         target_network: QNetwork = None,
-        target_network_blank: bool = False,
         target_network_update_interval: int = 1000,
         move_frame_n_bins: int = 5,
         position_n_bins: int = 5,
@@ -626,7 +625,6 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
         - `discount`: the discount factor
         - `learning_rate`: the learning rate
         - `target_network`: an extra, slower-changing, target network to stabilize learning. If `None`, it won't be used
-        - `target_network_blank`: if `True`, the target network will be a copy the Q-network, but with all parameters set to 0, otherwise it's just a copy
         - `target_network_update_interval`: the interval between target network updates, in terms of update steps
         - `move_frame_n_bins`: how many separations to perform on the move frame observation variable when discretizing. Only valid for the "footsies" environment
         - `position_n_bins`: how many separations to perform on the position observation variable when discretizing. Only valid for the "footsies" environment
@@ -639,7 +637,6 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
             discount=discount,
             learning_rate=learning_rate,
             target_network=target_network,
-            target_network_blank=target_network_blank,
             target_network_update_interval=target_network_update_interval,
         )
         if environment not in ("footsies", "mountain car"):
@@ -692,9 +689,9 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
         obs_discretized = self._transform_obs(obs_discretized)
         super()._update_q_value(obs_discretized, target, action, opponent_action)
     
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
+    def q(self, obs: torch.Tensor, **kwargs) -> float | torch.Tensor:
         obs_discretized = self._transform_obs(obs)
-        return super().q(obs_discretized, action, opponent_action)
+        return super().q(obs_discretized, **kwargs)
 
     @property
     def obs_dim(self) -> int:

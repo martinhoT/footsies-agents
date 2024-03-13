@@ -17,7 +17,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     discretized: bool = False,
     qtable: bool = False,
     use_target_network: bool = True,
-    **kwargs
 ) -> tuple[TheOneAgent, dict[str, list]]:
     
     obs_dim = observation_space_size

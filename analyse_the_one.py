@@ -16,7 +16,7 @@ from gymnasium.wrappers.transform_observation import TransformObservation
 import logging
 from sys import stdout
 
-logging.basicConfig(level=logging.DEBUG, stream=stdout)
+# logging.basicConfig(level=logging.DEBUG, stream=stdout)
 
 
 if __name__ == "__main__":
@@ -44,15 +44,15 @@ if __name__ == "__main__":
     agent, loggables = the_one_vanilla_(
         env.observation_space.shape[0],
         env.action_space.n,
-        qtable=True
+        qtable=True,
+        discretized=False,
     )
 
-    idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
-    idle_distribution[0, 0] = 1.0
-    print(idle_distribution)
-    agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
+    # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
+    # idle_distribution[0, 0] = 1.0
+    # agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
 
-    # load_agent_model(agent, "the_one_vanilla_leaky")
+    load_agent_model(agent, "the_one_vanilla_qtable")
 
     def spammer():
         from itertools import cycle
@@ -70,8 +70,8 @@ if __name__ == "__main__":
 
     qlearner_manager = QLearnerAnalyserManager(
         agent.a2c,
-        action_dim=ActionMap.n_simple(),
-        opponent_action_dim=ActionMap.n_simple(),
+        action_dim=agent.action_dim,
+        opponent_action_dim=agent.opponent_action_dim,
     )
 
     if agent.opponent_model is not None:

@@ -75,7 +75,6 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         over_simple_actions=True,
         remove_special_moves=True,
         game_model_learning_rate=1e-4,
-        opponent_model_learning_rate=1e-4,
     )
 
     loggables = get_loggables(agent)
