@@ -119,7 +119,8 @@ def train(
 
     # Only used for self-play
     if self_play_manager is not None:
-        self_play_manager._add_opponent(env.unwrapped.opponent)
+        # We say we created the opponent at episode -2 to distinguish it from the ingame bot, which is -1
+        self_play_manager._register_opponent(env.unwrapped.opponent, -2)
 
     if progress_bar:
         training_iterator = tqdm(training_iterator)
@@ -130,7 +131,7 @@ def train(
 
             terminated = False
             truncated = False
-            total_reward = 0.0
+            result = 0 # by default, the game is a draw
             while not (terminated or truncated):
                 action = agent.act(obs, info)
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -139,13 +140,18 @@ def train(
                     reward = penalize_truncation
                 
                 agent.update(obs, reward, terminated, truncated, info)
-                total_reward += reward
+
+            # Determine the final game result, to provide to the self-play manager
+            if terminated and (reward != 0.0):
+                result = 1 if reward > 0.0 else -1
+            elif truncated and (info["p1_guard"] != info["p2_guard"]):
+                result = 1 if info["p1_guard"] > info["p2_guard"] else -1
 
             # Set a new opponent from the opponent pool
             if self_play_manager is not None:
-                should_change = self_play_manager.update_at_episode(round(total_reward))
+                should_change = self_play_manager.update_at_episode(result)
                 if should_change:
-                    env.unwrapped.set_opponent(self_play_manager.current_opponent)
+                    env.unwrapped.set_opponent(self_play_manager.current_opponent.method)
             
             episode_finished_callback(episode)
 

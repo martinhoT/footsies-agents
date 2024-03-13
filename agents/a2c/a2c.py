@@ -1,9 +1,11 @@
+from typing import Callable
 import torch
 import logging
 from torch import nn
 from torch.distributions import Categorical
+from agents.mimic.agent import PlayerModel
 from agents.torch_utils import create_layered_network, ToMatrix
-from agents.ql.ql import QFunction, QFunctionNetwork
+from agents.ql.ql import QFunction, QFunctionNetwork, QFunctionNetworkDiscretized
 from abc import ABC, abstractmethod
 
 LOGGER = logging.getLogger("main.a2c")
@@ -119,13 +121,13 @@ class A2CLearnerBase(ABC):
 
     @property
     @abstractmethod
-    def actor(self) -> nn.Module | None:
-        """The actor module, if it exists."""
+    def actor(self) -> ActorNetwork:
+        """The actor object."""
 
     @property
     @abstractmethod
-    def critic(self) -> nn.Module | None:
-        """The critic module, if it exists."""
+    def critic(self) -> ValueNetwork | QFunction:
+        """The critic object."""
 
 
 class A2CLambdaLearner(A2CLearnerBase):
@@ -288,12 +290,10 @@ class A2CQLearner(A2CLearnerBase):
         
         self._actor = actor
         self._critic = critic
-        self.discount = critic.discount
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
         self.policy_cumulative_discount = policy_cumulative_discount
         self.consider_opponent_action = actor.consider_opponent_action
-        # TODO: use
-        self.update_style = update_style
+        self._update_style = update_style
 
         self.action_dim = self._critic.action_dim
         self.opponent_action_dim = self._critic.opponent_action_dim
@@ -305,6 +305,11 @@ class A2CQLearner(A2CLearnerBase):
         self.postponed_learn: dict = None
         self.frameskipped_critic_updates = []
         self.frameskipped_critic_updates_cumulative_reward = 0.0
+        
+        # Consider a custom opponent policy when updating the Q-values.
+        # Since the opponent is part of the environment, this pretty much defines the transition dynamics
+        # and as such what kind of values we will obtain.
+        self._custom_opponent_policy = None
 
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
@@ -364,7 +369,7 @@ class A2CQLearner(A2CLearnerBase):
         else:
             next_obs_action_probabilities = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
         self.frameskipped_critic_updates.append((obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_action_probabilities))
-        if next_obs_agent_action is not None:
+        if next_obs_agent_action is not None or terminated or truncated:
             # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
             previous_discount = self._critic.discount
             self._critic.discount = 1.0
@@ -382,7 +387,7 @@ class A2CQLearner(A2CLearnerBase):
                     opponent_action=obs_opponent_action_,
                     next_opponent_action=None, # We ignore what the opponent actually did, so that we would not need importance sampling. This will assume that the opponent behaves uniformly randomly
                     next_agent_policy=next_obs_action_probabilities_,
-                    next_opponent_policy=None, # We ignore the actual opponent we are playing against, and approximate Q-values assuming a uniform random opponent
+                    next_opponent_policy=self._custom_opponent_policy(obs_).detach().T if self._custom_opponent_policy is not None else None,
                 )
 
                 total_td_error = total_td_error + torch.mean(td_error).item()
@@ -401,7 +406,7 @@ class A2CQLearner(A2CLearnerBase):
             self._update_actor(obs, obs_agent_action, obs_opponent_action)
 
         if self.policy_cumulative_discount:
-            self.cumulative_discount *= self.discount
+            self.cumulative_discount *= self.critic.discount
 
         if terminated or truncated:
             self.cumulative_discount = 1.0
@@ -420,8 +425,11 @@ class A2CQLearner(A2CLearnerBase):
         if self.postponed_learn is not None:
             self._learn_complete(**self.postponed_learn, next_obs_agent_action=obs_agent_action, next_obs_opponent_action=obs_opponent_action)
             
+            # If the episode terminated, just learn the last bit, don't even need to wait for the agent and opponent actions since they won't exist
             if terminated or truncated:
+                self._learn_complete(obs=obs, next_obs=next_obs, reward=reward, terminated=terminated, truncated=truncated, obs_agent_action=obs_agent_action, obs_opponent_action=obs_opponent_action, next_obs_agent_action=None, next_obs_opponent_action=None)
                 self.postponed_learn = None
+                return
             
         self.postponed_learn = {
             "obs": obs,
@@ -439,6 +447,31 @@ class A2CQLearner(A2CLearnerBase):
     
     @property
     def critic(self):
-        if isinstance(self._critic, QFunctionNetwork):
-            return self._critic.q_network
-        return None
+        return self._critic
+
+    @property
+    def actor_learning_rate(self) -> float:
+        return self.actor_optimizer.param_groups[0]["lr"]
+
+    @actor_learning_rate.setter
+    def actor_learning_rate(self, learning_rate: float):
+        self.actor_optimizer.param_groups[0]["lr"] = learning_rate
+    
+    @property
+    def critic_learning_rate(self) -> float:
+        return self._critic.learning_rate
+    
+    @critic_learning_rate.setter
+    def critic_learning_rate(self, learning_rate: float):
+        self._critic.learning_rate = learning_rate
+
+    def consider_opponent_policy(self, opponent_policy: Callable[[torch.Tensor], torch.Tensor]):
+        """
+        Consider a specific opponent policy when calculating the Q-values.
+        With this, the Q-values will be calculated assuming the opponent behaves according to the given policy.
+        
+        Parameters
+        ----------
+        - `opponent_policy`: A callable that takes an environment observation (tensor) and outputs the probability distribution over opponent actions (of size `batch_size X action_size`). If `None`, will assume a uniform random opponent
+        """
+        self._custom_opponent_policy = opponent_policy

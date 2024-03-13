@@ -36,6 +36,8 @@ class PlayerModelNetwork(nn.Module):
     ):
         super().__init__()
 
+        self._output_dim = output_dim
+
         self.layers = create_layered_network(
             input_dim, output_dim, hidden_layer_sizes, hidden_layer_activation
         )
@@ -55,6 +57,10 @@ class PlayerModelNetwork(nn.Module):
 
     def forward(self, x: torch.Tensor):
         return self.layers(x)
+    
+    @property
+    def output_dim(self) -> int:
+        return self._output_dim
 
 
 class PlayerModel:
@@ -63,10 +69,11 @@ class PlayerModel:
         player_model_network: PlayerModelNetwork,
         move_transition_scale: float = 1.0,
         learning_rate: float = 1e-2,
+        mini_batch_size: int = 1,
         # Reinforcement: keep training on problematic examples.
         # It's bad because it has the potential to stall the opponent model.
-        reinforce_max_loss: float = float("+inf"),
-        reinforce_max_iters: int = float("+inf"),
+        reinforce_max_loss: float = 0.0,
+        reinforce_max_iters: int = 1,
         # Scar: training example that had a loss spike, which we should keep in mind and keep training on in the future.
         # Contrary to the previous idea, scarring just executes one training step per update, but does so in a batch including scars.
         # This should come as a replacement for the move transition scale.
@@ -84,6 +91,7 @@ class PlayerModel:
         scar_detection_threshold: float = float("+inf"),
         smoothed_loss_coef: float = 0.0,
     ):
+        self.mini_batch_size = mini_batch_size
         self.move_transition_scale = move_transition_scale
         self.reinforce_max_loss = reinforce_max_loss
         self.reinforce_max_iters = reinforce_max_iters
@@ -129,11 +137,11 @@ class PlayerModel:
     def mask_environment_observation(self, obs: torch.Tensor) -> torch.Tensor:
         return obs[:, self.obs_mask]
 
-    def update(self, obs: torch.Tensor, action: torch.Tensor, move_transition: bool = False) -> float:
+    def update(self, obs: torch.Tensor, action: int, move_transition: bool = False) -> float:
         total_loss = 0.0
         
         self.x_batch_as_list.append(obs)
-        self.y_batch_as_list.append(action)
+        self.y_batch_as_list.append(torch.nn.functional.one_hot(torch.tensor([action]), num_classes=self.network.output_dim))
         self.move_transition_as_list.append(move_transition)
         self.step += 1
 

@@ -1,3 +1,4 @@
+import os
 import torch
 import logging
 from torch import nn
@@ -12,6 +13,7 @@ from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
 from agents.a2c.a2c import A2CQLearner
 from agents.mimic.agent import PlayerModel
+from agents.torch_utils import observation_invert_perspective_flattened
 from data import FootsiesDataset
 
 LOGGER = logging.getLogger("main.the_one")
@@ -34,15 +36,16 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Modifiers
         over_simple_actions: bool = False,
         remove_special_moves: bool = False,
-        opponent_model_frameskip: bool = True,
+        rollback_as_opponent_model: bool = False,
         # Learning
         game_model_learning_rate: float = 1e-4,
-        opponent_model_learning_rate: float = 1e-4,
     ):
         # Validate arguments
         if not over_simple_actions:
             raise NotImplementedError("non-simple actions are not yet supported")
-        
+        if rollback_as_opponent_model and opponent_model is not None:
+            raise ValueError("can't have an opponent model when using the rollback strategy as an opponent predictor, can only use one or the other")
+
         # Store required values
         #  Dimensions
         self.obs_dim = obs_dim
@@ -57,27 +60,26 @@ class FootsiesAgent(FootsiesAgentTorch):
         #  Modifiers
         self.over_simple_actions = over_simple_actions
         self.remove_agent_special_moves = remove_special_moves
-        self.opponent_model_frameskip = opponent_model_frameskip
+        self.rollback_as_opponent_model = rollback_as_opponent_model
 
         # To report in the `model` property
-        self.full_model = FullModel(
+        self._full_model = FullModel(
             game_model=self.game_model,
-            opponent_model=self.opponent_model,
-            actor=self.a2c.actor,
-            critic=self.a2c.critic,
+            opponent_model=None if self.opponent_model is None else self.opponent_model.network,
+            actor_critic=self.a2c.model,
         )
 
         # Optimizers. The actor-critic module already takes care of its own optimizers.
         if self.game_model is not None:
             self.game_model_optimizer = torch.optim.SGD(self.game_model.parameters(), lr=game_model_learning_rate)
-        if self.opponent_model is not None:
-            self.opponent_model_optimizer = torch.optim.SGD(self.opponent_model.parameters(), lr=opponent_model_learning_rate)
 
         self.current_observation = None
         self.current_representation = None
         # In case simplified, temporally extended actions are being used. We need to keep track of them
         self.current_simple_action = None
         self.current_simple_action_frame = 0
+        # We set the previous opponent action to 0, which should correspond to a no-op (STAND)
+        self.previous_opponent_action = 0
 
         # Loss trackers
         self.cumulative_loss_game_model = 0
@@ -105,7 +107,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             raise ValueError("the game model must be linear to use this method")
         if len(self.opponent_model.opponent_model_layers) > 1:
             raise ValueError("the opponent model must be linear to use this method")
-        if len(self.a2c.actor.actor_layers) > 1:
+        if len(self.a2c._actor.actor_layers) > 1:
             raise ValueError("the actor must be linear to use this method")
 
         obs_dim = self.representation.representation_dim if self.representation is not None else self.obs_dim
@@ -131,7 +133,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         W_o = opponent_model_parameters["weight"].data
         b_o = opponent_model_parameters["bias"].data.unsqueeze(1)
         
-        policy_parameters = dict(self.a2c.actor.actor_layers[0].named_parameters())
+        policy_parameters = dict(self.a2c._actor.actor_layers[0].named_parameters())
         W_a = policy_parameters["weight"].data
         b_a = policy_parameters["bias"].data.unsqueeze(1)
         
@@ -152,6 +154,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_observation = obs
         if self.opponent_model is not None:
             predicted_opponent_action = self.opponent_model.predict(obs)
+        elif self.rollback_as_opponent_model:
+            predicted_opponent_action = self.previous_opponent_action
         else:
             predicted_opponent_action = None
 
@@ -159,7 +163,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
-        # The actions are from info dictionary at the next step, but that's because it contains which action was performed in the *previous* step
+        # Get the actions that were effectively performed by each player on the previous step
         if self.over_simple_actions:
             agent_action, opponent_action = ActionMap.simples_from_torch_transition(self.current_observation, next_obs)
             if self.remove_agent_special_moves:
@@ -170,13 +174,15 @@ class FootsiesAgent(FootsiesAgentTorch):
         else:
             raise NotImplementedError("non-simple actions are not yet supported")
 
-        # Update the different models.
+        # Update the different models
         self.a2c.update(next_obs, reward, terminated, truncated, info)
         if self.game_model is not None:
             self._update_game_model(self.current_observation, agent_action, opponent_action, next_obs)
         if self.opponent_model is not None and opponent_action is not None:
-            opponent_action_onehot = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).unsqueeze(0)
-            self.opponent_model.update(self.current_observation, opponent_action_onehot)
+            self.opponent_model.update(self.current_observation, opponent_action)
+
+        # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy
+        self.previous_opponent_action = opponent_action
 
     def _update_game_model(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
         """Calculate the game model loss, backpropagate and optimize"""
@@ -235,10 +241,13 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     # NOTE: literally extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        actor = self.a2c.actor.clone()
+        actor = self.a2c._actor.clone()
 
         def internal_policy(obs):
             nonlocal actor
+
+            # Invert the perspective, since the agent was trained as if they were on the left side of the screen
+            obs = observation_invert_perspective_flattened(obs)
 
             opp_action = None
             previous_observation = getattr(actor, "previous_observation__") if hasattr(actor, "previous_observation__") else None
@@ -262,8 +271,41 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     @property
     def model(self) -> nn.Module:
-        return self.full_model
+        return self._full_model
     
+    # Only the actor-critic modules are shared in Hogwild!, not the game model or opponent model
+    @property
+    def shareable_model(self) -> nn.Module:
+        return self.a2c.model
+
+    def load(self, folder_path: str):
+        # Load actor-critic
+        self.a2c.load(folder_path)
+
+        # Load game model
+        if self.game_model is not None:
+            game_model_path = os.path.join(folder_path, "game_model")
+            self.game_model.load_state_dict(torch.load(game_model_path))
+
+        # Load opponent model (even though this is meant to be discardable)
+        if self.opponent_model is not None:
+            opponent_model_path = os.path.join(folder_path, "opponent_model")
+            self.opponent_model.load(opponent_model_path)
+
+    def save(self, folder_path: str):
+        # Save actor-critic
+        self.a2c.save(folder_path)
+
+        # Save game model
+        if self.game_model is not None:
+            game_model_path = os.path.join(folder_path, "game_model")
+            torch.save(self.game_model.state_dict(), game_model_path)
+        
+        # Save opponent model (even though this is meant to be discardable)
+        if self.opponent_model is not None:
+            opponent_model_path = os.path.join(folder_path, "opponent_model")
+            self.opponent_model.save(opponent_model_path)
+
     def evaluate_average_loss_game_model(self) -> float:
         res = (
             self.cumulative_loss_game_model / self.cumulative_loss_game_model_n

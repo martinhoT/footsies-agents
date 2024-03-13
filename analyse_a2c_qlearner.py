@@ -8,8 +8,9 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
 from analysis import Analyser
 from agents.action import ActionMap
+from agents.a2c.a2c import A2CQLearner
 from agents.a2c.agent import FootsiesAgent as A2CAgent
-from agents.ql.ql import QFunctionTable
+from agents.ql.ql import QFunctionNetwork, QFunctionTable
 from main import load_agent_model
 
 
@@ -20,7 +21,7 @@ SIMPLE_ACTION_LABELS = SIMPLE_ACTION_LABELS_GEN(ActionMap.SIMPLE_ACTIONS, Action
 SIMPLE_ACTION_LABELS_REVERSED = SIMPLE_ACTION_LABELS_REVERSED_GEN(ActionMap.SIMPLE_ACTIONS, ActionMap.n_simple())
 
 
-class QTablePlot:
+class PlayerActionMatrix:
     def __init__(
         self,
         action_dim: int,
@@ -35,23 +36,30 @@ class QTablePlot:
         self.color_scale = None
         self.series = None
 
-    def setup(self, title: str = "Q-table"):
+    def setup(self, title: str, value_range: tuple[float, float] = (-1.0, 1.0)):
+        sx, sy = value_range
+        agent_actions = SIMPLE_ACTION_LABELS_GEN(ActionMap.SIMPLE_ACTIONS[:self.action_dim], self.action_dim)
+        opponent_actions = SIMPLE_ACTION_LABELS_REVERSED_GEN(ActionMap.SIMPLE_ACTIONS[:self.opponent_action_dim], self.opponent_action_dim)
+
         with dpg.group(horizontal=True):
             if self.add_color_scale:
-                self.color_scale = dpg.add_colormap_scale(min_scale=-1.0, max_scale=1.0, colormap=dpg.mvPlotColormap_Viridis, height=400)
-            with dpg.plot(label=title, no_mouse_pos=True, height=400, width=-1) as plot: # height=400, width=-1
+                self.color_scale = dpg.add_colormap_scale(min_scale=sx, max_scale=sy, colormap=dpg.mvPlotColormap_Viridis, height=400)
+
+            with dpg.plot(label=title, no_mouse_pos=True, height=400, width=-1) as plot:
                 dpg.bind_colormap(plot, dpg.mvPlotColormap_Viridis)
                 x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Agent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True)
-                dpg.set_axis_ticks(x_axis, SIMPLE_ACTION_LABELS_GEN(ActionMap.SIMPLE_ACTIONS[:self.action_dim], self.action_dim))
-                with dpg.plot_axis(dpg.mvYAxis, label="Opponent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True) as y_axis:
-                    dpg.set_axis_ticks(y_axis, SIMPLE_ACTION_LABELS_REVERSED_GEN(ActionMap.SIMPLE_ACTIONS[:self.opponent_action_dim], self.opponent_action_dim))
-                    initial_data = np.zeros((self.opponent_action_dim, self.action_dim))
-                    self.series = dpg.add_heat_series(initial_data.flatten().tolist(), rows=self.opponent_action_dim, cols=self.action_dim, scale_min=-1.0, scale_max=1.0)
+                dpg.set_axis_ticks(x_axis, agent_actions)
 
-    def update(self, q_values: np.ndarray):
-        dpg.set_value(self.series, [q_values.flatten().tolist(), [self.opponent_action_dim, self.action_dim]])
+                with dpg.plot_axis(dpg.mvYAxis, label="Opponent action", lock_min=True, lock_max=True, no_gridlines=True, no_tick_marks=True) as y_axis:
+                    dpg.set_axis_ticks(y_axis, opponent_actions)
+                    initial_data = np.zeros((self.opponent_action_dim, self.action_dim))
+                    self.series = dpg.add_heat_series(initial_data.flatten().tolist(), rows=self.opponent_action_dim, cols=self.action_dim, scale_min=sx, scale_max=sy, format="%0.2f")
+
+    def update(self, values: np.ndarray):
+        dpg.set_value(self.series, [values.flatten().tolist(), [self.opponent_action_dim, self.action_dim]])
+
         if self.auto_scale:
-            mn, mx = np.min(q_values), np.max(q_values)
+            mn, mx = np.min(values), np.max(values)
             if self.color_scale is not None:
                 dpg.configure_item(self.color_scale, min_scale=mn, max_scale=mx)
             dpg.configure_item(self.series, scale_min=mn, scale_max=mx)
@@ -99,56 +107,96 @@ class QLearnerAnalyserManager:
         opponent_action_dim: int,
     ):
         self.agent = agent
-        self.q_table = None
+        # Assume it's the QLearner to avoid headache
+        self.learner: A2CQLearner = agent.learner
         self.action_dim = action_dim
         self.opponent_action_dim = opponent_action_dim
 
-        self.q_table_plot = QTablePlot(action_dim, opponent_action_dim, auto_scale=False)
-        self.q_table_update_frequency_plot = QTablePlot(action_dim, opponent_action_dim, add_color_scale=False, auto_scale=True) if isinstance(self.agent.critic, QFunctionTable) else None
-        self.policy_plot = PolicyDistributionPlot(action_dim)
+        self.online_learning = False
+        self.show_target_network = False
+
+        self.q_table_plot = PlayerActionMatrix(action_dim, opponent_action_dim, auto_scale=False)
+        self.q_table_update_frequency_plot = PlayerActionMatrix(action_dim, opponent_action_dim, add_color_scale=False, auto_scale=True) if isinstance(self.agent._critic, QFunctionTable) else None
+        self.policy_plot = PlayerActionMatrix(action_dim, opponent_action_dim, auto_scale=False)
         
         self.current_observation = None
 
         # DPG items
         self.predicted_opponent_action = None
+        self.attribute_modifier_window = None
+        self.current_observation_index = None
 
     def add_custom_elements(self, analyser: Analyser):
-        self.q_table_plot.setup(title="Q-table values")
+        with dpg.window(label="Attribute modifier", show=False) as self.attribute_modifier_window:
+            dpg.add_text("Actor")
+            dpg.add_slider_float(label="Learning rate", default_value=self.learner.actor_learning_rate, min_value=0.0, max_value=1.0, callback=lambda s, a: setattr(self.learner, "actor_learning_rate", a))
+
+            dpg.add_separator()
+
+            dpg.add_text("Critic")
+            dpg.add_slider_float(label="Learning rate", default_value=self.learner.critic_learning_rate, min_value=0.0, max_value=1.0, callback=lambda s, a: setattr(self.learner, "critic_learning_rate", a))
+            dpg.add_slider_float(label="Discount", default_value=self.learner.critic.discount, min_value=0.0, max_value=1.0, callback=lambda s, a: setattr(self.learner.critic, "discount", a))
+
+        with dpg.group(horizontal=True):
+            dpg.add_button(label="Open attribute modifier", callback=lambda: dpg.show_item(self.attribute_modifier_window))            
+            dpg.add_checkbox(label="Online learning", default_value=self.online_learning, callback=lambda s, a: setattr(self, "online_learning", a))
+
+        dpg.add_separator()
+
+        if isinstance(self.learner.critic, QFunctionNetwork):
+            dpg.add_checkbox(label="Show target network", default_value=self.show_target_network, callback=lambda s, a: setattr(self, "show_target_network", a))
+        self.q_table_plot.setup(title="Q-table values", value_range=(-1.0, 1.0))
     
         if self.q_table_update_frequency_plot is not None:
             self.q_table_update_frequency_plot.setup(title="Q-table update frequency")        
 
+        if isinstance(self.learner.critic, QFunctionTable):
+            with dpg.group(horizontal=True):
+                dpg.add_text("Current observation index: ")
+                self.current_observation_index = dpg.add_text("0")
+
         dpg.add_separator()
         
-        self.policy_plot.setup()
-        
-        dpg.add_separator()
+        self.policy_plot.setup(title="Policy distributions", value_range=(0.0, 1.0))
 
-        with dpg.group(horizontal=True):
-            dpg.add_text("Predicted opponent action:")
-            self.predicted_opponent_action = dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], default_value=FootsiesMove.STAND.name, enabled=True, callback=lambda s: self.update_policy_distribution())
-
-    def update_policy_distribution(self, obs: np.ndarray = None):
-        if obs is None:
-            obs = self.current_observation
-        
-        opponent_action = self.get_predicted_opponent_action()
-        policy_distribution = self.agent.actor.probabilities(obs, opponent_action).detach().numpy().flatten()
+    def update_policy_distribution(self, obs: torch.Tensor):
+        policy_distribution = self.agent._actor.probabilities(obs, None).numpy(force=True).flatten()
         self.policy_plot.update(policy_distribution)
 
     def on_state_update(self, analyser: Analyser):
         obs: torch.Tensor = analyser.current_observation
-        self.current_observation = obs
 
-        q_values = self.agent.critic.q(obs)
+        if isinstance(self.learner.critic, QFunctionNetwork):
+            q_values = self.learner.critic.q(obs, use_target_network=self.show_target_network)
+        else:
+            q_values = self.learner.critic.q(obs)
         self.q_table_plot.update(q_values)
         if self.q_table_update_frequency_plot is not None:
-            self.q_table_update_frequency_plot.update(self.agent.critic.update_frequency(obs))
+            self.q_table_update_frequency_plot.update(self.agent._critic.update_frequency(obs))
+
+        if isinstance(self.learner.critic, QFunctionTable) and self.current_observation_index is not None:
+            dpg.set_value(self.current_observation_index, str(self.learner.critic._obs_idx(obs)))
 
         self.update_policy_distribution(obs)
 
-    def get_predicted_opponent_action(self):
-        return ActionMap.simple_from_move(FootsiesMove[dpg.get_value(self.predicted_opponent_action)])
+        if self.online_learning and analyser.previous_observation is not None:
+            obs, next_obs, reward, terminated, truncated, _, _ = analyser.most_recent_transition
+            # Clone the observations, detached from the graph (clone() is differentiable, so we use detach()), 
+            # don't get internal references in the analyser since those can change dynamically
+            # (e.g. by loading battle states), which messes up the gradient computation graph
+            obs = obs.detach().clone()
+            next_obs = next_obs.detach().clone()
+
+            if not isinstance(obs, torch.Tensor) or not isinstance(next_obs, torch.Tensor):
+                raise RuntimeError("the online learning portion of the A2C analyser assumes the environment is providing PyTorch tensors as observations, but that is not the case!")
+
+            p1_simple, p2_simple = ActionMap.simples_from_torch_transition(obs, next_obs)
+
+            # Avoid using special moves if they weren't specified
+            if p1_simple is not None:
+                p1_simple = min(p1_simple, self.action_dim - 1)
+
+            self.learner.learn(obs, next_obs, reward, terminated, truncated, obs_agent_action=p1_simple, obs_opponent_action=p2_simple)
 
 
 if __name__ == "__main__":

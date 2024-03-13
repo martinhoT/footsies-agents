@@ -60,7 +60,7 @@ class OpponentDistributionPlot:
     def setup(self, width: int = 1200):
         y = np.zeros((ActionMap.n_simple(),))
 
-        with dpg.plot(label=self.title, width=width):
+        with dpg.plot(label=self.title, width=width) as plot:
             dpg.add_plot_legend()
             
             self.x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Move")
@@ -72,6 +72,8 @@ class OpponentDistributionPlot:
         
             self.predicted_series = dpg.add_bar_series(self.x + 1.0 - self.bar_width, y, label="Predicted", weight=self.bar_width * 2, parent=self.y_axis)
             self.estimated_series = dpg.add_bar_series(self.x + 1.0 + self.bar_width, y, label="Estimated", weight=self.bar_width * 2, parent=self.y_axis)
+
+            dpg.bind_colormap(plot, dpg.mvPlotColormap_Default)
 
     def update(self, distribution_predicted: np.ndarray, distribution_estimated: np.ndarray):
         if distribution_predicted is not None:
@@ -104,13 +106,15 @@ class GradientHistogramPlot:
         self.histogram = None
     
     def setup(self, width: int = 1200):
-        with dpg.plot(label=self.title, width=width):
+        with dpg.plot(label=self.title, width=width) as plot:
             self.x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Gradient")
 
             self.y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Density")
             dpg.set_axis_limits(self.y_axis, 0.0, 1.5)
         
             self.histogram = dpg.add_bar_series(self.x + self.step / 2, [0.0] * len(self.x), weight=self.step, parent=self.y_axis)
+
+            dpg.bind_colormap(plot, dpg.mvPlotColormap_Default)
 
     def update(self, parameters: Iterable[torch.nn.Parameter]):
         grads = [param.grad.flatten() for param in parameters if param.grad is not None]
@@ -146,7 +150,7 @@ class LossPlot:
         self.y_axis = None
     
     def setup(self, width: int = 1200):
-        with dpg.plot(label=self.title, width=width):
+        with dpg.plot(label=self.title, width=width) as plot:
             dpg.add_plot_legend()
 
             self.x_axis = dpg.add_plot_axis(dpg.mvXAxis, label="Episode")
@@ -158,6 +162,8 @@ class LossPlot:
             self.current_loss_plot = dpg.add_line_series(self.x, self.y_current_loss, label="Loss at this example", parent=self.y_axis)
             self.smoothed_loss_plot = dpg.add_line_series(self.x, self.y_smoothed_loss, label="Smoothed loss", parent=self.y_axis)
             self.threshold_plot = dpg.add_line_series(self.x, self.y_threshold, label="Threshold", parent=self.y_axis)
+
+            dpg.bind_colormap(plot, dpg.mvPlotColormap_Default)
     
     def update(self, new_loss: float, smoothed_loss: float, new_threshold: float = None):
         if new_threshold is not None:
@@ -198,11 +204,11 @@ class MimicAnalyserManager:
         self.p2_plot = OpponentDistributionPlot("Player 2 move probability distribution")
         
         # NOTE: Recommended to use odd bins so that one bin catches values around 0
-        self.p1_gradient_plot = GradientHistogramPlot("Player 1 learning gradients", 101, -1, 1)
-        self.p2_gradient_plot = GradientHistogramPlot("Player 2 learning gradients", 101, -1, 1)
+        self.p1_gradient_plot = GradientHistogramPlot("Player 1 learning gradients", 101, -1, 1) if self.p1_model is not None else None
+        self.p2_gradient_plot = GradientHistogramPlot("Player 2 learning gradients", 101, -1, 1) if self.p2_model is not None else None
 
-        self.p1_loss_plot = LossPlot("Player 1 learning loss", 50, self.p1_model.scar_detection_threshold)
-        self.p2_loss_plot = LossPlot("Player 2 learning loss", 50, self.p2_model.scar_detection_threshold)
+        self.p1_loss_plot = LossPlot("Player 1 learning loss", 50, self.p1_model.scar_detection_threshold) if self.p1_model is not None else None
+        self.p2_loss_plot = LossPlot("Player 2 learning loss", 50, self.p2_model.scar_detection_threshold) if self.p2_model is not None else None
 
         n_moves = ActionMap.n_simple()
         self.p1_action_table = ActionTableEstimator(n_moves)
@@ -270,15 +276,13 @@ class MimicAnalyserManager:
 
         dpg.add_separator()
 
-        if self.learn_p1:
-            with dpg.group(horizontal=True):
-                dpg.add_text("Size of action table estimator of player 1: ")
-                self.p1_action_table_estimator_size = dpg.add_text("")
+        with dpg.group(horizontal=True):
+            dpg.add_text("Size of action table estimator of player 1: ")
+            self.p1_action_table_estimator_size = dpg.add_text("")
         
-        if self.learn_p2:
-            with dpg.group(horizontal=True):
-                dpg.add_text("Size of action table estimator of player 2: ")
-                self.p2_action_table_estimator_size = dpg.add_text("")
+        with dpg.group(horizontal=True):
+            dpg.add_text("Size of action table estimator of player 2: ")
+            self.p2_action_table_estimator_size = dpg.add_text("")
 
         with dpg.group(horizontal=True):
             dpg.add_text("Actual move of player 1:")
@@ -291,7 +295,7 @@ class MimicAnalyserManager:
         dpg.add_separator()
 
         with dpg.window(label="Attribute modifier", show=False) as self.attribute_modifier_window:
-            if self.learn_p1:
+            if self.p1_model is not None:
                 dpg.add_text("Player 1")
                 dpg.add_slider_float(label="Scar detection threshold", default_value=self.p1_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p1_model, "scar_detection_threshold", a))
                 dpg.add_slider_float(label="Smoothed loss coef", default_value=self.p1_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p1_model, "smoothed_loss_coef", a))
@@ -303,7 +307,7 @@ class MimicAnalyserManager:
 
             dpg.add_separator()
 
-            if self.learn_p2:
+            if self.p2_model is not None:
                 dpg.add_text("Player 2")
                 dpg.add_slider_float(label="Scar detection threshold", default_value=self.p2_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p2_model, "scar_detection_threshold", a))
                 dpg.add_slider_float(label="Smoothed loss coef", default_value=self.p2_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p2_model, "smoothed_loss_coef", a))
@@ -317,17 +321,21 @@ class MimicAnalyserManager:
 
         with dpg.collapsing_header(label="Loss plots"):
             with dpg.group(horizontal=True):
-                with dpg.group():
-                    self.p1_loss_plot.setup(525)
-                    self.p1_scar_size = dpg.add_slider_float(label="Player 1 scar size", default_value=len(self.p1_model.x_batch_as_list), max_value=100, min_value=0, width=100, enabled=False)
-                with dpg.group():
-                    self.p2_loss_plot.setup(525)
-                    self.p2_scar_size = dpg.add_slider_float(label="Player 2 scar size", default_value=len(self.p2_model.x_batch_as_list), max_value=100, min_value=0, width=100, enabled=False)
+                if self.p1_model is not None:
+                    with dpg.group():
+                        self.p1_loss_plot.setup(525)
+                        self.p1_scar_size = dpg.add_slider_float(label="Player 1 scar size", default_value=len(self.p1_model.x_batch_as_list), max_value=100, min_value=0, width=100, enabled=False)
+                if self.p2_model is not None:
+                    with dpg.group():
+                        self.p2_loss_plot.setup(525)
+                        self.p2_scar_size = dpg.add_slider_float(label="Player 2 scar size", default_value=len(self.p2_model.x_batch_as_list), max_value=100, min_value=0, width=100, enabled=False)
             
         with dpg.collapsing_header(label="Gradient plots"):
             with dpg.group(horizontal=True):
-                self.p1_gradient_plot.setup(525)
-                self.p2_gradient_plot.setup(525)
+                if self.p1_model is not None:
+                    self.p1_gradient_plot.setup(525)
+                if self.p2_model is not None:
+                    self.p2_gradient_plot.setup(525)
         
     def predict_next_move(self, analyser: Analyser):
         if analyser.previous_observation is None:
@@ -355,7 +363,7 @@ class MimicAnalyserManager:
         self.p2_action_table.update(obs, p2_simple)
 
         # Update P1 model
-        if self.learn_p1:
+        if self.learn_p1 and p1_simple is not None:
             self.p1_model.update(obs, p1_simple)
 
             self.p1_gradient_plot.update(self.p1_model.network.parameters())
@@ -363,7 +371,7 @@ class MimicAnalyserManager:
             dpg.set_value(self.p1_scar_size, len(self.p1_model.x_batch_as_list))
         
         # Update P2 model
-        if self.learn_p2:
+        if self.learn_p2 and p2_simple is not None:
             self.p2_model.update(obs, p2_simple)
             
             self.p2_gradient_plot.update(self.p2_model.network.parameters())
@@ -450,8 +458,8 @@ if __name__ == "__main__":
         mini_batch_size=1,
         move_transition_scale=1.0,
         learning_rate=3e-3,
-        reinforce_max_loss=float("+inf"),
-        reinforce_max_iters=float("+inf"),
+        reinforce_max_loss=0.0,
+        reinforce_max_iters=1,
         scar_max_size=1000,
         scar_loss_coef=1.0,
         scar_recency_coef=0.0,

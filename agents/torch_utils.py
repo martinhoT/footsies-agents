@@ -74,7 +74,7 @@ def hogwild(
     - `logging_wrapper`: the logging wrapper to apply to the worker of rank 0. If None, no logging will be performed
     - `training_method_kwargs`: additional keyword arguments to pass to the training method
     """
-    agent.model.share_memory()
+    agent.shareable_model.share_memory()
 
     total_cpus = mp.cpu_count()
     if cpus_to_use is None:

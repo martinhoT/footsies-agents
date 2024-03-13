@@ -46,8 +46,18 @@ class QFunction(ABC):
 
     @discount.setter
     @abstractmethod
-    def discount(self):
-        """Change the discount factor."""
+    def discount(self, value: float):
+        """"""
+
+    @property
+    @abstractmethod
+    def learning_rate(self) -> float:
+        """The learning rate."""
+
+    @learning_rate.setter
+    @abstractmethod
+    def learning_rate(self, value: float):
+        """"""
 
     @property
     @abstractmethod
@@ -81,12 +91,14 @@ class QFunction(ABC):
         - `next_agent_action`: the action taken by the agent in the next step. If not `None`, will consider the next Q-value for that action. This corresponds to SARSA
         - `next_opponent_action`: the action taken by the opponent in the next step. If not `None`, will consider the next Q-value for that opponent action.
         WARNING: probably requires importance sampling, so it should not be used
-        - `next_agent_policy`: the agent's policy evaluated at the next observation. If not `None`, will consider the next Q-values weighted by the current policy.
+        - `next_agent_policy`: the agent's policy evaluated at the next observation.
+        Should be a matrix with agent actions in the rows and opponent actions in the columns.
+        If not `None`, will consider the next Q-values weighted by the current policy.
         This corresponds to Expected SARSA, or Q-learning if `agent_policy` happens to be greedy.
-        Should be a matrix with agent actions in the rows and opponent actions in the columns
-        - `next_opponent_policy`: the opponent's policy evaluated at the next observation. Should be a column vector
+        - `next_opponent_policy`: the opponent's policy evaluated at the next observation.
+        Should be a column vector.
         If not `None`, will weight the next Q-values according to how likely they are to happen under the opponent's policy.
-        If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a unifrom random policy in the next observation
+        If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a uniform random policy in the next observation
         """
         if terminated:
             nxt_value = 0.0
@@ -122,7 +134,7 @@ class QFunction(ABC):
                 next_q = next_opponent_policy @ np.max(next_qs, axis=-1, keepdims=True)
                 LOGGER.debug("Setup Q-learning update")
 
-            nxt_value = self.discount * next_q
+            nxt_value = self.discount * next_q.item()
 
         target = reward + nxt_value
         cur_value = self.q(obs, agent_action, opponent_action=opponent_action).detach()
@@ -217,7 +229,7 @@ class QFunctionTable(QFunction):
 
         self._action_dim = action_dim
         self._opponent_action_dim = opponent_action_dim
-        self.learning_rate = learning_rate
+        self._learning_rate = learning_rate
         self._discount = discount
         self.table_as_matrix = table_as_matrix
         self.environment = environment
@@ -261,8 +273,10 @@ class QFunctionTable(QFunction):
             # Make the empty value read-only. This is the value that is returned if the queried observation is not in the Q-table
             self.table_empty_value.setflags(write=False)
     
-    def _footsies_obs_idx(self, obs: np.ndarray) -> int:
+    def _footsies_obs_idx(self, obs: torch.Tensor) -> int:
         """Obtain the integer identifier associated to the given observation from the `footsies` environment."""
+        obs = obs.squeeze().numpy()
+        
         gu1, gu2 = tuple(np.round(obs[0:2] * 3))
         mo1 = np.argmax(obs[2:17])
         mo2 = np.argmax(obs[17:32])
@@ -280,13 +294,15 @@ class QFunctionTable(QFunction):
             + 4**2 * 15**2 * self.move_frame_n_bins**2 * self.position_n_bins * po2
         )
 
-    def _mountain_car_obs_idx(self, obs: np.ndarray) -> int:
+    def _mountain_car_obs_idx(self, obs: torch.Tensor) -> int:
         """Obtain the integer identifier associated to the given observation from the `mountain car` environment."""
+        obs = obs.squeeze().numpy()
+        
         pos = np.digitize(obs[0], self.position_bins).item()
         vel = np.digitize(obs[1], self.velocity_bins).item()
         return int(pos + 10 * vel)
 
-    def _obs_idx(self, obs: np.ndarray) -> int:
+    def _obs_idx(self, obs: torch.Tensor) -> int:
         """Obtain the integer identifier associated to the given observation."""
         if self.environment == "footsies":
             return self._footsies_obs_idx(obs)
@@ -295,7 +311,7 @@ class QFunctionTable(QFunction):
         
         return None
 
-    def _update_q_value(self, obs: np.ndarray, target: float, action: int = None, opponent_action: int = None):
+    def _update_q_value(self, obs: torch.Tensor, target: float, action: int = None, opponent_action: int = None):
         if action is None:
             action = slice(None)
         if opponent_action is None:
@@ -303,44 +319,48 @@ class QFunctionTable(QFunction):
 
         obs_idx = self._obs_idx(obs)
 
-        td_error = (target - self.q(obs, action, opponent_action))
+        td_error = (target - self.q(obs, action, opponent_action).squeeze(dim=0).numpy(force=True))
 
         if self.table_as_matrix:
             if self.considering_opponent:
-                self.table[obs_idx, opponent_action, action] += self.learning_rate * td_error
+                self.table[obs_idx, opponent_action, action] += self._learning_rate * td_error
                 self.update_frequency_table[obs_idx, opponent_action, action] += 1
             else:
-                self.table[obs_idx, action] += self.learning_rate * td_error
+                self.table[obs_idx, action] += self._learning_rate * td_error
                 self.update_frequency_table[obs_idx, action] += 1
         else:
             if self.considering_opponent:
                 if obs_idx not in self.table:
                     self.table[obs_idx] = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.float32)
                     self.update_frequency_table[obs_idx] = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.int32)
-                self.table[obs_idx][opponent_action, action] += self.learning_rate * td_error
+                self.table[obs_idx][opponent_action, action] += + self._learning_rate * td_error
                 self.update_frequency_table[obs_idx][opponent_action, action] += 1
             else:
                 if obs_idx not in self.table:
                     self.table[obs_idx] = np.zeros(self.action_dim, dtype=np.float32)
                     self.update_frequency_table[obs_idx] = np.zeros(self.action_dim, dtype=np.int32)
-                self.table[obs_idx][action] += self.learning_rate * td_error
+                self.table[obs_idx][action] += + self._learning_rate * td_error
                 self.update_frequency_table[obs_idx][action] += 1
 
-    def q(self, obs: np.ndarray, action: int = None, opponent_action: int = None) -> float | np.ndarray:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
         if action is None:
             action = slice(None)
         if opponent_action is None:
             opponent_action = slice(None)
         
+        res = None
         if self.table_as_matrix:
-            return self.table[self._obs_idx(obs), opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs), action]
+            res = self.table[self._obs_idx(obs), opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs), action] 
         else:
             obs_idx = self._obs_idx(obs)
             if obs_idx not in self.table:
-                return self.table_empty_value[opponent_action, action]
-            return self.table[self._obs_idx(obs)][opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs)][action]
+                res = self.table_empty_value[opponent_action, action]
+            else:
+                res = self.table[self._obs_idx(obs)][opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs)][action]
+            
+        return torch.from_numpy(res).unsqueeze(0) if isinstance(res, np.ndarray) else torch.tensor(res).unsqueeze(0)
 
-    def update_frequency(self, obs: np.ndarray) -> np.ndarray:
+    def update_frequency(self, obs: torch.Tensor) -> np.ndarray:
         """Get the update frequency for the given observation."""
         if self.table_as_matrix:
             return self.update_frequency_table[self._obs_idx(obs), :, :] if self.considering_opponent else self.update_frequency_table[self._obs_idx(obs), :]
@@ -396,7 +416,15 @@ class QFunctionTable(QFunction):
     @discount.setter
     def discount(self, discount: float):
         self._discount = discount
-        
+    
+    @property
+    def learning_rate(self) -> float:
+        return self._learning_rate
+
+    @learning_rate.setter
+    def learning_rate(self, learning_rate: float):
+        self._learning_rate = learning_rate
+
 
 class QNetwork(nn.Module):
     def __init__(
@@ -459,7 +487,6 @@ class QFunctionNetwork(QFunction):
         discount: float = 1.0,
         learning_rate: float = 1e-2,
         target_network: QNetwork = None,
-        target_network_blank: bool = False,
         target_network_update_interval: int = 1000,
     ):
         """
@@ -475,7 +502,6 @@ class QFunctionNetwork(QFunction):
         - `discount`: the discount factor
         - `learning_rate`: the learning rate
         - `target_network`: an extra, slower-changing, target network to stabilize learning. If `None`, it won't be used
-        - `target_network_blank`: if `True`, the target network will be a copy the Q-network, but with all parameters set to 0, otherwise it's just a copy
         - `target_network_update_interval`: the interval between target network updates, in terms of update steps
         """
         self._action_dim = action_dim
@@ -489,12 +515,8 @@ class QFunctionNetwork(QFunction):
         if self._use_target_network:
             # Make a copy of the Q-network, but with parameters set to 0 to remove any noise that the Q-network would pick up
             self.target_network = target_network
-            if target_network_blank:
-                for param in self.target_network.parameters():
-                    param.data.zero_()
-            else:
-                for target_param, q_param in zip(self.target_network.parameters(), self.q_network.parameters()):
-                    target_param.data.copy_(q_param.data)
+            for param in self.target_network.parameters():
+                param.data.zero_()
             
             # Disable gradient computation to get speed boost.
             self.target_network.requires_grad_(False)
@@ -525,21 +547,20 @@ class QFunctionNetwork(QFunction):
                 target_param.data.copy_(q_param.data)
             self._current_update_step = 0
     
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, use_target_network: bool = True) -> float | torch.Tensor:
         if action is None:
             action = slice(None)
         if opponent_action is None:
             opponent_action = slice(None)
 
-        return self.target_network(obs)[:, opponent_action, action]
+        network = self.target_network if use_target_network else self.q_network
+        return network(obs)[:, opponent_action, action]
 
     def save(self, path: str):
-        model_path = os.path.join(path, "qnetwork")
-        torch.save(self.q_network.state_dict(), model_path)
+        torch.save(self.q_network.state_dict(), path)
     
     def load(self, path: str):
-        model_path = os.path.join(path, "qnetwork")
-        state_dict = torch.load(model_path)
+        state_dict = torch.load(path)
         self.q_network.load_state_dict(state_dict)
         if self._use_target_network:
             self.target_network.load_state_dict(state_dict)
@@ -561,6 +582,14 @@ class QFunctionNetwork(QFunction):
         self._discount = discount
 
     @property
+    def learning_rate(self) -> float:
+        return self.q_network_optimizer.param_groups[0]["lr"]
+    
+    @learning_rate.setter
+    def learning_rate(self, learning_rate: float):
+        self.q_network_optimizer.param_groups[0]["lr"] = learning_rate
+
+    @property
     def considering_opponent(self) -> bool:
         return self._opponent_action_dim is not None
 
@@ -575,6 +604,9 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
         opponent_action_dim: int = None,
         discount: float = 1.0,
         learning_rate: float = 1e-2,
+        target_network: QNetwork = None,
+        target_network_blank: bool = False,
+        target_network_update_interval: int = 1000,
         move_frame_n_bins: int = 5,
         position_n_bins: int = 5,
         environment: str = "footsies",
@@ -593,6 +625,9 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
         and action-values will be of the form `Q(s, o, a)`
         - `discount`: the discount factor
         - `learning_rate`: the learning rate
+        - `target_network`: an extra, slower-changing, target network to stabilize learning. If `None`, it won't be used
+        - `target_network_blank`: if `True`, the target network will be a copy the Q-network, but with all parameters set to 0, otherwise it's just a copy
+        - `target_network_update_interval`: the interval between target network updates, in terms of update steps
         - `move_frame_n_bins`: how many separations to perform on the move frame observation variable when discretizing. Only valid for the "footsies" environment
         - `position_n_bins`: how many separations to perform on the position observation variable when discretizing. Only valid for the "footsies" environment
         - `environment`: the environment for which the Q-table is being instantiated. Currently only supports "footsies" and "mountain car"
@@ -603,9 +638,14 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
             opponent_action_dim=opponent_action_dim,
             discount=discount,
             learning_rate=learning_rate,
+            target_network=target_network,
+            target_network_blank=target_network_blank,
+            target_network_update_interval=target_network_update_interval,
         )
         if environment not in ("footsies", "mountain car"):
             raise ValueError(f"environment '{environment}' not supported")
+
+        self.environment = environment
 
         if self.environment == "footsies":
             self.move_frame_n_bins = move_frame_n_bins
@@ -613,8 +653,8 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
             self._obs_dim = self.env_obs_dim("footsies", move_frame=move_frame_n_bins, position=position_n_bins)
 
             # Leave some leeway for the start and end of the linear space, since the start and end are part of the observation
-            self.move_frame_bins = np.linspace(-0.1, 1.1, move_frame_n_bins)
-            self.position_bins = np.linspace(-1.1, 1.1, position_n_bins)
+            self.move_frame_bins = torch.linspace(-0.1, 1.1, move_frame_n_bins)
+            self.position_bins = torch.linspace(-1.1, 1.1, position_n_bins)
 
         elif self.environment == "mountain car":
             # These variables are hardcorded for the mountain car environment
@@ -623,14 +663,17 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
             self._obs_dim = self.env_obs_dim("mountain car", position=position_n_bins, velocity=velocity_n_bins)
             self.position_n_bins = position_n_bins
 
-            self.position_bins = np.linspace(-1.2, 0.6, position_n_bins)
-            self.velocity_bins = np.linspace(-0.07, 0.07, velocity_n_bins)
+            self.position_bins = torch.linspace(-1.2, 0.6, position_n_bins)
+            self.velocity_bins = torch.linspace(-0.07, 0.07, velocity_n_bins)
 
     def _transform_obs(self, obs: torch.Tensor) -> torch.Tensor:
         """Transform the continuous environment observation into a discretized one, similar in nature to the Q-table."""
-        gu1, gu2 = tuple(torch.round(obs[0:2] * 3))
-        mf1, mf2 = tuple(torch.digitize(obs[32:34], self.move_frame_bins))
-        po1, po2 = tuple(torch.digitize(obs[34:36], self.position_bins))
+        obs = obs.squeeze()
+        
+        gu1, gu2 = torch.round(obs[0:2] * 3).tolist()
+        # We set right=True to mimic the behavior of NumPy's digitize (they are exactly opposite)
+        mf1, mf2 = torch.bucketize(obs[32:34], self.move_frame_bins, right=True).tolist()
+        po1, po2 = torch.bucketize(obs[34:36], self.position_bins, right=True).tolist()
         
         obs_discretized = torch.hstack((
             # Guard

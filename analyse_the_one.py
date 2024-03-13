@@ -11,8 +11,12 @@ from agents.action import ActionMap
 from main import load_agent_model
 from analyse_a2c_qlearner import QLearnerAnalyserManager
 from analyse_opponent_model import MimicAnalyserManager
-from models import the_one_vanilla_no_specials_
+from models import the_one_vanilla_no_specials_, the_one_vanilla_no_specials_opp_, the_one_vanilla_, the_one_vanilla_no_specials_rollback_
 from gymnasium.wrappers.transform_observation import TransformObservation
+import logging
+from sys import stdout
+
+logging.basicConfig(level=logging.DEBUG, stream=stdout)
 
 
 if __name__ == "__main__":
@@ -37,12 +41,18 @@ if __name__ == "__main__":
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
 
-    agent, _ = the_one_vanilla_no_specials_(
+    agent, loggables = the_one_vanilla_(
         env.observation_space.shape[0],
         env.action_space.n,
+        qtable=True
     )
 
-    load_agent_model(agent, "the_one_vanilla_no_specials_tanh")
+    idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
+    idle_distribution[0, 0] = 1.0
+    print(idle_distribution)
+    agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
+
+    # load_agent_model(agent, "the_one_vanilla_leaky")
 
     def spammer():
         from itertools import cycle
@@ -60,7 +70,7 @@ if __name__ == "__main__":
 
     qlearner_manager = QLearnerAnalyserManager(
         agent.a2c,
-        action_dim=ActionMap.n_simple() - 2,
+        action_dim=ActionMap.n_simple(),
         opponent_action_dim=ActionMap.n_simple(),
     )
 

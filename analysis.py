@@ -16,7 +16,7 @@ from agents.action import ActionMap
 from collections import namedtuple
 
 
-AnalyserState = namedtuple("AnalyserSavedState", ["battle_state", "observation", "info", "reward"])
+AnalyserState = namedtuple("AnalyserSavedState", ["battle_state", "observation", "info", "reward", "terminated", "truncated"])
 
 
 def footsies_move_from_one_hot(one_hot: torch.Tensor) -> FootsiesMove:
@@ -111,7 +111,7 @@ class Analyser:
     def save_battle_state(self):
         battle_state = self.footsies_env.save_battle_state()
         self.saved_battle_states.append(AnalyserState(
-            battle_state, self.current_observation, self.current_info, self.reward
+            battle_state, self.current_observation, self.current_info, self.reward, self.terminated, self.truncated
         ))
 
         current_saved_battle_state_list = self.saved_battle_states_labels
@@ -133,14 +133,14 @@ class Analyser:
         
         # TODO: guarantee that p1MostRecentAction is the same as would be normally obtained (it's obtained differently in the game code)
         footsies_state = FootsiesState.from_battle_state(battle_state)
-        self.previous_observation = self.current_observation
+        self.previous_observation = None
         self.current_observation = transformed_observation_from_root(self.env, self.footsies_env._extract_obs(footsies_state))
         self.custom_state_update_callback(self)
 
     def load_battle_state_from_selected(self):
         saved_state = self.selected_saved_state
         self.load_battle_state(saved_state.battle_state)
-        self.update_state(saved_state.observation, saved_state.info, saved_state.reward)
+        self.update_state(saved_state.observation, saved_state.info, saved_state.reward, saved_state.terminated, saved_state.truncated)
 
     def update_current_action_from_agent(self):
         action = self.p1_action_source(self.current_observation, self.current_info)
@@ -152,7 +152,7 @@ class Analyser:
 
         self.action_left, self.action_right, self.action_attack = action_tuple
 
-    def update_state(self, observation, info, reward):
+    def update_state(self, observation: "any", info: dict, reward: float, terminated: bool, truncated: bool):
         # Observation
         self.previous_observation = self.current_observation
         self.current_observation = observation
@@ -182,8 +182,10 @@ class Analyser:
         self.text_output = self.text_output_formatter.pformat(info)
         self.frame = info["frame"]
 
-        # Reward
+        # Reward and other stuff
         self.reward = reward
+        self.terminated = terminated
+        self.truncated = truncated
 
     def start_advancing(self):
         self.advancing = True
@@ -194,6 +196,8 @@ class Analyser:
         self.advancing = False
 
     def advance(self):
+        terminated, truncated = False, False
+
         if self.requires_reset:
             self.episode_counter += 1
             obs, info = self.env.reset()
@@ -210,7 +214,7 @@ class Analyser:
 
             self.requires_reset = terminated or truncated
 
-        self.update_state(obs, info, reward)
+        self.update_state(obs, info, reward, terminated, truncated)
         
         self.custom_state_update_callback(self)
         self._custom_battle_state_cached = None
@@ -253,6 +257,11 @@ class Analyser:
 
         return battle_state
 
+    @property
+    def most_recent_transition(self) -> tuple["any", "any", float, bool, bool, dict, dict]:
+        """The most recent environment transition tuple `(obs, next_obs, reward, terminated, truncated, info, next_info)`"""
+        return (self.previous_observation, self.current_observation, self.reward, self.terminated, self.truncated, self.previous_info, self.current_info)
+
     p1_guard_prev: int = editable_dpg_value("p1_guard_prev")
     p2_guard_prev: int = editable_dpg_value("p2_guard_prev")
     p1_position_prev: float = editable_dpg_value("p1_position_prev")
@@ -289,6 +298,8 @@ class Analyser:
     use_custom_action: bool = editable_dpg_value("use_custom_action")
     reward: float = editable_dpg_value("reward")
     frame: int = editable_dpg_value("frame")
+    terminated: bool = editable_dpg_value("terminated")
+    truncated: bool = editable_dpg_value("truncated")
     text_output: str = editable_dpg_value("text_output")
 
     def start(self, state_change_apply_immediately: bool = False):
@@ -361,6 +372,10 @@ class Analyser:
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Save", callback=self.save_battle_state)
                 dpg.add_button(label="Load", callback=self.load_battle_state_from_selected)
+
+                dpg.add_text("ⓘ")
+                with dpg.tooltip(dpg.last_item()):
+                    dpg.add_text("Careful when using a dense reward scheme, since the environment internally keeps track of the cumulative reward and that is not reset!\nDon't perform reward-sensitive operations with save/load at the end of episodes in that case")
             
             self.dpg_saved_battle_state_list = dpg.add_listbox([])
 
@@ -384,6 +399,9 @@ class Analyser:
 
             dpg.add_input_float(label="Reward", tag="reward", enabled=False)
             dpg.add_input_int(label="Frame", tag="frame", enabled=False)
+            with dpg.group(horizontal=True):
+                dpg.add_checkbox(label="Terminated", tag="terminated", default_value=False, enabled=False)
+                dpg.add_checkbox(label="Truncated", tag="truncated", default_value=False, enabled=False)
 
             with dpg.group(horizontal=True):
                 advance_button = dpg.add_button(label="Advance", callback=self.advance)

@@ -53,6 +53,11 @@ class FootsiesAgentTorch(FootsiesAgentBase):
     def model(self) -> nn.Module:
         """The PyTorch model used by the agent"""
     
+    @property
+    def shareable_model(self) -> nn.Module:
+        """The PyTorch module that can be shared with other agents during Hogwild! parallel training. Returns the `model` property by default"""
+        return self.model
+
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model")
         self.model.load_state_dict(torch.load(model_path))

@@ -114,8 +114,14 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.current_step += 1
 
         # Update the win rate tracker (only really valid for FOOTSIES)
+        # NOTE: draws decrease win rate
         if terminated:
             if reward > 0.0:
+                self.total_wins += 1
+            self.total_terminated_episodes += 1
+        # We treat truncation, which should be by time limit, as termination
+        elif truncated:
+            if info["p1_guard"] > info["p2_guard"]:
                 self.total_wins += 1
             self.total_terminated_episodes += 1
 
