@@ -1,5 +1,6 @@
 import argparse
 import os
+import logging
 from dataclasses import dataclass
 from agents.torch_utils import hidden_layer_parameters_from_specifications
 
@@ -9,6 +10,7 @@ class MainArgs:
     episodes: int
     time_steps: int
     penalize_truncation: float
+    curriculum: bool
 
     misc: "MiscArgs"
     agent: "AgentArgs"
@@ -25,6 +27,7 @@ class MiscArgs:
     log_test_states_number: int
     log_step_start: int
     log_episode_start: int
+    log_file_level: int
     hogwild: bool
     hogwild_cpus: int
     hogwild_n_workers: int
@@ -59,6 +62,7 @@ class SelfPlayArgs:
     snapshot_interval: int
     switch_interval: int
     mix_bot: int
+    add_curriculum_opps: bool
 
 
 @dataclass
@@ -194,9 +198,19 @@ def parse_args() -> MainArgs:
         help="use the Frame Skipped wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
     )
     parser.add_argument(
+        "footsies-curriculum",
+        action="store_true",
+        help="perform curriculum learning with pre-made rule-based opponents"
+    )
+    parser.add_argument(
         "--footsies-self-play",
         action="store_true",
         help="use self-play during training on the FOOTSIES environment. It's recommended to use the time limit wrapper",
+    )
+    parser.add_argument(
+        "--footsies-self-play-add-curriculum-opps",
+        action="store_true",
+        help="add all opponents that are used for curriculum learning into the self-play's opponent pool"
     )
     parser.add_argument(
         "--footsies-self-play-max-snapshots",
@@ -344,6 +358,12 @@ def parse_args() -> MainArgs:
         help="value at which the logging episode will start, useful for appending to existing Tensorboard logs",
     )
     parser.add_argument(
+        "--log-file-level",
+        choices=["critical", "error", "warning", "info", "debug"],
+        default="debug",
+        help="the log level of the logs created in the log file. Recommended to be either debug or info"
+    )
+    parser.add_argument(
         "--hogwild",
         action="store_true",
         help="whether to use the Hogwild! asynchronous training algorithm. Only available for FOOTSIES agents based on PyTorch (for sharing of model parameters)"
@@ -399,6 +419,7 @@ def parse_args() -> MainArgs:
         episodes=args.episodes,
         time_steps=args.time_steps,
         penalize_truncation=args.penalize_truncation,
+        curriculum=args.footsies_curriculum,
         misc=MiscArgs(
             save=not args.no_save,
             load=not args.no_load,
@@ -407,6 +428,7 @@ def parse_args() -> MainArgs:
             log_test_states_number=args.log_test_states_number,
             log_step_start=args.log_step_start,
             log_episode_start=args.log_episode_start,
+            log_file_level=getattr(logging, args.log_file_level.upper()),
             hogwild=args.hogwild,
             hogwild_cpus=args.hogwild_cpus,
             hogwild_n_workers=args.hogwild_n_workers,
@@ -442,6 +464,7 @@ def parse_args() -> MainArgs:
             snapshot_interval=args.footsies_self_play_snapshot_interval,
             switch_interval=args.footsies_self_play_switch_interval,
             mix_bot=args.footsies_self_play_mix_bot,
+            add_curriculum_opps=args.footsies_self_play_add_curriculum_opps,
         )
     )
 

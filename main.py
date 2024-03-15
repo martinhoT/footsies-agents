@@ -24,7 +24,9 @@ from agents.logger import TrainingLoggerWrapper
 from agents.utils import snapshot_sb3_policy, wrap_policy
 from agents.torch_utils import hogwild
 from args import parse_args, EnvArgs
-from self_play import SelfPlayManager
+from opponents.self_play import SelfPlayManager
+from opponents.curriculum import CurriculumManager
+from opponents.base import OpponentManager
 
 LOGGER = logging.getLogger("main")
 
@@ -95,7 +97,7 @@ def train(
     env: Env,
     n_episodes: int = None,
     penalize_truncation: float = None,
-    self_play_manager: SelfPlayManager = None,
+    opponent_manager: OpponentManager = None,
     episode_finished_callback: Callable[[int], None] = lambda episode: None,
     progress_bar: bool = True,
 ):
@@ -108,7 +110,7 @@ def train(
     - `env`: the Gymnasium environment to train on
     - `n_episodes`: if specified, the number of training episodes
     - `penalize_truncation`: penalize the agent if the time limit was exceeded, to discourage lengthening the episode
-    - `self_play_manager`: opponent pool manager for self-play. If None, self-play will not be performed
+    - `opponent_manager`: manager of a custom opponent pool. Can be used for for self-play or curriculum learning. If None, custom opponents will not be used
     - `episode_finished_callback`: function that will be called after each episode is finished
     - `progress_bar`: whether to display a progress bar (with `tqdm`)
     """
@@ -143,10 +145,10 @@ def train(
                 result = 1 if info["p1_guard"] > info["p2_guard"] else 0
 
             # Set a new opponent from the opponent pool
-            if self_play_manager is not None:
-                should_change = self_play_manager.update_at_episode(result)
+            if opponent_manager is not None:
+                should_change = opponent_manager.update_at_episode(result)
                 if should_change:
-                    env.unwrapped.set_opponent(self_play_manager.current_opponent.method)
+                    env.unwrapped.set_opponent(opponent_manager.current_opponent.method)
             
             episode_finished_callback(episode)
 
@@ -207,12 +209,12 @@ def create_env(args: EnvArgs) -> Env:
     return env
 
 
-def setup_logger(agent_name: str, level: int = logging.DEBUG, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
+def setup_logger(agent_name: str, stdout_level: int = logging.WARNING, file_level: int = logging.DEBUG, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
     from logging.handlers import RotatingFileHandler
     from sys import stdout
 
     logger = logging.getLogger("main")
-    logger.setLevel(level)
+    logger.setLevel(logging.DEBUG)
 
     for handler in list(logger.handlers):
         logger.removeHandler(handler)
@@ -228,14 +230,14 @@ def setup_logger(agent_name: str, level: int = logging.DEBUG, log_to_file: bool 
     
     ch = logging.StreamHandler(stdout)
     ch.setFormatter(formatter)
-    ch.setLevel(logging.WARNING)
+    ch.setLevel(stdout_level)
 
     logger.addHandler(ch)
 
     if log_to_file:
         rfh = RotatingFileHandler(f"logs/{agent_name}.log", maxBytes=1e7, backupCount=9)
         rfh.setFormatter(formatter)
-        rfh.setLevel(level)
+        rfh.setLevel(file_level)
 
         logger.addHandler(rfh)
 
@@ -248,7 +250,7 @@ if __name__ == "__main__":
     log_dir = os.path.join("runs", args.agent.name)
     args.env.diayn_kwargs["log_dir"] = log_dir
     
-    setup_logger(args.agent.name, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
+    setup_logger(args.agent.name, file_level=args.misc.log_file_level, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
 
     # Prepare environment
 
@@ -296,7 +298,7 @@ if __name__ == "__main__":
         starter_opponent = snapshot_method()
 
         footsies_env.set_opponent(starter_opponent)
-        self_play_manager = SelfPlayManager(
+        opponent_manager = SelfPlayManager(
             snapshot_method=snapshot_method,
             max_snapshots=args.self_play.max_snapshots,
             snapshot_interval=args.self_play.snapshot_interval,
@@ -307,8 +309,19 @@ if __name__ == "__main__":
             log_interval=1,
             starter_opponent=starter_opponent,
         )
-    else:
-        None
+
+        LOGGER.info("Activated self-play")
+
+    elif args.curriculum:
+        opponent_manager = CurriculumManager(
+            win_rate_threshold=0.7,
+            min_episodes=100,
+        )
+
+        footsies_env: FootsiesEnv = env.unwrapped
+        footsies_env.set_opponent(opponent_manager.current_opponent)
+        
+        LOGGER.info("Activated curriculum learning")
 
     # Identity function, used when logging is disabled
     agent_logging_wrapper = lambda a: a
@@ -359,7 +372,7 @@ if __name__ == "__main__":
         train_kwargs = {
             "n_episodes": args.episodes,
             "penalize_truncation": args.penalize_truncation,
-            "self_play_manager": self_play_manager,
+            "opponent_manager": opponent_manager,
         }
 
         if args.misc.hogwild:

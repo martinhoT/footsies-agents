@@ -13,13 +13,16 @@ from analyse_a2c_qlearner import QLearnerAnalyserManager
 from analyse_opponent_model import MimicAnalyserManager
 from models import the_one_vanilla_no_specials_, the_one_vanilla_no_specials_opp_, the_one_vanilla_, the_one_vanilla_no_specials_rollback_
 from gymnasium.wrappers.transform_observation import TransformObservation
+from main import setup_logger
+from opponents.curriculum import WhiffPunisher
 import logging
-from sys import stdout
-
-# logging.basicConfig(level=logging.DEBUG, stream=stdout)
 
 
 if __name__ == "__main__":
+
+    setup_logger("analyse", stdout_level=logging.INFO, log_to_file=False)
+
+    custom_opponent = WhiffPunisher()
 
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
@@ -29,7 +32,8 @@ if __name__ == "__main__":
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=False,
-        vs_player=True,
+        vs_player=False,
+        opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
@@ -41,10 +45,10 @@ if __name__ == "__main__":
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
 
-    agent, loggables = the_one_vanilla_(
+    agent, loggables = the_one_vanilla_no_specials_rollback_(
         env.observation_space.shape[0],
         env.action_space.n,
-        qtable=True,
+        qtable=False,
         discretized=False,
     )
 
@@ -52,7 +56,7 @@ if __name__ == "__main__":
     # idle_distribution[0, 0] = 1.0
     # agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
 
-    load_agent_model(agent, "the_one_vanilla_qtable")
+    load_agent_model(agent, "the_one_vanilla_no_specials_rollback_nobot")
 
     def spammer():
         from itertools import cycle
@@ -94,10 +98,19 @@ if __name__ == "__main__":
         if mimic_manager is not None:
             mimic_manager.predict_next_move(analyser)
 
+    def act(obs, info):
+        # This is so bad (since the the_one doesn't have update() called, only the A2CAgent), but idc
+        prev_obs = agent.current_observation
+        if prev_obs is not None:
+            _, opponent_action = ActionMap.simples_from_torch_transition(prev_obs, obs)
+            agent.previous_opponent_action = opponent_action
+
+        return agent.act(obs, info)
+
     analyser = Analyser(
         env=env,
         # p1_action_source=lambda o, i: next(p1),
-        p1_action_source=agent.act,
+        p1_action_source=act,
         custom_elements_callback=custom_elements_callback,
         custom_state_update_callback=custom_state_update_callback,
     )

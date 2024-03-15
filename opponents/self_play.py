@@ -4,13 +4,14 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable
+from opponents.base import OpponentManager
 
 LOGGER = logging.getLogger("main.self_play")
 
 
 @dataclass
 class Opponent:
-    method:     Callable[..., "any"]
+    method:     Callable[[dict], tuple[bool, bool, bool]]
     created_at: int
     elo:        int         = 1200
 
@@ -18,7 +19,7 @@ class Opponent:
         return f"Opponent(created_at={self.created_at}, elo={self.elo})"
 
 
-class SelfPlayManager:
+class SelfPlayManager(OpponentManager):
     """
     Class that manages an opponent pool for self-play.
     
@@ -93,7 +94,7 @@ class SelfPlayManager:
         counts = [self.mix_bot] + [1] * len(self.opponent_pool)
         return random.sample(full_pool, counts=counts, k=1)[0]
 
-    def update_at_episode(self, game_result: int) -> bool:
+    def update_at_episode(self, game_result: float) -> bool:
         """
         Update the manager after every episode. Returns whether an opponent change was done.
         
@@ -113,12 +114,12 @@ class SelfPlayManager:
         # Perform a snapshot of the agent at the current
         if self.episode % self.snapshot_interval == 0:
             new_opponent = self._register_opponent(self.snapshot_method())
-            LOGGER.info("Agent snapshot created! (new opponent created at episode %s, with ELO %s)", new_opponent.created_at, new_opponent.elo)
+            LOGGER.info("Agent snapshot created at episode %s! (new opponent created at episode %s, with ELO %s)", self.episode, new_opponent.created_at, new_opponent.elo)
         
         # Switch to another opponent
         if self.episode % self.switch_interval == 0:
             self._current_opponent = self._sample_opponent()
-            LOGGER.info("Switched to a new opponent! (the one created at episode %s, with ELO %s)", self._current_opponent.created_at, self._current_opponent.elo)
+            LOGGER.info("Switched to a new opponent at episode %s! (the one created at episode %s, with ELO %s)", self.episode, self._current_opponent.created_at, self._current_opponent.elo)
             league_info = '\n'.join(map(str, [self._ingame_bot] + list(self.opponent_pool)))
             LOGGER.info("League: %s", league_info)
 
@@ -134,11 +135,15 @@ class SelfPlayManager:
         return self._current_opponent != previous_opponent
 
     @property
-    def current_opponent(self) -> Opponent:
+    def current_opponent(self) -> Callable[[dict], tuple[bool, bool, bool]]:
         """The opponent being currently used for self-play. If `None`, then the in-game bot is being used."""
-        return self._current_opponent
+        return self._current_opponent.method
     
     @property
     def elo(self) -> int:
         """The ELO of the agent, calculated according to the ELO of the opponents."""
         return self._agent_elo
+    
+    @property
+    def exhausted(self) -> bool:
+        return True
