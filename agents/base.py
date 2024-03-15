@@ -38,7 +38,10 @@ class FootsiesAgentBase(ABC):
         as used for training.
         This is relevant since the environment can be wrapped with observation and action wrappers, of which the
         subclass agent is not aware (or at least doesn't need to be).
-        The superclass method deals with some of these wrappers to avoid code duplication
+        The superclass method deals with some of these wrappers to avoid code duplication.
+
+        NOTE: the internal policy implementations might need to perform some transformations on the observations and actions,
+        to account for the change in perspective between player 1 (agent) and player 2 (opponent, i.e. the extracted policy).
         """
 
     def _extract_policy(

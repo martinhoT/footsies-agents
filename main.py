@@ -126,7 +126,7 @@ def train(
 
             terminated = False
             truncated = False
-            result = 0 # by default, the game is a draw
+            result = 0.5 # by default, the game is a draw
             while not (terminated or truncated):
                 action = agent.act(obs, info)
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -138,9 +138,9 @@ def train(
 
             # Determine the final game result, to provide to the self-play manager
             if terminated and (reward != 0.0):
-                result = 1 if reward > 0.0 else -1
+                result = 1 if reward > 0.0 else 0
             elif truncated and (info["p1_guard"] != info["p2_guard"]):
-                result = 1 if info["p1_guard"] > info["p2_guard"] else -1
+                result = 1 if info["p1_guard"] > info["p2_guard"] else 0
 
             # Set a new opponent from the opponent pool
             if self_play_manager is not None:

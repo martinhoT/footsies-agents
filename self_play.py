@@ -99,7 +99,7 @@ class SelfPlayManager:
         
         Parameters
         ----------
-        - `game_result`: the result of the game, in terms of the agent's perspective. 1 for win, 0 for draw, -1 for loss
+        - `game_result`: the result of the game, in terms of the agent's perspective. 1 for win, 0 for loss, 0.5 for draw
         """
         previous_opponent = self._current_opponent
         self.episode += 1
@@ -108,7 +108,7 @@ class SelfPlayManager:
         expected_agent_victory = 1 / (1 + 10 ** ((self._current_opponent.elo - self._agent_elo) / 400))
         expected_opponent_victory = 1 - expected_agent_victory
         self._agent_elo += self._elo_k * (game_result - expected_agent_victory)
-        self._current_opponent.elo += self._elo_k * ((-game_result) - expected_opponent_victory)
+        self._current_opponent.elo += self._elo_k * ((1 - game_result) - expected_opponent_victory)
 
         # Perform a snapshot of the agent at the current
         if self.episode % self.snapshot_interval == 0:
