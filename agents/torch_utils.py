@@ -269,7 +269,7 @@ def observation_invert_perspective_flattened(obs: torch.Tensor) -> torch.Tensor:
     #  move progress
     inverted[:, [32, 33]] = obs[:, [33, 32]]
     #  position
-    inverted[:, [34, 35]] = obs[:, [35, 34]]
+    inverted[:, [34, 35]] = -obs[:, [35, 34]]
 
     return inverted
 

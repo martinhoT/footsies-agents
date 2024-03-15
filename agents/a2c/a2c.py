@@ -3,10 +3,10 @@ import torch
 import logging
 from torch import nn
 from torch.distributions import Categorical
-from agents.mimic.agent import PlayerModel
 from agents.torch_utils import create_layered_network, ToMatrix
-from agents.ql.ql import QFunction, QFunctionNetwork, QFunctionNetworkDiscretized
+from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
+from enum import Enum
 
 LOGGER = logging.getLogger("main.a2c")
 
@@ -275,6 +275,11 @@ class A2CLambdaLearner(A2CLearnerBase):
 
 # NOTE: we can use both players' perspectives when updating the Q-value function. This is left to the training loop to manage
 class A2CQLearner(A2CLearnerBase):
+    class UpdateStyle(Enum):
+        SARSA = 0
+        EXPECTED_SARSA = 1
+        Q_LEARNING = 2
+    
     def __init__(
         self,
         actor: ActorNetwork,
@@ -282,12 +287,12 @@ class A2CQLearner(A2CLearnerBase):
         actor_entropy_loss_coef: float = 0.0,
         actor_learning_rate: float = 1e-4,
         policy_cumulative_discount: bool = True,
-        update_style: str = "expected-sarsa",
+        update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
     ):
         """Implementation of a custom actor-critic algorithm with a Q-value table for the critic"""
-        if update_style not in ("sarsa", "expected-sarsa", "q-learning"):
-            raise ValueError("'update_style' must be one of 'sarsa', 'expected-sarsa', or 'q-learning'")
-        
+        if not isinstance(update_style, self.UpdateStyle):
+            raise ValueError(f"update_style must be an instance of {self.UpdateStyle}, not {type(update_style)}")
+
         self._actor = actor
         self._critic = critic
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
@@ -368,7 +373,9 @@ class A2CQLearner(A2CLearnerBase):
             next_obs_action_probabilities = self.actor.probabilities(next_obs, next_opponent_action=None).detach().squeeze().T
         else:
             next_obs_action_probabilities = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
-        self.frameskipped_critic_updates.append((obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_action_probabilities))
+        self.frameskipped_critic_updates.append(
+            (obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_action_probabilities, next_obs_agent_action, next_obs_opponent_action)
+        )
         if next_obs_agent_action is not None or terminated or truncated:
             # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
             previous_discount = self._critic.discount
@@ -377,7 +384,13 @@ class A2CQLearner(A2CLearnerBase):
 
             # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
             for frameskipped_update in reversed(self.frameskipped_critic_updates):
-                obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_action_probabilities_ = frameskipped_update
+                obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_action_probabilities_, next_obs_agent_action_, next_obs_opponent_action_ = frameskipped_update
+                
+                if self._update_style != self.UpdateStyle.EXPECTED_SARSA:
+                    next_obs_action_probabilities_ = None
+                if self._update_style != self.UpdateStyle.SARSA:
+                    next_obs_agent_action_ = None
+                
                 td_error = self._critic.update(
                     obs=obs_,
                     reward=reward_,
@@ -385,6 +398,7 @@ class A2CQLearner(A2CLearnerBase):
                     terminated=terminated_,
                     agent_action=obs_agent_action_,
                     opponent_action=obs_opponent_action_,
+                    next_agent_action=next_obs_agent_action_,
                     next_opponent_action=None, # We ignore what the opponent actually did, so that we would not need importance sampling. This will assume that the opponent behaves uniformly randomly
                     next_agent_policy=next_obs_action_probabilities_,
                     next_opponent_policy=self._custom_opponent_policy(obs_).detach().T if self._custom_opponent_policy is not None else None,

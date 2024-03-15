@@ -117,11 +117,6 @@ def train(
 
     training_iterator = count() if n_episodes is None else range(n_episodes)
 
-    # Only used for self-play
-    if self_play_manager is not None:
-        # We say we created the opponent at episode -2 to distinguish it from the ingame bot, which is -1
-        self_play_manager._register_opponent(env.unwrapped.opponent, -2)
-
     if progress_bar:
         training_iterator = tqdm(training_iterator)
 
@@ -294,13 +289,26 @@ if __name__ == "__main__":
     if args.misc.load:
         load_agent_model(agent, args.agent.name)
 
-    # Set a good default agent for self-play (FOOTSIES only)
+    # Set a good default agent for self-play (FOOTSIES only), and create the self-play manager
     if args.self_play.enabled:
         footsies_env: FootsiesEnv = env.unwrapped
-        if args.agent.is_sb3:
-            footsies_env.set_opponent(wrap_policy(env, snapshot_sb3_policy(agent)))
-        else:
-            footsies_env.set_opponent(agent.extract_policy(env))
+        snapshot_method = (lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env))
+        starter_opponent = snapshot_method()
+
+        footsies_env.set_opponent(starter_opponent)
+        self_play_manager = SelfPlayManager(
+            snapshot_method=snapshot_method,
+            max_snapshots=args.self_play.max_snapshots,
+            snapshot_interval=args.self_play.snapshot_interval,
+            switch_interval=args.self_play.switch_interval,
+            mix_bot=args.self_play.mix_bot,
+            log_elo=True,
+            log_dir=log_dir,
+            log_interval=1,
+            starter_opponent=starter_opponent,
+        )
+    else:
+        None
 
     # Identity function, used when logging is disabled
     agent_logging_wrapper = lambda a: a
@@ -348,17 +356,6 @@ if __name__ == "__main__":
             LOGGER.exception(f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training")
 
     else:
-        self_play_manager = SelfPlayManager(
-            snapshot_method=(lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env)),
-            max_snapshots=args.self_play.max_snapshots,
-            snapshot_interval=args.self_play.snapshot_interval,
-            switch_interval=args.self_play.switch_interval,
-            mix_bot=args.self_play.mix_bot,
-            log_elo=True,
-            log_dir=log_dir,
-            log_interval=1,
-        ) if args.self_play.enabled else None
-
         train_kwargs = {
             "n_episodes": args.episodes,
             "penalize_truncation": args.penalize_truncation,

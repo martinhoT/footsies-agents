@@ -131,7 +131,7 @@ class QFunction(ABC):
                 LOGGER.debug("Setup SARSA-like update")
             # Perform Q-learning update
             else:
-                next_q = next_opponent_policy @ np.max(next_qs, axis=-1, keepdims=True)
+                next_q = next_opponent_policy @ torch.max(next_qs, dim=-1, keepdims=True)
                 LOGGER.debug("Setup Q-learning update")
 
             nxt_value = self.discount * next_q.item()

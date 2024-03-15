@@ -53,7 +53,7 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         actor_learning_rate=1e-2,
         actor_entropy_loss_coef=0.1,
         policy_cumulative_discount=False,
-        update_style="expected-sarsa",
+        update_style=A2CQLearner.UpdateStyle.EXPECTED_SARSA,
     )
 
     a2c = A2CAgent(
@@ -76,7 +76,6 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         remove_special_moves=True,
         rollback_as_opponent_model=True,
         game_model_learning_rate=1e-4,
-        opponent_model_learning_rate=1e-4,
     )
 
     loggables = get_loggables(agent)

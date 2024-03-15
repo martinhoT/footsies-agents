@@ -9,7 +9,7 @@ class ActionMap:
     Class containing useful methods and data structures regarding FOOTSIES's actions.
     
     There are 3 types of actions:
-    - Primitive, the most basic FOOTSIES action representation, as a triple of bools
+    - Primitive, the most basic FOOTSIES action representation, as a triple of bools (<left>, <right>, <attack>)
     - Discrete, representing primitive actions as integers
     - Simple, representing actionable `FootsiesMove` moves as integers
 
@@ -104,6 +104,31 @@ class ActionMap:
     def simple_to_primitive(simple: int) -> Iterable[tuple[bool, bool, bool]]:
         """Convert a simple action (as an integer) into a sequence of primitive (boolean combination) actions."""
         return ActionMap.SIMPLE_TO_PRIMITIVE_MAP[simple]
+
+    @staticmethod
+    def invert_simple(simple: int) -> int:
+        """Invert the given simple action, done in one player's perspective, into the other player's. It's recommended to use the other inversion methods rather than this one."""
+        if simple == FootsiesMove.FORWARD:
+            return FootsiesMove.BACKWARD
+        if simple == FootsiesMove.BACKWARD:
+            return FootsiesMove.FORWARD
+        if simple == FootsiesMove.DASH_FORWARD:
+            return FootsiesMove.DASH_BACKWARD
+        if simple == FootsiesMove.DASH_BACKWARD:
+            return FootsiesMove.DASH_FORWARD
+        return simple
+
+    @staticmethod
+    def invert_discrete(discrete: int) -> int:
+        """Invert the given discrete action, done in one player's perspective, into the other player's."""
+        # Invert the left and right actions
+        return ((discrete & 1) << 1) + ((discrete & 2) >> 1) + (discrete & 4)
+
+    @staticmethod
+    def invert_primitive(primitive: tuple[bool, bool, bool]) -> tuple[bool, bool, bool]:
+        """Invert the given primitive action, done in one player's perspective, into the other player's."""
+        # Invert the left and right actions
+        return (primitive[1], primitive[0], primitive[2])
 
     ## Extractions
 

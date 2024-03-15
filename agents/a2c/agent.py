@@ -67,7 +67,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.cumulative_qtable_error_n = 0
         self._test_observations = None
 
-    def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None) -> "any":
+    def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
         self.current_observation = obs
         self.current_info = info
         
@@ -87,7 +87,10 @@ class FootsiesAgent(FootsiesAgentTorch):
                 self.current_action = None
         
         if self.current_action is None:
-            self.current_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
+            if deterministic:
+                self.current_action = self._learner.actor.probabilities(obs, next_opponent_action=predicted_opponent_action).argmax().item()
+            else:
+                self.current_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
             self.current_action_iterator = iter(ActionMap.simple_to_discrete(self.current_action))
             action = next(self.current_action_iterator)
         

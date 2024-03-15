@@ -11,7 +11,7 @@ from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
-from agents.a2c.a2c import A2CQLearner
+from agents.a2c.a2c import A2CQLearner, ActorNetwork
 from agents.mimic.agent import PlayerModel
 from agents.torch_utils import observation_invert_perspective_flattened
 from data import FootsiesDataset
@@ -156,6 +156,10 @@ class FootsiesAgent(FootsiesAgentTorch):
             predicted_opponent_action = self.opponent_model.predict(obs)
         elif self.rollback_as_opponent_model:
             predicted_opponent_action = self.previous_opponent_action
+            # Assume the opponent is standing if the predicted action is None in the rollback model,
+            # which should mean that the opponent is being frameskipped
+            if predicted_opponent_action is None:
+                predicted_opponent_action = 0
         else:
             predicted_opponent_action = None
 
@@ -239,35 +243,58 @@ class FootsiesAgent(FootsiesAgentTorch):
                     action = p1_action if agent_is_p1 else p2_action
                     self.imitator.learn(obs, action, frozen_representation)
 
-    # NOTE: literally extracts the policy only, doesn't include any other component
+    # NOTE: extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         actor = self.a2c._actor.clone()
 
-        def internal_policy(obs):
-            nonlocal actor
-
-            # Invert the perspective, since the agent was trained as if they were on the left side of the screen
-            obs = observation_invert_perspective_flattened(obs)
-
-            opp_action = None
-            previous_observation = getattr(actor, "previous_observation__") if hasattr(actor, "previous_observation__") else None
-            if previous_observation is not None:
-                # Weak, rollback-inspired opponent model: if the opponent did action X, then they will keep doing X
-                _, opp_action = ActionMap.simples_from_torch_transition(actor.previous_observation__, obs)
+        class ExtractedPolicy:
+            def __init__(self, actor: ActorNetwork, deterministic: bool = False):
+                self.actor = actor
+                self.deterministic = deterministic
+                self.current_action = None
+                self.current_action_iterator = None
             
-            # When in doubt, assume the opponent is standing
-            if opp_action is None:
-                opp_action = 0
+            def __call__(self, obs) -> int:
+                # Invert the perspective, since the agent was trained as if they were on the left side of the screen
+                obs = observation_invert_perspective_flattened(obs)
 
-            # Sample the action
-            action = actor.sample_action(obs, next_opponent_action=opp_action).item()
+                opp_action = None
+                previous_observation = getattr(actor, "previous_observation__") if hasattr(actor, "previous_observation__") else None
+                if previous_observation is not None:
+                    # Weak, rollback-inspired opponent model: if the opponent did action X, then they will keep doing X
+                    _, opp_action = ActionMap.simples_from_torch_transition(actor.previous_observation__, obs)
+                
+                # When in doubt, assume the opponent is standing
+                if opp_action is None:
+                    opp_action = 0
 
-            # Save the current observation in an attribute that *surely* won't overlap with an existing one
-            actor.previous_observation__ = obs
-            
-            return action
+                # Keep sampling the next discrete action from the simple action
+                if self.current_action is not None:
+                    try:
+                        action = next(self.current_action_iterator)
+                
+                    except StopIteration:
+                        self.current_action = None
+                
+                if self.current_action is None:
+                    # Sample the action
+                    if self.deterministic:
+                        self.current_action = actor.probabilities(obs, next_opponent_action=opp_action).argmax().item()
+                    else:
+                        self.current_action = actor.sample_action(obs, next_opponent_action=opp_action).item()
+                    self.current_action_iterator = iter(ActionMap.simple_to_discrete(self.current_action))
+                    action = next(self.current_action_iterator)
 
-        return super()._extract_policy(env, internal_policy)
+                # Save the current observation in an attribute that *surely* won't overlap with an existing one
+                actor.previous_observation__ = obs
+                
+                # We need to invert the action since the agent was trained to perform actions as if they were on the left side of the screen,
+                # so we need to mirror them
+                return ActionMap.invert_discrete(action)
+
+        policy = ExtractedPolicy(actor)
+
+        return super()._extract_policy(env, policy)
 
     @property
     def model(self) -> nn.Module:

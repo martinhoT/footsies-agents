@@ -39,6 +39,7 @@ class SelfPlayManager:
         log_elo: bool = False,
         log_dir: str = None,
         log_interval: int = 1,
+        starter_opponent: Callable[[dict], tuple[bool, bool, bool]] = None,
     ):
         """
         Instance of an opponent pool manager for self-play.
@@ -55,8 +56,8 @@ class SelfPlayManager:
         - `log_elo`: whether to log the ELO of the agent
         - `log_dir`: the directory where to save the self-play logs using Tensorboard. If `None`, then no logs are saved
         - `log_interval`: the interval between log writes, in number of episodes
+        - `starter_opponent`: the opponent to start with, should ideally be the one passed to the environment. If `None`, then the in-game bot is used, and will be assumed to be the one used by the environment
         """
-        
         self.snapshot_method = snapshot_method
         self.max_snapshots = max_snapshots
         self.snapshot_interval = snapshot_interval
@@ -64,12 +65,13 @@ class SelfPlayManager:
         self.mix_bot = mix_bot
 
         self.opponent_pool: deque[Opponent] = deque([], maxlen=max_snapshots)
-
+        if starter_opponent is not None:
+            self._register_opponent(starter_opponent, episode=0)
         self.episode = 0
 
-        ingame_bot = Opponent(None, -1, 1200)
+        ingame_bot = Opponent(None, -1)
         self._ingame_bot = ingame_bot
-        self._current_opponent = ingame_bot
+        self._current_opponent = self.opponent_pool[0] if starter_opponent is not None else ingame_bot
         self._agent_elo = 1200
         self._elo_k = 32
 
@@ -114,7 +116,7 @@ class SelfPlayManager:
             LOGGER.info("Agent snapshot created! (new opponent created at episode %s, with ELO %s)", new_opponent.created_at, new_opponent.elo)
         
         # Switch to another opponent
-        if self.episode & self.switch_interval == 0:
+        if self.episode % self.switch_interval == 0:
             self._current_opponent = self._sample_opponent()
             LOGGER.info("Switched to a new opponent! (the one created at episode %s, with ELO %s)", self._current_opponent.created_at, self._current_opponent.elo)
             league_info = '\n'.join(map(str, [self._ingame_bot] + list(self.opponent_pool)))
