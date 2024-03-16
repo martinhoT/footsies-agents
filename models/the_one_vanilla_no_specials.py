@@ -51,7 +51,7 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         actor=actor,
         critic=critic,
         actor_learning_rate=1e-2,
-        actor_entropy_loss_coef=0.1,
+        actor_entropy_loss_coef=0.0,
         policy_cumulative_discount=False,
         update_style="expected-sarsa",
     )

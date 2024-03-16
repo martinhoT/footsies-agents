@@ -50,6 +50,7 @@ class EnvArgs:
     footsies_wrapper_norm: bool
     footsies_wrapper_acd: bool
     footsies_wrapper_fs: bool
+    footsies_wrapper_adv: bool
     diayn: bool
     diayn_kwargs: dict
     torch: bool
@@ -58,7 +59,7 @@ class EnvArgs:
 @dataclass
 class SelfPlayArgs:
     enabled: bool
-    max_snapshots: int
+    max_opponents: int
     snapshot_interval: int
     switch_interval: int
     mix_bot: int
@@ -198,7 +199,12 @@ def parse_args() -> MainArgs:
         help="use the Frame Skipped wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
     )
     parser.add_argument(
-        "footsies-curriculum",
+        "--footsies-wrapper-adv",
+        action="store_true",
+        help="use the Encourage Advance wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
+    )
+    parser.add_argument(
+        "--footsies-curriculum",
         action="store_true",
         help="perform curriculum learning with pre-made rule-based opponents"
     )
@@ -213,10 +219,10 @@ def parse_args() -> MainArgs:
         help="add all opponents that are used for curriculum learning into the self-play's opponent pool"
     )
     parser.add_argument(
-        "--footsies-self-play-max-snapshots",
+        "--footsies-self-play-max-opponents",
         type=int,
         default=10,
-        help="maximum number of snapshots to hold at once in the opponent pool",
+        help="maximum number of opponents to hold at once in the opponent pool. Doesn't count the in-game bot",
     )
     parser.add_argument(
         "--footsies-self-play-snapshot-interval",
@@ -235,12 +241,6 @@ def parse_args() -> MainArgs:
         type=int,
         default=1,
         help="how many opponents will the in-game opponent count as, when sampling from the opponent pool. In-game bot won't be sampled if 0",
-    )
-    parser.add_argument(
-        "--footsies-self-play-port",
-        type=int,
-        default=11001,
-        help="port to be used for the opponent socket",
     )
     parser.add_argument(
         "--wrapper-time-limit",
@@ -392,15 +392,18 @@ def parse_args() -> MainArgs:
     is_sb3 = args.agent.startswith("sb3.")
     is_footsies = args.env == "FOOTSIES"
     will_footsies_self_play = args.footsies_self_play and is_footsies
+    will_footsies_curriculum = args.footsies_curriculum and is_footsies
 
     if is_sb3:
         if args.episodes is not None:
             print("WARNING: specifying a number of episodes for SB3 algorithms is not supported, will be ignored")
 
-    if will_footsies_self_play:
-        # Set dummy opponent for now, and set later with a copy of the instanced agent
+    if will_footsies_self_play or will_footsies_curriculum:
+        # Set dummy opponent for now, and set later with a custom opponent
         env_kwargs["opponent"] = lambda o: (False, False, False)
-        env_kwargs["opponent_port"] = args.footsies_self_play_port
+
+    elif will_footsies_self_play and will_footsies_curriculum:
+        raise ValueError("can't use both self-play and curriculum learning at the same time")
 
     if is_footsies:
         if args.footsies_path is None:
@@ -447,6 +450,7 @@ def parse_args() -> MainArgs:
             footsies_wrapper_norm=args.footsies_wrapper_norm,
             footsies_wrapper_acd=args.footsies_wrapper_acd,
             footsies_wrapper_fs=args.footsies_wrapper_fs,
+            footsies_wrapper_adv=args.footsies_wrapper_adv,
             diayn=args.diayn,
             diayn_kwargs={
                 "skill_dim": args.diayn_skill_dim,
@@ -460,7 +464,7 @@ def parse_args() -> MainArgs:
         ),
         self_play=SelfPlayArgs(
             enabled=will_footsies_self_play,
-            max_snapshots=args.footsies_self_play_max_snapshots,
+            max_opponents=args.footsies_self_play_max_opponents,
             snapshot_interval=args.footsies_self_play_snapshot_interval,
             switch_interval=args.footsies_self_play_switch_interval,
             mix_bot=args.footsies_self_play_mix_bot,

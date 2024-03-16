@@ -1,13 +1,14 @@
-import torch
+import psutil
+from itertools import count
 from collections import deque
-from torch import nn
 from copy import copy
-from typing import Any, Callable, Iterable
-from gymnasium import Env, ObservationWrapper, ActionWrapper
+from typing import Any, Callable
+from gymnasium import Env, ObservationWrapper, ActionWrapper, Wrapper
 from gymnasium import spaces
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.action import ActionMap
 from footsies_gym.moves import FootsiesMove
+from torch.utils.tensorboard import SummaryWriter
 
 # Some wrappers need to be handled in a special manner when extracting a policy for the FOOTSIES environment
 from footsies_gym.wrappers.frame_skip import FootsiesFrameSkipped
@@ -111,6 +112,26 @@ def extract_sub_kwargs(kwargs: dict, subkeys: tuple[str], strict: bool = True) -
     return extracted
 
 
+def find_footsies_ports(start: int = 11000, step: int = 1, end: int = None) -> tuple[int, int, int]:
+    closed_ports = {p.laddr.port for p in psutil.net_connections(kind="tcp4")}
+
+    ports = []
+
+    port_iterator = count(start=start, step=step) if end is None else range(start, end, step)
+
+    for port in port_iterator:
+        if port not in closed_ports:
+            ports.append(port)
+
+        if len(ports) >= 3:
+            break
+
+    if len(ports) < 3:
+        raise RuntimeError(f"could not find 3 free ports for a new FOOTSIES instance (starting at {start} with steps of {step})")
+
+    return tuple(ports)
+
+
 class AppendSimpleHistoryWrapper(ObservationWrapper):
     """Observation wrapper for appending the action history of one of the players. Must be put after `FootsiesNormalized`."""
     def __init__(self, env, p1: bool, n: int, action_dim: int, distinct: bool):
@@ -161,3 +182,56 @@ class AppendSimpleHistoryWrapper(ObservationWrapper):
 
         return obs
     
+
+class FootsiesEncourageAdvance(Wrapper):
+    """Wrapper for providing a reward for advancing towards the opponent based on the distance between players. Must be put after `FootsiesNormalized`."""
+    
+    def __init__(self, env,
+        distance_cap: float = 4.0,
+        advance_reward: float = 0.01,
+        log_dir: str = None,
+    ):
+        """
+        Wrapper for providing a reward for advancing towards the opponent based on the distance between players.
+        
+        Parameters
+        ----------
+        - `distance_cap`: the maximum distance beyond which 0 reward will be given. The default corresponds to round start position
+        - `advance_reward`: the maximum reward for advancing towards the opponent, which will decrease towards 0 the greater the distance is between the players
+        - `log_dir`: the directory where to save the Tensorboard logs regarding how much extra reward was given on each episode
+        """
+        super().__init__(env)
+
+        self.distance_cap = distance_cap
+        self.advance_reward = advance_reward
+
+        # For logging
+        self._summary_writer = SummaryWriter()
+        self._episode_extra_reward = 0.0
+        self._episodes = 0
+
+    def step(self, action: tuple[bool, bool, bool]) -> tuple[dict, float, bool, dict]:
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        distance_between_players = min(obs["position"][1] - obs["position"][0], self.distance_cap)
+
+        # Reward agent for advancing forward, and close to the opponent
+        p1_move = ActionMap.move_from_move_index(info["p1_move"])
+        if p1_move == FootsiesMove.FORWARD:
+            extra = self.advance_reward * (self.distance_cap - distance_between_players) / self.distance_cap
+            self._episode_extra_reward += extra
+            reward += extra
+
+        # Logging
+        if terminated or truncated:
+            if self._summary_writer is not None:
+                self._summary_writer.add_scalar(
+                    "Performance/Reward from advancing",
+                    self._episode_extra_reward,
+                    self._episodes,
+                )
+
+            self._episode_extra_reward = 0.0
+            self._episodes += 1
+
+        return obs, reward, terminated, truncated, info

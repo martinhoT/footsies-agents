@@ -16,7 +16,7 @@ class ValueNetwork(nn.Module):
         self,
         obs_dim: int,
         hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.Identity,
+        hidden_layer_activation: type[nn.Module] = nn.Identity,
         representation: nn.Module = None,
     ):
         super().__init__()
@@ -39,7 +39,7 @@ class ActorNetwork(nn.Module):
         obs_dim: int,
         action_dim: int,
         hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.Identity,
+        hidden_layer_activation: type[nn.Module] = nn.Identity,
         representation: nn.Module = None,
         opponent_action_dim: int = None,
     ):

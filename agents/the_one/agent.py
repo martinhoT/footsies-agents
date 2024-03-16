@@ -79,7 +79,10 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_simple_action = None
         self.current_simple_action_frame = 0
         # We set the previous opponent action to 0, which should correspond to a no-op (STAND)
-        self.previous_opponent_action = 0
+        self.previous_valid_opponent_action = 0
+
+        # Merely for tracking
+        self._recently_predicted_opponent_action = None
 
         # Loss trackers
         self.cumulative_loss_game_model = 0
@@ -155,15 +158,16 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.opponent_model is not None:
             predicted_opponent_action = self.opponent_model.predict(obs)
         elif self.rollback_as_opponent_model:
-            predicted_opponent_action = self.previous_opponent_action
+            predicted_opponent_action = self.previous_valid_opponent_action
             # Assume the opponent is standing if the predicted action is None in the rollback model,
             # which should mean that the opponent is being frameskipped
-            if predicted_opponent_action is None:
-                predicted_opponent_action = 0
+            # if predicted_opponent_action is None:
+            #     predicted_opponent_action = 0
         else:
             predicted_opponent_action = None
 
         action = self.a2c.act(self.current_observation, info, predicted_opponent_action=predicted_opponent_action)
+        self._recently_predicted_opponent_action = predicted_opponent_action
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
@@ -185,8 +189,11 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.opponent_model is not None and opponent_action is not None:
             self.opponent_model.update(self.current_observation, opponent_action)
 
-        # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy
-        self.previous_opponent_action = opponent_action
+        # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
+        # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
+        # that originated the temporal action in the first place. This is important for the rollback-based prediction strategy.
+        # This variable is only used for the rollback-based prediction anyway.
+        self.previous_valid_opponent_action = opponent_action if opponent_action is not None else self.previous_valid_opponent_action
 
     def _update_game_model(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
         """Calculate the game model loss, backpropagate and optimize"""
@@ -304,6 +311,11 @@ class FootsiesAgent(FootsiesAgentTorch):
     @property
     def shareable_model(self) -> nn.Module:
         return self.a2c.model
+
+    @property
+    def recently_predicted_opponent_action(self) -> int:
+        """The most recent prediction for the opponent's action done in the last `act` call."""
+        return self._recently_predicted_opponent_action
 
     def load(self, folder_path: str):
         # Load actor-critic

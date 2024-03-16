@@ -32,8 +32,8 @@ if __name__ == "__main__":
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=False,
-        vs_player=False,
-        opponent=custom_opponent.act,
+        vs_player=True,
+        # opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     # idle_distribution[0, 0] = 1.0
     # agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
 
-    load_agent_model(agent, "the_one_vanilla_no_specials_rollback_nobot")
+    load_agent_model(agent, "the_one_vanilla_no_specials_rollback_curriculum")
 
     def spammer():
         from itertools import cycle
@@ -89,6 +89,10 @@ if __name__ == "__main__":
         mimic_manager = None
 
     def custom_elements_callback(analyser: Analyser):
+        with dpg.group(horizontal=True):
+            dpg.add_text("Predicted opponent action:")
+            dpg.add_text("X", tag="predicted_opponent_action")
+
         qlearner_manager.add_custom_elements(analyser)
         if mimic_manager is not None:
             mimic_manager.include_mimic_dpg_elements(analyser)
@@ -99,13 +103,18 @@ if __name__ == "__main__":
             mimic_manager.predict_next_move(analyser)
 
     def act(obs, info):
-        # This is so bad (since the the_one doesn't have update() called, only the A2CAgent), but idc
+        # This is so bad, it's a repeat of update()'s last part (since the the_one doesn't have update() called, only the A2CAgent), but idc
         prev_obs = agent.current_observation
         if prev_obs is not None:
             _, opponent_action = ActionMap.simples_from_torch_transition(prev_obs, obs)
-            agent.previous_opponent_action = opponent_action
+            agent.previous_valid_opponent_action = opponent_action if opponent_action is not None else agent.previous_valid_opponent_action
 
-        return agent.act(obs, info)
+        action = agent.act(obs, info)
+
+        predicted_opponent_action = ActionMap.simple_as_move(agent.recently_predicted_opponent_action)
+        dpg.set_value("predicted_opponent_action", predicted_opponent_action.name if predicted_opponent_action is not None else "X")
+
+        return action
 
     analyser = Analyser(
         env=env,

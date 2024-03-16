@@ -1,8 +1,5 @@
-import os
 import importlib
 import optuna
-import psutil
-from itertools import count
 from typing import Callable
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
@@ -11,21 +8,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from args import parse_args_experiment
-
-
-def find_footsies_ports(start: int = 11000, step: int = 1) -> tuple[int, int, int]:
-    closed_ports = {p.laddr.port for p in psutil.net_connections(kind="tcp4")}
-
-    ports = []
-
-    for port in count(start=start, step=step):
-        if port not in closed_ports:
-            ports.append(port)
-
-        if len(ports) >= 3:
-            break
-
-    return tuple(ports)
+from main import find_footsies_ports
 
 
 class TrialManager:

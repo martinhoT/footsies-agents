@@ -122,7 +122,6 @@ class QLearnerAnalyserManager:
         self.current_observation = None
 
         # DPG items
-        self.predicted_opponent_action = None
         self.attribute_modifier_window = None
         self.current_observation_index = None
 

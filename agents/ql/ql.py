@@ -72,10 +72,10 @@ class QFunction(ABC):
         terminated: bool,
         agent_action: int = None,
         opponent_action: int = None,
-        next_agent_action: int = None,
-        next_opponent_action: int = None,
-        next_agent_policy: torch.Tensor = None,
-        next_opponent_policy: torch.Tensor = None,
+        next_agent_action: int | None = None,
+        next_opponent_action: int | None = None,
+        next_agent_policy: torch.Tensor | None = None,
+        next_opponent_policy: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Perform a Q-value update. Returns the TD error.

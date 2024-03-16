@@ -10,7 +10,7 @@ from itertools import pairwise
 from gymnasium import Env
 from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
-from agents.utils import extract_sub_kwargs
+from agents.utils import find_footsies_ports
 from agents.action import ActionMap
 
 
@@ -118,7 +118,7 @@ def hogwild(
                 main_logger.addHandler(new_handler)
 
         # Create the logger instance that this method will use
-        worker_logger = logging.getLogger("main.worker")
+        worker_logger = logging.getLogger(f"main.worker.{rank}")
 
         # Set up process
         torch.manual_seed(base_seed + rank)
@@ -130,22 +130,8 @@ def hogwild(
 
         # We need to set different FOOTSIES instances with different ports for each worker
         if is_footsies:
-            from psutil import net_connections
-            closed_ports = {p.laddr.port for p in net_connections(kind="tcp4")}
-
             base_port = 10000 + rank * 1000
-
-            # We need a triplet of ports
-            ports = []
-            for port in range(base_port, base_port + 1000):
-                if port not in closed_ports:
-                    ports.append(port)
-
-                if len(ports) >= 3:
-                    break
-            
-            if len(ports) < 3:
-                raise RuntimeError(f"could not find 3 free ports for worker {rank}'s FOOTSIES instance")
+            ports = find_footsies_ports(start=base_port, end=base_port + 1000)
 
             worker_logger.info("[%s] I was assigned the ports: %s", rank, ports)
             
@@ -290,15 +276,13 @@ class ImitationLearner:
         self,
         policy: nn.Module,
         action_dim: int,
-        optimizer: type[torch.optim.Optimizer] = torch.optim.Adam,
-        **kwargs,
+        learning_rate: float = 1e-3,
     ):
         """Imitation learning applied to a policy"""
-        optimizer_kwargs, = extract_sub_kwargs(kwargs, ("optimizer",))
         
         self.policy = policy
         self.action_dim = action_dim
-        self.optimizer = optimizer(self.policy.parameters(), maximize=False, **optimizer_kwargs)
+        self.optimizer = torch.optim.SGD(self.policy.parameters(), maximize=False, lr=learning_rate)
         # NOTE: because of this loss, combinatory actions are not supported
         self.loss_fn = nn.KLDivLoss(reduction="batchmean")
 

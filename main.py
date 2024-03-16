@@ -16,7 +16,7 @@ from tqdm import tqdm
 from itertools import count
 from copy import deepcopy
 from functools import partial
-from typing import List, Any, Callable
+from typing import Callable
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.base import FootsiesAgentBase, FootsiesAgentTorch
 from agents.diayn import DIAYN, DIAYNWrapper
@@ -25,20 +25,11 @@ from agents.utils import snapshot_sb3_policy, wrap_policy
 from agents.torch_utils import hogwild
 from args import parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
-from opponents.curriculum import CurriculumManager
+from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, ForwardSpammer, Idle, NSpecialSpammer, Spammer, WhiffPunisher
 from opponents.base import OpponentManager
+from agents.utils import find_footsies_ports, FootsiesEncourageAdvance
 
 LOGGER = logging.getLogger("main")
-
-
-"""
-Practical considerations:
-
-- Special attacks require holding an attack input without interruption for 1 whole second (60 frames).
-  Therefore, the policy should ideally be able to consider a history at least 60 frames long.
-"""
-
-# TODO: try adding noise to some observation variables (such as position) for better generalization?
 
 
 def import_sb3(agent_model: str, env: Env, parameters: dict) -> BaseAlgorithm:
@@ -147,8 +138,13 @@ def train(
             # Set a new opponent from the opponent pool
             if opponent_manager is not None:
                 should_change = opponent_manager.update_at_episode(result)
+
+                if opponent_manager.exhausted:
+                    LOGGER.info("Opponent pool exhausted, quitting training")
+                    break
+
                 if should_change:
-                    env.unwrapped.set_opponent(opponent_manager.current_opponent.method)
+                    env.unwrapped.set_opponent(opponent_manager.current_opponent)
             
             episode_finished_callback(episode)
 
@@ -166,6 +162,13 @@ def create_env(args: EnvArgs) -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
         env = FootsiesEnv(**args.kwargs)
+
+        if args.footsies_wrapper_adv:
+            env = FootsiesEncourageAdvance(
+                env,
+                # Use the same logging directory of DIAYN, idc I want to test this fast
+                log_dir=args.diayn_kwargs["log_dir"],
+            )
 
         if args.footsies_wrapper_norm:
             env = FootsiesNormalized(env)
@@ -209,7 +212,7 @@ def create_env(args: EnvArgs) -> Env:
     return env
 
 
-def setup_logger(agent_name: str, stdout_level: int = logging.WARNING, file_level: int = logging.DEBUG, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
+def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: int = logging.DEBUG, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
     from logging.handlers import RotatingFileHandler
     from sys import stdout
 
@@ -250,6 +253,15 @@ if __name__ == "__main__":
     log_dir = os.path.join("runs", args.agent.name)
     args.env.diayn_kwargs["log_dir"] = log_dir
     
+    # Alleviate the need of specifically specifying different ports for each parallel instance.
+    # Still, allow the user to specify specific ports if they want to.
+    game_port, opponent_port, remote_control_port = find_footsies_ports()
+    args.env.kwargs.setdefault("game_port", game_port)
+    args.env.kwargs.setdefault("opponent_port", opponent_port)
+    args.env.kwargs.setdefault("remote_control_port", remote_control_port)
+
+    # Set up the main logger
+
     setup_logger(args.agent.name, file_level=args.misc.log_file_level, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
 
     # Prepare environment
@@ -300,7 +312,7 @@ if __name__ == "__main__":
         footsies_env.set_opponent(starter_opponent)
         opponent_manager = SelfPlayManager(
             snapshot_method=snapshot_method,
-            max_snapshots=args.self_play.max_snapshots,
+            max_opponents=args.self_play.max_opponents,
             snapshot_interval=args.self_play.snapshot_interval,
             switch_interval=args.self_play.switch_interval,
             mix_bot=args.self_play.mix_bot,
@@ -310,17 +322,29 @@ if __name__ == "__main__":
             starter_opponent=starter_opponent,
         )
 
+        if args.self_play.add_curriculum_opps:
+            opponent_manager.populate_with_curriculum_opponents(
+                Idle(),
+                Backer(),
+                Spammer(),
+                ForwardSpammer(),
+                NSpecialSpammer(),
+                BSpecialSpammer(),
+                WhiffPunisher(),
+            )
+
         LOGGER.info("Activated self-play")
 
     elif args.curriculum:
         opponent_manager = CurriculumManager(
             win_rate_threshold=0.7,
-            min_episodes=100,
+            win_rate_over_episodes=100,
+            log_dir=log_dir,
         )
 
         footsies_env: FootsiesEnv = env.unwrapped
         footsies_env.set_opponent(opponent_manager.current_opponent)
-        
+
         LOGGER.info("Activated curriculum learning")
 
     # Identity function, used when logging is disabled

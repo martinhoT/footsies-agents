@@ -41,8 +41,8 @@ def include_game_model_dpg_elements(analyser: Analyser):
         
         with dpg.table_row():
             dpg.add_text("Position")
-            dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position_predicted", enabled=False)
-            dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position_predicted", enabled=False)
+            dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p1_position_predicted", enabled=False)
+            dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p2_position_predicted", enabled=False)
 
         with dpg.table_row():
             dpg.add_text("Move")
@@ -78,8 +78,8 @@ def update_prediction(agent: GameModelAgent, observation, agent_action, opponent
     dpg.set_value("p2_move_predicted", p2_move.name)
     dpg.set_value("p1_move_progress_predicted", next_obs[32])
     dpg.set_value("p2_move_progress_predicted", next_obs[33])
-    dpg.set_value("p1_position_predicted", next_obs[34] * 4.4)
-    dpg.set_value("p2_position_predicted", next_obs[35] * 4.4)
+    dpg.set_value("p1_position_predicted", next_obs[34] * 4.6)
+    dpg.set_value("p2_position_predicted", next_obs[35] * 4.6)
     dpg.set_value("agent_action", ActionMap.SIMPLE_ACTIONS[agent_action].name)
     dpg.set_value("opponent_action", ActionMap.SIMPLE_ACTIONS[opponent_action].name)
 

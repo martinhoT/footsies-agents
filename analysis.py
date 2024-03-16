@@ -102,6 +102,9 @@ class Analyser:
 
         # DPG items
         self.dpg_saved_battle_state_list: int | str = None
+        self.dpg_advance_button: int | str = None
+        self.dpg_keep_advancing_button: int | str = None
+        self.dpg_stop_advancing_button: int | str = None
 
         self.text_output_formatter = pprint.PrettyPrinter(indent=1)
 
@@ -118,6 +121,10 @@ class Analyser:
         dpg.configure_item(self.dpg_saved_battle_state_list, items=current_saved_battle_state_list + [self.battle_state_label(battle_state)])
 
     def load_battle_state(self, battle_state: FootsiesBattleState, require_update: bool = True):
+        if self.advancing:
+            print("WARNING: you are attempting to load a custom battle state while the environment is advancing, you should stop it or multithreading shenanigans happen! We change stuff that is used in advance such as the previous_observation variable. To avoid problems, automatic advancing has been halted")
+            self.stop_advancing()
+
         self.footsies_env.load_battle_state(battle_state)
 
         if require_update:
@@ -164,8 +171,8 @@ class Analyser:
             self.p2_move_prev = footsies_move_from_one_hot(self.previous_observation[0, 17:32])
             self.p1_move_progress_prev = self.previous_observation[0, 32].item()
             self.p2_move_progress_prev = self.previous_observation[0, 33].item()
-            self.p1_position_prev = self.previous_observation[0, 34].item() * 4.4
-            self.p2_position_prev = self.previous_observation[0, 35].item() * 4.4
+            self.p1_position_prev = self.previous_observation[0, 34].item() * 4.6
+            self.p2_position_prev = self.previous_observation[0, 35].item() * 4.6
 
         self.p1_guard = round(self.current_observation[0, 0].item() * 3)
         self.p2_guard = round(self.current_observation[0, 1].item() * 3)
@@ -173,8 +180,8 @@ class Analyser:
         self.p2_move = footsies_move_from_one_hot(self.current_observation[0, 17:32])
         self.p1_move_progress = self.current_observation[0, 32].item()
         self.p2_move_progress = self.current_observation[0, 33].item()
-        self.p1_position = self.current_observation[0, 34].item() * 4.4
-        self.p2_position = self.current_observation[0, 35].item() * 4.4
+        self.p1_position = self.current_observation[0, 34].item() * 4.6
+        self.p2_position = self.current_observation[0, 35].item() * 4.6
 
         # Info
         self.previous_info = self.current_info
@@ -188,11 +195,19 @@ class Analyser:
         self.truncated = truncated
 
     def start_advancing(self):
+        dpg.disable_item(self.dpg_advance_button)
+        dpg.disable_item(self.dpg_keep_advancing_button)
+        dpg.enable_item(self.dpg_stop_advancing_button)
+
         self.advancing = True
         while self.advancing:
             self.advance()
 
     def stop_advancing(self):
+        dpg.enable_item(self.dpg_advance_button)
+        dpg.enable_item(self.dpg_keep_advancing_button)
+        dpg.disable_item(self.dpg_stop_advancing_button)
+
         self.advancing = False
 
     def advance(self):
@@ -321,8 +336,8 @@ class Analyser:
                 
                 with dpg.table_row():
                     dpg.add_text("Position")
-                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position_prev", enabled=False)
-                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position_prev", enabled=False)
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p1_position_prev", enabled=False)
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p2_position_prev", enabled=False)
 
                 with dpg.table_row():
                     dpg.add_text("Move")
@@ -350,8 +365,8 @@ class Analyser:
                 
                 with dpg.table_row():
                     dpg.add_text("Position")
-                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p1_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
-                    dpg.add_slider_float(min_value=-4.4, max_value=4.4, tag="p2_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p1_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p2_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
 
                 with dpg.table_row():
                     dpg.add_text("Move")
@@ -404,28 +419,28 @@ class Analyser:
                 dpg.add_checkbox(label="Truncated", tag="truncated", default_value=False, enabled=False)
 
             with dpg.group(horizontal=True):
-                advance_button = dpg.add_button(label="Advance", callback=self.advance)
-                keep_advancing_button = dpg.add_button(label="Keep advancing")
-                stop_advancing_button = dpg.add_button(label="Stop advancing", enabled=False)
-                
-                def keep_advancing_callback():
-                    dpg.disable_item(advance_button)
-                    dpg.enable_item(stop_advancing_button)
-                    self.start_advancing()
-                
-                def stop_advancing_callback():
-                    self.stop_advancing()
-                    dpg.enable_item(advance_button)
-                    dpg.disable_item(stop_advancing_button)
+                self.dpg_advance_button = dpg.add_button(label="Advance", callback=self.advance)
+                self.dpg_keep_advancing_button = dpg.add_button(label="Keep advancing")
+                self.dpg_stop_advancing_button = dpg.add_button(label="Stop advancing", enabled=False)
 
-                dpg.configure_item(keep_advancing_button, callback=lambda: threading.Thread(target=keep_advancing_callback, args=[], daemon=False).start())
-                dpg.configure_item(stop_advancing_button, callback=stop_advancing_callback)
+                dpg.configure_item(self.dpg_keep_advancing_button, callback=lambda: threading.Thread(target=self.start_advancing, args=[], daemon=False).start())
+                dpg.configure_item(self.dpg_stop_advancing_button, callback=self.stop_advancing)
 
             dpg.add_text("Game info (only updated on advance)")
             dpg.add_input_text(multiline=True, no_spaces=False, tag="text_output", enabled=False)
 
             dpg.add_separator()
             self.custom_elements_callback(self)
+
+        # Create a theme mainly for visible 'disabled' states
+        with dpg.theme() as global_theme:
+            with dpg.theme_component(dpg.mvButton, enabled_state=False):
+                dpg.add_theme_color(dpg.mvThemeCol_Text, (100, 100, 100))
+                dpg.add_theme_color(dpg.mvThemeCol_Button, (50, 50, 50))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, (50, 50, 50))
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (50, 50, 50))
+
+        dpg.bind_theme(global_theme)
 
         dpg.setup_dearpygui()
         dpg.show_viewport()

@@ -4,6 +4,8 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 
 $agent_script \
     --footsies-curriculum \
+    --wrapper-time-limit 600 \
+    --footsies-wrapper-adv \
     -eS \
         sync_mode synced_non_blocking \
     "$@"
