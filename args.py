@@ -3,6 +3,10 @@ import os
 import logging
 from dataclasses import dataclass
 from agents.torch_utils import hidden_layer_parameters_from_specifications
+from intrinsic.base import IntrinsicRewardScheme
+from intrinsic.counts import CountBasedScheme
+from intrinsic.icm import ICMScheme
+from intrinsic.rnd import RNDScheme
 
 
 @dataclass
@@ -11,6 +15,7 @@ class MainArgs:
     time_steps: int
     penalize_truncation: float
     curriculum: bool
+    intrinsic_reward_scheme: type[IntrinsicRewardScheme] | None
 
     misc: "MiscArgs"
     agent: "AgentArgs"
@@ -249,6 +254,12 @@ def parse_args() -> MainArgs:
         help="add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES",
     )
     parser.add_argument(
+        "--intrinsic-reward",
+        choices=["count", "icm", "rnd", "none"],
+        default="none",
+        help="the type of intrinsic reward to use. 'none' means no intrinsic reward will be used"
+    )
+    parser.add_argument(
         "--diayn",
         action="store_true",
         help="use the DIAYN wrapper, which replaces the environment's reward with the pseudo-reward from DIAYN, fostering the creation of a diverse set of task-agnostic skills"
@@ -418,11 +429,20 @@ def parse_args() -> MainArgs:
         args.diayn_discriminator_hidden_layer_activation_specification,
     )
 
+    
+    intrinsic_reward_scheme = {
+        "count": CountBasedScheme,
+        "icm": ICMScheme,
+        "rnd": RNDScheme,
+        "none": None,
+    }[args.intrinsic_reward]
+
     return MainArgs(
         episodes=args.episodes,
         time_steps=args.time_steps,
         penalize_truncation=args.penalize_truncation,
         curriculum=args.footsies_curriculum,
+        intrinsic_reward_scheme=intrinsic_reward_scheme,
         misc=MiscArgs(
             save=not args.no_save,
             load=not args.no_load,

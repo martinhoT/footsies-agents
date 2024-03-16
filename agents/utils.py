@@ -206,7 +206,7 @@ class FootsiesEncourageAdvance(Wrapper):
         self.advance_reward = advance_reward
 
         # For logging
-        self._summary_writer = SummaryWriter()
+        self._summary_writer = SummaryWriter(log_dir=log_dir) if log_dir is not None else None
         self._episode_extra_reward = 0.0
         self._episodes = 0
 

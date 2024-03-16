@@ -24,8 +24,8 @@ class CurriculumManager(OpponentManager):
         self._opponents = sorted([
             Idle(),
             Backer(),
-            Spammer(),
-            ForwardSpammer(),
+            NSpammer(),
+            BSpammer(),
             NSpecialSpammer(),
             BSpecialSpammer(),
             WhiffPunisher(),
@@ -132,11 +132,14 @@ class Backer(CurriculumOpponent):
         return 0
 
 
-class Spammer(CurriculumOpponent):
+class NSpammer(CurriculumOpponent):
     def __init__(self):
         self._action_cycle = cycle([
             (False, False, True),
-            (False, False, False),
+            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.duration), # Wait for the attack to finish before moving forward
+            (True, False, False),
+            (True, False, False),
+            (True, False, False),
         ])
 
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
@@ -147,10 +150,11 @@ class Spammer(CurriculumOpponent):
         return 1
 
 
-class ForwardSpammer(CurriculumOpponent):
+class BSpammer(CurriculumOpponent):
     def __init__(self):
         self._action_cycle = cycle([
             (True, False, True),
+            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.duration), # Wait for the attack to finish before moving forward
             (True, False, False),
             (True, False, False),
             (True, False, False),

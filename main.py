@@ -25,9 +25,10 @@ from agents.utils import snapshot_sb3_policy, wrap_policy
 from agents.torch_utils import hogwild
 from args import parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
-from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, ForwardSpammer, Idle, NSpecialSpammer, Spammer, WhiffPunisher
+from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher
 from opponents.base import OpponentManager
 from agents.utils import find_footsies_ports, FootsiesEncourageAdvance
+from intrinsic.base import IntrinsicRewardScheme
 
 LOGGER = logging.getLogger("main")
 
@@ -89,6 +90,7 @@ def train(
     n_episodes: int = None,
     penalize_truncation: float = None,
     opponent_manager: OpponentManager = None,
+    intrinsic_reward_scheme: IntrinsicRewardScheme = None,
     episode_finished_callback: Callable[[int], None] = lambda episode: None,
     progress_bar: bool = True,
 ):
@@ -102,6 +104,7 @@ def train(
     - `n_episodes`: if specified, the number of training episodes
     - `penalize_truncation`: penalize the agent if the time limit was exceeded, to discourage lengthening the episode
     - `opponent_manager`: manager of a custom opponent pool. Can be used for for self-play or curriculum learning. If None, custom opponents will not be used
+    - `intrinsic_reward`: the intrinsic reward scheme to use, if any
     - `episode_finished_callback`: function that will be called after each episode is finished
     - `progress_bar`: whether to display a progress bar (with `tqdm`)
     """
@@ -122,12 +125,22 @@ def train(
             result = 0.5 # by default, the game is a draw
             while not (terminated or truncated):
                 action = agent.act(obs, info)
-                obs, reward, terminated, truncated, info = env.step(action)
+                next_obs, reward, terminated, truncated, info = env.step(action)
                 
                 if penalize_truncation is not None and truncated:
                     reward = penalize_truncation
                 
-                agent.update(obs, reward, terminated, truncated, info)
+                if intrinsic_reward_scheme is not None:
+                    intrinsic_reward = intrinsic_reward_scheme.update_and_reward(obs, next_obs, reward, terminated, truncated, info)
+
+                    # It's not great to use the `info` dict as the storage for intrinsic reward, but this allows the addition of such without breaking the current API.
+                    # I could change it but I won't bother. Whathever agent wants to use intrinsic reward can just check if the key is present.
+                    if "intrinsic_reward" in info:
+                        LOGGER.warning("'intrinsic reward' key already present in info, will overwrite it although it shouldn't be present in the first place")
+                    info["intrinsic_reward"] = intrinsic_reward
+
+                agent.update(next_obs, reward, terminated, truncated, info)
+                obs = next_obs
 
             # Determine the final game result, to provide to the self-play manager
             if terminated and (reward != 0.0):
@@ -326,8 +339,8 @@ if __name__ == "__main__":
             opponent_manager.populate_with_curriculum_opponents(
                 Idle(),
                 Backer(),
-                Spammer(),
-                ForwardSpammer(),
+                NSpammer(),
+                BSpammer(),
                 NSpecialSpammer(),
                 BSpecialSpammer(),
                 WhiffPunisher(),
@@ -367,6 +380,12 @@ if __name__ == "__main__":
             episode_start_value=args.misc.log_episode_start,
             **loggables,
         )
+    
+    if args.intrinsic_reward_scheme:
+        intrinsic_reward_scheme = args.intrinsic_reward_scheme.basic()
+        
+    else:
+        intrinsic_reward_scheme = None
 
     if args.agent.is_sb3:
         try:
@@ -397,6 +416,7 @@ if __name__ == "__main__":
             "n_episodes": args.episodes,
             "penalize_truncation": args.penalize_truncation,
             "opponent_manager": opponent_manager,
+            "intrinsic_reward_scheme": intrinsic_reward_scheme,
         }
 
         if args.misc.hogwild:

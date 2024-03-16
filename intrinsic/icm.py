@@ -2,6 +2,8 @@ import numpy as np
 import torch
 from torch import nn
 from agents.torch_utils import create_layered_network
+from intrinsic.base import IntrinsicRewardScheme
+from agents.action import ActionMap
 
 
 class AbstractEnvironmentEncoder(nn.Module):
@@ -10,7 +12,7 @@ class AbstractEnvironmentEncoder(nn.Module):
         obs_dim: int,
         encoded_dim: int,
         hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.Identity,
+        hidden_layer_activation: type[nn.Module] = nn.Identity,
     ):
         super().__init__()
 
@@ -28,7 +30,7 @@ class InverseEnvironmentModel(nn.Module):
         action_dim: int,
         encoder: AbstractEnvironmentEncoder,
         hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.Identity,
+        hidden_layer_activation: type[nn.Module] = nn.Identity,
     ):
         super().__init__()
 
@@ -50,7 +52,7 @@ class ForwardEnvironmentModel(nn.Module):
         action_dim: int,
         encoder: AbstractEnvironmentEncoder,
         hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.Identity,
+        hidden_layer_activation: type[nn.Module] = nn.Identity,
     ):
         super().__init__()
 
@@ -94,7 +96,7 @@ class IntrinsicCuriosityModule(nn.Module):
             encoded_next_obs = self.encoder(next_obs)
             _, predicted_encoded_next_obs = self(obs, action, next_obs)
 
-            intrinsic_reward = self.reward_scale * 0.5 * torch.mean((predicted_encoded_next_obs - encoded_next_obs) ** 2)
+            intrinsic_reward = self.reward_scale * 0.5 * (predicted_encoded_next_obs - encoded_next_obs).pow(2).mean()
 
             return intrinsic_reward.item()
     
@@ -151,21 +153,62 @@ class IntrinsicCuriosityTrainer:
         self.forward_model_loss = forward_model_loss.item()
 
 
-class NoveltyTable:
+class ICMScheme(IntrinsicRewardScheme):
     def __init__(
         self,
-        reward_scale: float = 1.0
+        trainer: IntrinsicCuriosityTrainer,
     ):
-        self.table = {}
-        self.reward_scale = reward_scale
-    
-    def register(self, obs: torch.Tensor):
-        o = obs.numpy().tobytes()
-        self.table[o] = self.table.get(o, 0) + 1
-    
-    def query(self, obs: torch.Tensor) -> int:
-        o = obs.numpy().tobytes()
-        return self.table.get(o, 0)
+        self.trainer = trainer
+        self.icm = trainer.curiosity
 
-    def intrinsic_reward(self, obs: torch.Tensor) -> float:
-        return self.reward_scale / self.query(obs)
+        
+    def _append_opponent_action(self, obs: torch.Tensor, opponent_action: int) -> torch.Tensor:
+        opponent_action_oh = nn.functional.one_hot(torch.tensor([opponent_action]), num_classes=ActionMap.n_simple()).float()
+        return torch.hstack((obs, opponent_action_oh))
+
+    def update_and_reward(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict) -> float:
+        p1_action, p2_action = ActionMap.simples_from_torch_transition(obs, next_obs)
+
+        # Include the opponent's future action in the observation, which should help in determining the future state
+        obs_with_opp = self._append_opponent_action(obs, p2_action)
+
+        self.trainer.train(obs_with_opp, p1_action, next_obs)
+
+        return self.icm.intrinsic_reward(obs_with_opp, p1_action, next_obs)
+
+    @staticmethod
+    def basic(obs_dim: int = 36, encoded_dim: int = 16) -> "IntrinsicRewardScheme":
+        encoder = AbstractEnvironmentEncoder(
+            obs_dim=obs_dim,
+            encoded_dim=encoded_dim,
+            hidden_layer_sizes=[128, 128],
+            hidden_layer_activation=nn.LeakyReLU,
+        )
+        
+        icm = IntrinsicCuriosityModule(
+            encoder=encoder,
+            inverse_model=InverseEnvironmentModel(
+                encoded_dim=encoded_dim,
+                action_dim=ActionMap.n_simple(),
+                encoder=encoder,
+                hidden_layer_sizes=[64, 64],
+                hidden_layer_activation=nn.LeakyReLU,
+            ),
+            forward_model=ForwardEnvironmentModel(
+                encoded_dim=encoded_dim,
+                action_dim=ActionMap.n_simple(),
+                encoder=encoder,
+                hidden_layer_sizes=[64, 64],
+                hidden_layer_activation=nn.LeakyReLU,
+            ),
+            reward_scale=1.0,
+        )
+
+        trainer = IntrinsicCuriosityTrainer(
+            curiosity=icm,
+            optimizer=torch.optim.SGD,
+            learning_rate=1e-3,
+            beta=0.2,
+        )
+
+        return ICMScheme(trainer=trainer)

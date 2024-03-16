@@ -9,7 +9,7 @@ from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
 from agents.a2c.a2c import A2CLearnerBase, A2CQLearner, ActorNetwork, ValueNetwork
-from agents.ql.ql import QFunctionTable, QFunctionNetwork
+from agents.ql.ql import QFunction, QFunctionTable, QFunctionNetwork
 from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
 from agents.action import ActionMap
 
@@ -114,6 +114,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
+            intrinsic_reward=info.get("intrinsic_reward", 0),
         )
 
         # P1 learning logging
@@ -134,6 +135,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             self._learner.learn(p2_obs, p2_next_obs, reward, terminated, truncated,
                 obs_agent_action=obs_agent_action,
                 obs_opponent_action=obs_opponent_action,
+                intrinsic_reward=info.get("intrinsic_reward", 0),
             )
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
@@ -176,15 +178,20 @@ class FootsiesAgent(FootsiesAgentTorch):
         torch.save(self._actor.state_dict(), actor_path)
         
         # Save critic
-        if isinstance(self._critic, QFunctionTable):
-            critic_path = os.path.join(folder_path, "critic_qtable")
-            self._critic.save(critic_path)
-        elif isinstance(self._critic, QFunctionNetwork):
-            critic_path = os.path.join(folder_path, "critic_qnetwork")
-            self._critic.save(critic_path)
-        elif isinstance(self._critic, ValueNetwork):
-            critic_path = os.path.join(folder_path, "critic_vnetwork")
-            torch.save(self._critic.state_dict(), critic_path)
+        def save_critic(critic: QFunction, folder_path: str):
+            if isinstance(critic, QFunctionTable):
+                critic_path = os.path.join(folder_path, "critic_qtable")
+                critic.save(critic_path)
+            elif isinstance(critic, QFunctionNetwork):
+                critic_path = os.path.join(folder_path, "critic_qnetwork")
+                critic.save(critic_path)
+            elif isinstance(critic, ValueNetwork):
+                critic_path = os.path.join(folder_path, "critic_vnetwork")
+                torch.save(critic.state_dict(), critic_path)
+        
+        save_critic(self._critic, folder_path)
+        if self.learner.intrinsic_critic is not None:
+            save_critic(self.learner.intrinsic_critic, folder_path)
 
     def evaluate_average_delta(self) -> float:
         res = (
