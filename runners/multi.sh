@@ -4,7 +4,6 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 
 $agent_script \
     "$@" \
-    --no-save \
-    --no-log \
-    -eS \
-        render_mode human
+    --hogwild \
+    --hogwild-cpus 12 \
+    --hogwild-n-workers 6

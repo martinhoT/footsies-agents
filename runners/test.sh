@@ -3,6 +3,7 @@ agent_script=$1
 shift 1 # Remove the first argument, which is the path to the wrapped script, so that the rest of the arguments are passed to it
 
 $agent_script \
+    "$@" \
     --no-save \
     --no-log \
     -eS \
@@ -10,5 +11,4 @@ $agent_script \
         sync_mode synced_non_blocking \
     -eB \
         fast_forward false \
-        vs_player true \
-    "$@"
+        vs_player true
