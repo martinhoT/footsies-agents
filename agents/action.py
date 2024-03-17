@@ -217,12 +217,6 @@ class ActionMap:
             player_move_state in ActionMap.TEMPORAL_ACTIONS_CANCELABLE
             # Opponent has just been hit
             and opponent_move_progress == 0.0 and opponent_move_state in ActionMap.HIT_GUARD_STATES
-            # (
-                # The move progress is either not advancing (frozen in time)...
-                # np.isclose(previous_move_progress, current_move_progress)
-                # ... or that move was canceled into another move. We hardcode the only situation in which this happens (if I'm not wrong)
-                # or current_player_move_state == FootsiesMove.N_SPECIAL
-            # )
         )
 
     @staticmethod

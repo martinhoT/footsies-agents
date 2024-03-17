@@ -1,0 +1,2 @@
+#!/bin/sh
+./runners/curriculum.sh ./runners/footsies.sh to_no_specials_rollback --name curriculum_greedies --no-load -mS critic_agent_update q_learning critic_opponent_update q_learning -mN critic_lr 0.001

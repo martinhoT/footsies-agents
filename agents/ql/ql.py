@@ -70,12 +70,12 @@ class QFunction(ABC):
         reward: float,
         next_obs: torch.Tensor,
         terminated: bool,
-        agent_action: int = None,
-        opponent_action: int = None,
+        agent_action: int | None = None,
+        opponent_action: int | None = None,
         next_agent_action: int | None = None,
         next_opponent_action: int | None = None,
-        next_agent_policy: torch.Tensor | None = None,
-        next_opponent_policy: torch.Tensor | None = None,
+        next_agent_policy: torch.Tensor | str | None = None,
+        next_opponent_policy: torch.Tensor | str | None = None,
     ) -> torch.Tensor:
         """
         Perform a Q-value update. Returns the TD error.
@@ -95,10 +95,12 @@ class QFunction(ABC):
         Should be a matrix with agent actions in the rows and opponent actions in the columns.
         If not `None`, will consider the next Q-values weighted by the current policy.
         This corresponds to Expected SARSA, or Q-learning if `agent_policy` happens to be greedy.
+        Can also be a string: "greedy" for a greedy policy, or "uniform" for a uniform random policy.
         - `next_opponent_policy`: the opponent's policy evaluated at the next observation.
         Should be a column vector.
         If not `None`, will weight the next Q-values according to how likely they are to happen under the opponent's policy.
-        If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a uniform random policy in the next observation
+        If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a uniform random policy in the next observation.
+        Can also be a string: "greedy" for a greedy policy, or "uniform" for a uniform random policy.
         """
         if terminated:
             nxt_value = 0.0
@@ -107,33 +109,44 @@ class QFunction(ABC):
             if next_agent_action is not None and next_agent_policy is not None:
                 raise ValueError("'next_agent_action' and 'next_agent_policy' are mutually exclusive, as they dictate which kind of Q-value update to perform, but both were not None")
             
+            if next_agent_action is None and next_agent_policy is None:
+                raise ValueError("either 'next_agent_action' or 'next_agent_policy' must be provided")
+
             if next_opponent_action is not None and next_opponent_policy is not None:
                 raise ValueError("'next_opponent_action' and 'next_opponent_policy' are mutually exclusive, as they dictate which kind of Q-value update to perform, but both were not None")
             
-            # Lazy formulation to save lines of code
-            if next_opponent_action is not None:
-                next_opponent_policy = nn.functional.one_hot(torch.tensor([next_opponent_action]), num_classes=self.opponent_action_dim).unsqueeze(1).float()
-                LOGGER.debug("Will consider a single action from the opponent in the update")
-            elif next_opponent_policy is None:
-                next_opponent_policy = torch.ones(self.opponent_action_dim).unsqueeze(1) / self.opponent_action_dim
-                LOGGER.debug("Will consider the opponent to be following a uniform random policy in the update")
-            else:
-                LOGGER.debug("Will consider a custom opponent's policy in the update")
-            if next_agent_action is not None:
-                next_agent_policy = nn.functional.one_hot(torch.tensor([next_agent_action]), num_classes=self.action_dim).unsqueeze(1).float()
-                LOGGER.debug("Will perform a SARSA update")
+            if next_opponent_action is None and next_opponent_policy is None:
+                raise ValueError("either 'next_opponent_action' or 'next_opponent_policy' must be provided")
 
             # The target doesn't need gradients to flow through. We also squeeze, assuming only one observation is being considered in next_obs
             next_qs = self.q(next_obs).detach().squeeze(dim=0)
-            # Perform SARSA-like update
-            if next_agent_policy is not None:
-                next_q = next_opponent_policy.T @ torch.diag(next_qs @ next_agent_policy).unsqueeze(1)
-                LOGGER.debug("Setup SARSA-like update")
-            # Perform Q-learning update
-            else:
-                next_q = next_opponent_policy @ torch.max(next_qs, dim=-1, keepdims=True)
-                LOGGER.debug("Setup Q-learning update")
 
+            # First compute the effective agent policy (a matrix or column vector), if needed.
+            # If it was explicitly passed, then we don't need to artificially create one.
+            if next_agent_action is not None:
+                next_agent_policy = nn.functional.one_hot(torch.tensor([next_agent_action]), num_classes=self.action_dim).float().T
+            elif next_agent_policy == "uniform":
+                next_agent_policy = torch.ones(self.action_dim).unsqueeze(1) / self.action_dim
+            elif next_agent_policy == "greedy":
+                next_agent_policy = nn.functional.one_hot(torch.argmax(next_qs, dim=-1), num_classes=self.action_dim).float().T
+
+            # The next Q-values aggregated according to the agent's policy, but missing the opponent's
+            next_q_opp = torch.sum(next_qs * next_agent_policy.T, dim=1, keepdim=True)
+
+            # Then compute the effective opponent policy (a column vector), if needed.
+            # If it was explicitly passed, then we don't need to artificially create one.
+            if next_opponent_action is not None:
+                next_opponent_policy = nn.functional.one_hot(torch.tensor([next_opponent_action]), num_classes=self.opponent_action_dim).float().T
+            elif next_opponent_policy == "uniform":
+                next_opponent_policy = torch.ones(self.opponent_action_dim).unsqueeze(1) / self.opponent_action_dim
+            elif next_opponent_policy == "greedy":
+                # This one is tricky! The opponent's policy is a column vector (not conditioned on agent action),
+                # so we need to implicitly take the agent's policy into account in the Q-values
+                next_opponent_policy = nn.functional.one_hot(torch.argmax(next_q_opp), num_classes=self.opponent_action_dim).unsqueeze(1).float()
+
+            # Finally, aggregate the next Q-values according to the opponent's policy
+            next_q = next_opponent_policy.T @ next_q_opp
+            
             nxt_value = self.discount * next_q.item()
 
         target = reward + nxt_value

@@ -188,7 +188,7 @@ class FootsiesEncourageAdvance(Wrapper):
     
     def __init__(self, env,
         distance_cap: float = 4.0,
-        advance_reward: float = 0.01,
+        advance_reward: float = 0.1,
         log_dir: str = None,
     ):
         """

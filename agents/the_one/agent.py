@@ -1,6 +1,7 @@
 import os
 import torch
 import logging
+import random
 from torch import nn
 from torch.distributions import Categorical
 from copy import deepcopy
@@ -159,12 +160,12 @@ class FootsiesAgent(FootsiesAgentTorch):
             predicted_opponent_action = self.opponent_model.predict(obs)
         elif self.rollback_as_opponent_model:
             predicted_opponent_action = self.previous_valid_opponent_action
-            # Assume the opponent is standing if the predicted action is None in the rollback model,
-            # which should mean that the opponent is being frameskipped
-            # if predicted_opponent_action is None:
-            #     predicted_opponent_action = 0
         else:
-            predicted_opponent_action = None
+            opponent_policy = info.get("next_opponent_policy", None)
+            if opponent_policy is not None:
+                predicted_opponent_action = random.choices(range(self.opponent_action_dim), weights=opponent_policy, k=1)[0]
+            else:
+                predicted_opponent_action = None
 
         action = self.a2c.act(self.current_observation, info, predicted_opponent_action=predicted_opponent_action)
         self._recently_predicted_opponent_action = predicted_opponent_action

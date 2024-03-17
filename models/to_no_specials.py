@@ -11,7 +11,7 @@ from agents.the_one.loggables import get_loggables
 
 CONSIDER_OPPONENT_ACTION = True
 
-def model_init(observation_space_size: int, action_space_size: int, **kwargs) -> tuple[TheOneAgent, dict[str, list]]:
+def model_init(observation_space_size: int, action_space_size: int) -> tuple[TheOneAgent, dict[str, list]]:
     obs_dim = observation_space_size
     action_dim = ActionMap.n_simple() - 2
     opponent_action_dim = ActionMap.n_simple()
@@ -53,7 +53,7 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         actor_learning_rate=1e-2,
         actor_entropy_loss_coef=0.0,
         policy_cumulative_discount=False,
-        update_style=A2CQLearner.UpdateStyle.EXPECTED_SARSA,
+        agent_update_style="expected-sarsa",
     )
 
     a2c = A2CAgent(
@@ -74,7 +74,6 @@ def model_init(observation_space_size: int, action_space_size: int, **kwargs) ->
         reaction_time_emulator=None,
         over_simple_actions=True,
         remove_special_moves=True,
-        rollback_as_opponent_model=True,
         game_model_learning_rate=1e-4,
     )
 

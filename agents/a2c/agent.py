@@ -76,6 +76,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             self.current_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
             return self.current_action
 
+        # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic
         if predicted_opponent_action is None:
             predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
 
@@ -111,9 +112,14 @@ class FootsiesAgent(FootsiesAgentTorch):
             obs_agent_action = self.current_action
             obs_opponent_action = None
 
+        next_opponent_policy = info.get("next_opponent_policy", None)
+        if next_opponent_policy is not None:
+            next_opponent_policy = next_opponent_policy.unsqueeze(1)
+
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
+            next_obs_opponent_policy=next_opponent_policy,
             intrinsic_reward=info.get("intrinsic_reward", 0),
         )
 
@@ -135,6 +141,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             self._learner.learn(p2_obs, p2_next_obs, reward, terminated, truncated,
                 obs_agent_action=obs_agent_action,
                 obs_opponent_action=obs_opponent_action,
+                obs_opponent_policy=None, # I didn't even think about this, likely 100% wrong
                 intrinsic_reward=info.get("intrinsic_reward", 0),
             )
 

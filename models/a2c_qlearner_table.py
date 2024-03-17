@@ -8,7 +8,7 @@ from agents.ql.ql import QFunctionTable
 
 CONSIDER_OPPONENT_ACTION = True
 
-def model_init(observation_space_size: int, action_space_size: int, **kwargs) -> tuple[A2CAgent, dict[str, list]]:
+def model_init(observation_space_size: int, action_space_size: int) -> tuple[A2CAgent, dict[str, list]]:
     obs_dim = observation_space_size
     action_dim = ActionMap.n_simple()
 

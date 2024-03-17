@@ -113,6 +113,9 @@ def train(
 
     training_iterator = count() if n_episodes is None else range(n_episodes)
 
+    # Whether to notify the agent of the opponent's next action distribution. Only valid for a very specific implementation.
+    tell_agent_of_opponent = isinstance(opponent_manager, CurriculumManager)
+
     if progress_bar:
         training_iterator = tqdm(training_iterator)
 
@@ -138,6 +141,11 @@ def train(
                     if "intrinsic_reward" in info:
                         LOGGER.warning("'intrinsic reward' key already present in info, will overwrite it although it shouldn't be present in the first place")
                     info["intrinsic_reward"] = intrinsic_reward
+
+                if tell_agent_of_opponent:
+                    # Notify the agent of the opponent's next action distribution, using the same storage method for the intrinsic reward.
+                    # Note that this info dict will be kept for the next iteration, which means the agent's `act` method also has access to this information.
+                    info["next_opponent_policy"] = opponent_manager.current_curriculum_opponent.peek(next_obs)
 
                 agent.update(next_obs, reward, terminated, truncated, info)
                 obs = next_obs

@@ -88,7 +88,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         actor_learning_rate=1e-2,
         actor_entropy_loss_coef=0.0,
         policy_cumulative_discount=False,
-        update_style="expected-sarsa",
+        agent_update_style=A2CQLearner.UpdateStyle.EXPECTED_SARSA,
     )
 
     a2c = A2CAgent(

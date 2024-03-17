@@ -276,9 +276,14 @@ class A2CLambdaLearner(A2CLearnerBase):
 # NOTE: we can use both players' perspectives when updating the Q-value function. This is left to the training loop to manage
 class A2CQLearner(A2CLearnerBase):
     class UpdateStyle(Enum):
+        # Considers the action that the player performed in the next observation
         SARSA = 0
+        # Considers the action distribution of the player in the next observation
         EXPECTED_SARSA = 1
+        # Considers the player to act greedily in the next observation
         Q_LEARNING = 2
+        # Considers the player to be acting uniformly randomly in the next observation
+        UNIFORM = 3
     
     def __init__(
         self,
@@ -287,7 +292,8 @@ class A2CQLearner(A2CLearnerBase):
         actor_entropy_loss_coef: float = 0.0,
         actor_learning_rate: float = 1e-4,
         policy_cumulative_discount: bool = False,
-        update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
+        agent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
+        opponent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         intrinsic_critic: QFunction = None,
     ):
         """
@@ -300,11 +306,16 @@ class A2CQLearner(A2CLearnerBase):
         - `actor_entropy_loss_coef`: the coefficient for the entropy loss in the actor's loss function, i.e. how much to prioritize policy entropy over reward
         - `actor_learning_rate`: the learning rate for the actor
         - `policy_cumulative_discount`: whether to discount the policy more the more steps are taken in the environment
-        - `update_style`: the style of update to use for the critic
+        - `agent_update_style`: how to update the critic's Q-values considering the agent's policy
+        - `opponent_update_style`: how to update the critic's Q-values considering the opponent's policy
         - `intrinsic_critic`: the critic for the intrinsic reward. If `None`, then no intrinsic reward is considered
         """
-        if not isinstance(update_style, self.UpdateStyle):
-            raise ValueError(f"update_style must be an instance of {self.UpdateStyle}, not {type(update_style)}")
+        if not isinstance(agent_update_style, self.UpdateStyle):
+            raise ValueError(f"'agent_update_style' must be an instance of {self.UpdateStyle}, not {type(agent_update_style)}")
+        if not isinstance(opponent_update_style, self.UpdateStyle):
+            raise ValueError(f"'opponent_update_style' must be an instance of {self.UpdateStyle}, not {type(opponent_update_style)}")
+        if agent_update_style == self.UpdateStyle.UNIFORM:
+            LOGGER.warning("Considering the agent to be following a uniform random policy doesn't make much sense, and is not recommended")
 
         self._actor = actor
         self._critic = critic
@@ -312,7 +323,8 @@ class A2CQLearner(A2CLearnerBase):
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
         self.policy_cumulative_discount = policy_cumulative_discount
         self.consider_opponent_action = actor.consider_opponent_action
-        self._update_style = update_style
+        self._agent_update_style = agent_update_style
+        self._opponent_update_style = opponent_update_style
 
         self.action_dim = self._critic.action_dim
         self.opponent_action_dim = self._critic.opponent_action_dim
@@ -391,17 +403,30 @@ class A2CQLearner(A2CLearnerBase):
         
         return advantage
     
-    def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, intrinsic_reward: float, terminated: bool, truncated: bool, obs_agent_action: int, obs_opponent_action: int, next_obs_agent_action: int, next_obs_opponent_action: int):
-        """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the agent's and opponent's actual action on the next observation `next_obs`."""
+    def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, obs_agent_action: int | None, obs_opponent_action: int | None, next_obs_agent_action: int | None, next_obs_opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, intrinsic_reward: float = 0.0):
+        """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the agent's and opponent's actual action on the next observation `next_obs`. The next opponent policy should be a column vector."""
         # Update the Q-table. Save the TD error in case the caller wants to check it. The TD error is None if no critic update was performed
         self.td_error = None
-        if obs_agent_action is not None:
-            next_obs_action_probabilities = self.actor.probabilities(next_obs, next_opponent_action=None).detach().squeeze().T
+
+        # If the agent will be frameskipped, then we consider them to be doing any of their actions (uniform random policy).
+        if next_obs_agent_action is None:
+            # TODO: How about we have a column, which means we consider the action the agent performed at the beginning of frameskipping?
+            #       This is essentially the same idea we have when we perform rollback-based prediction of the opponent's next action.
+            next_obs_agent_policy = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
         else:
-            next_obs_action_probabilities = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
+            next_obs_agent_policy = self.actor.probabilities(next_obs, next_opponent_action=None).detach().squeeze().T
+        
+        # The same thing above but for the opponent
+        if next_obs_opponent_action is None:
+            next_obs_opponent_policy = torch.ones(self.opponent_action_dim, 1).float() / (self.opponent_action_dim)
+
+        # Schedule a critic update
         self.frameskipped_critic_updates.append(
-            (obs, reward, intrinsic_reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_action_probabilities, next_obs_agent_action, next_obs_opponent_action)
+            (obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_agent_action, next_obs_opponent_action, next_obs_agent_policy, next_obs_opponent_policy, intrinsic_reward)
         )
+
+        # If the agent will not be frameskipped, then we can perform the updates now.
+        # If the game is finished, then we also perform all scheduled updates.
         if next_obs_agent_action is not None or terminated or truncated:
             # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
             previous_discount = self._critic.discount
@@ -410,13 +435,38 @@ class A2CQLearner(A2CLearnerBase):
 
             # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
             for frameskipped_update in reversed(self.frameskipped_critic_updates):
-                obs_, reward_, intrinsic_reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_action_probabilities_, next_obs_agent_action_, next_obs_opponent_action_ = frameskipped_update
+                obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_action_, next_obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
                 
-                if self._update_style != self.UpdateStyle.EXPECTED_SARSA:
-                    next_obs_action_probabilities_ = None
-                if self._update_style != self.UpdateStyle.SARSA:
+                # Disable Expected SARSA, keeping the agent's next action
+                if self._agent_update_style == self.UpdateStyle.SARSA:
+                    next_obs_agent_policy_ = None
+                # Disable SARSA, keeping the agent's next policy
+                elif self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
                     next_obs_agent_action_ = None
+                # Enable Q-learning, change agent's policy to greedy
+                elif self._agent_update_style == self.UpdateStyle.Q_LEARNING:
+                    next_obs_agent_action_ = None
+                    next_obs_agent_policy_ = "greedy"
+                # Change agent's policy to be uniform
+                elif self._agent_update_style == self.UpdateStyle.UNIFORM:
+                    next_obs_agent_action_ = None
+                    next_obs_agent_policy_ = "uniform"
                 
+                # Disable Expected SARSA, keeping the opponent's next action
+                if self._opponent_update_style == self.UpdateStyle.SARSA:
+                    next_obs_opponent_policy_ = None
+                # Disable SARSA, keeping the opponent's next policy
+                elif self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+                    next_obs_opponent_action_ = None
+                # Enable Q-learning, change opponent's policy to greedy
+                elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
+                    next_obs_opponent_action_ = None
+                    next_obs_opponent_policy_ = "greedy"
+                # Change opponent's policy to be uniform
+                elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
+                    next_obs_opponent_action_ = None
+                    next_obs_opponent_policy_ = "uniform"
+
                 # The kwargs that are shared between the critic and the intrinsic critic
                 critic_kwargs = {
                     "obs": obs_,
@@ -424,9 +474,9 @@ class A2CQLearner(A2CLearnerBase):
                     "agent_action": obs_agent_action_,
                     "opponent_action": obs_opponent_action_,
                     "next_agent_action": next_obs_agent_action_,
-                    "next_opponent_action": None, # We ignore what the opponent actually did, so that we would not need importance sampling. This will assume that the opponent behaves uniformly randomly
-                    "next_agent_policy": next_obs_action_probabilities_,
-                    "next_opponent_policy": self._custom_opponent_policy(obs_).detach().T if self._custom_opponent_policy is not None else None,
+                    "next_opponent_action": next_obs_opponent_action_,
+                    "next_agent_policy": next_obs_agent_policy_,
+                    "next_opponent_policy": next_obs_opponent_policy_,
                 }
 
                 td_error = self._critic.update(
@@ -464,7 +514,7 @@ class A2CQLearner(A2CLearnerBase):
         if terminated or truncated:
             self.cumulative_discount = 1.0
 
-    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, *, obs_agent_action: int, obs_opponent_action: int, intrinsic_reward: float = 0.0, **kwargs):
+    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, *, obs_agent_action: int, obs_opponent_action: int, next_obs_opponent_policy: torch.Tensor | None = None, intrinsic_reward: float = 0.0, **kwargs):
         """
         Update the actor and critic in this environment step. Should be preceded by an environment interaction with `sample_action()`.
         
@@ -474,6 +524,7 @@ class A2CQLearner(A2CLearnerBase):
         ----------------
         - `obs_agent_action`: which action the agent actually performed. Should match what was sampled, but can be `None` if the critic update should be done for all agent actions
         - `obs_opponent_action`: which action the opponent actually performed. May not match what was used at the time of sampling
+        - `next_obs_opponent_policy`: the probability distribution over opponent actions for the next observation. Should be a column vector. Can be `None` as long as the update style is not Expected SARSA, or the episode terminated
         - `intrinsic_reward`: the intrinsic reward from the environment
         """
         if self.postponed_learn is not None:
@@ -481,7 +532,7 @@ class A2CQLearner(A2CLearnerBase):
             
             # If the episode terminated, just learn the last bit, don't even need to wait for the agent and opponent actions since they won't exist
             if terminated or truncated:
-                self._learn_complete(obs=obs, next_obs=next_obs, reward=reward, intrinsic_reward=intrinsic_reward, terminated=terminated, truncated=truncated, obs_agent_action=obs_agent_action, obs_opponent_action=obs_opponent_action, next_obs_agent_action=None, next_obs_opponent_action=None)
+                self._learn_complete(obs=obs, next_obs=next_obs, reward=reward, terminated=terminated, truncated=truncated, obs_agent_action=obs_agent_action, obs_opponent_action=obs_opponent_action, next_obs_agent_action=None, next_obs_opponent_action=None, next_obs_opponent_policy=None, intrinsic_reward=intrinsic_reward)
                 self.postponed_learn = None
                 return
             
@@ -493,6 +544,7 @@ class A2CQLearner(A2CLearnerBase):
             "truncated": truncated,
             "obs_agent_action": obs_agent_action,
             "obs_opponent_action": obs_opponent_action,
+            "next_obs_opponent_policy": next_obs_opponent_policy,
             "intrinsic_reward": intrinsic_reward,
         }
 

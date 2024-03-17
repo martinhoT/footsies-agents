@@ -1,4 +1,6 @@
+import torch
 import logging
+from torch import nn
 from abc import ABC, abstractmethod
 from collections import deque
 from footsies_gym.moves import FootsiesMove
@@ -99,12 +101,20 @@ class CurriculumManager(OpponentManager):
     def current_recent_win_rate(self) -> float:
         return sum(self._agent_wins) / len(self._agent_wins) if self._agent_wins else 0.5
 
+    @property
+    def current_curriculum_opponent(self) -> "CurriculumOpponent":
+        return self._opponents[self._current_opponent_idx]
+
 
 class CurriculumOpponent(ABC):
 
     @abstractmethod
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         """The method by which the opponent performs actions"""
+
+    @abstractmethod
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        """Return the probability distribution of the action that the agent will perform next (the next `act` call). Both observation and the probability distribution are tensors."""
 
     @property
     @abstractmethod
@@ -113,19 +123,31 @@ class CurriculumOpponent(ABC):
 
 
 class Idle(CurriculumOpponent):
+    def __init__(self):
+        self._probs = torch.zeros((ActionMap.n_simple(),)).float()
+        self._probs[ActionMap.simple_from_move(FootsiesMove.STAND)] = 1.0
 
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return (False, False, False)
     
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        return self._probs
+
     @property
     def difficulty(self) -> int:
         return 0
     
 
 class Backer(CurriculumOpponent):
+    def __init__(self):
+        self._probs = torch.zeros((ActionMap.n_simple(),)).float()
+        self._probs[ActionMap.simple_from_move(FootsiesMove.BACKWARD)] = 1.0
 
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return (False, True, False)
+
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        return self._probs
 
     @property
     def difficulty(self) -> int:
@@ -136,15 +158,37 @@ class NSpammer(CurriculumOpponent):
     def __init__(self):
         self._action_cycle = cycle([
             (False, False, True),
-            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.duration), # Wait for the attack to finish before moving forward
+            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.startup), # Wait for the attack to start before attacking again
+            *([(False, False, True)] * FootsiesMove.N_ATTACK.value.active), # Attack during active frames
+            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.recovery), # Wait until the attack finishes before moving forward
             (True, False, False),
             (True, False, False),
             (True, False, False),
         ])
 
+        self._peeked_action = None
+
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
+        if self._peeked_action is not None:
+            action = self._peeked_action
+            self._peeked_action = None
+            return action
+        
         return next(self._action_cycle)
     
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        if self._peeked_action is None:
+            self._peeked_action = next(self._action_cycle)
+
+        simple = FootsiesMove.STAND
+        if self._peeked_action == (False, False, True):
+            simple = FootsiesMove.N_ATTACK
+        elif self._peeked_action == (True, False, False):
+            simple = FootsiesMove.FORWARD
+
+        simple = ActionMap.simple_from_move(simple)
+        return nn.functional.one_hot(torch.tensor(simple), num_classes=ActionMap.n_simple()).float()
+
     @property
     def difficulty(self) -> int:
         return 1
@@ -154,14 +198,36 @@ class BSpammer(CurriculumOpponent):
     def __init__(self):
         self._action_cycle = cycle([
             (True, False, True),
-            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.duration), # Wait for the attack to finish before moving forward
+            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.startup), # Wait for the attack to start before attacking again
+            *([(False, False, True)] * FootsiesMove.B_ATTACK.value.active), # Attack during active frames
+            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.recovery), # Wait until the attack finishes before moving forward
             (True, False, False),
             (True, False, False),
             (True, False, False),
         ])
+
+        self._peeked_action = None
     
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
+        if self._peeked_action is not None:
+            action = self._peeked_action
+            self._peeked_action = None
+            return action
+        
         return next(self._action_cycle)
+
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        if self._peeked_action is None:
+            self._peeked_action = next(self._action_cycle)
+        
+        simple = FootsiesMove.STAND
+        if self._peeked_action == (True, False, True):
+            simple = FootsiesMove.B_ATTACK
+        elif self._peeked_action == (True, False, False):
+            simple = FootsiesMove.FORWARD
+
+        simple = ActionMap.simple_from_move(simple)
+        return nn.functional.one_hot(torch.tensor(simple), num_classes=ActionMap.n_simple()).float()
 
     @property
     def difficulty(self) -> int:
@@ -174,10 +240,16 @@ class NSpecialSpammer(CurriculumOpponent):
             *([(False, False, True)] * 60),
             (False, False, False),
         ])
+
+        self._probs = torch.zeros((ActionMap.n_simple(),)).float()
+        self._probs[ActionMap.simple_from_move(FootsiesMove.N_SPECIAL)] = 1.0
     
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return next(self._action_cycle)
     
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        return self._probs
+
     @property
     def difficulty(self) -> int:
         return 2
@@ -189,10 +261,16 @@ class BSpecialSpammer(CurriculumOpponent):
             *([(False, False, True)] * 60),
             (True, False, False),
         ])
+
+        self._probs = torch.zeros((ActionMap.n_simple(),)).float()
+        self._probs[ActionMap.simple_from_move(FootsiesMove.B_SPECIAL)] = 1.0
     
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return next(self._action_cycle)
     
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        return self._probs
+
     @property
     def difficulty(self) -> int:
         return 2
@@ -201,39 +279,75 @@ class BSpecialSpammer(CurriculumOpponent):
 class WhiffPunisher(CurriculumOpponent):
     def __init__(self, keepout_distance: float = 2.624):
         self._keepout_distance = keepout_distance
-        self._action_queue = deque([])
+        self._primitive_action_queue = deque([])
+        self._simple_action = FootsiesMove.STAND
 
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
-        # If there were actions that was previously queued, perform them
-        if self._action_queue:
-            return self._action_queue.popleft()
-
-        agent_move: FootsiesMove = ActionMap.move_from_move_index(obs["move"][0])
-        agent_move_frame: int = obs["move_frame"][0]
-    
+    def _compute_action(self, agent_move: FootsiesMove, agent_move_frame: int, agent_position: float, our_position: float) -> FootsiesMove:
         # If we hit the agent, finish them off
         if agent_move == FootsiesMove.DAMAGE:
-            return (False, False, True)
+            return FootsiesMove.N_ATTACK
 
         # Move towards the agent by default if distance between players is too great
-        distance_between_players = obs["position"][1] - obs["position"][0]
+        distance_between_players = our_position - agent_position
         if distance_between_players > self._keepout_distance:
-            return (True, False, False)
+            return FootsiesMove.FORWARD
 
         if agent_move in (FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL):
             # If the agent is in recovery and we can hit them before they recover...
             if agent_move.in_recovery(agent_move_frame) and agent_move_frame + FootsiesMove.N_ATTACK.value.startup < agent_move.value.duration:
-                # ... punish them (we also need to have an idle input so that we are not charging a special move, and can perform the full punish)
-                self._action_queue.append((False, False, False))
-                return (False, False, True)
+                # ... punish them
+                return FootsiesMove.N_ATTACK
 
             # If the agent is beginning to perform the move...
             else:
                 # ... just block
-                return (False, True, False)
+                return FootsiesMove.BACKWARD
         
         # Don't get too close to the opponent
-        return (False, True, False)
+        return FootsiesMove.BACKWARD
+
+    # NOTE: keep in mind that the opponent has actions inverted, so FORWARD -> BACKWARD and vice versa
+    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+        # If there were actions that was previously queued, perform them.
+        # We also clean up the discrete action queue since they should be in sync.
+        if self._primitive_action_queue:
+            return self._primitive_action_queue.popleft()
+
+        agent_move = ActionMap.move_from_move_index(obs["move"][0])
+
+        simple_action = self._compute_action(
+            agent_move=agent_move,
+            agent_move_frame=obs["move_frame"][0],
+            agent_position=obs["position"][0],
+            our_position=obs["position"][1],
+        )
+        
+        self._simple_action = ActionMap.simple_from_move(simple_action)
+        # We need to correct the action since it will be performed on the other side of the screen
+        self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
+
+        return self._primitive_action_queue.popleft()
+
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        if self._primitive_action_queue:
+            return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
+        
+        agent_move_idx = torch.argmax(next_obs[0, 2:17]).item()
+        agent_move = ActionMap.move_from_move_index(agent_move_idx)
+        move_frame = round(next_obs[0, 33].item() * agent_move.value.duration)
+
+        simple_action = self._compute_action(
+            agent_move=agent_move,
+            agent_move_frame=move_frame,
+            agent_position=next_obs[0, 0].item(),
+            our_position=next_obs[0, 1].item(),
+        )
+
+        self._simple_action = ActionMap.simple_from_move(simple_action)
+        # We need to correct the action since it will be performed on the other side of the screen
+        self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
+
+        return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
 
     @property
     def difficulty(self):

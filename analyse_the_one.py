@@ -11,7 +11,7 @@ from agents.action import ActionMap
 from main import load_agent_model
 from analyse_a2c_qlearner import QLearnerAnalyserManager
 from analyse_opponent_model import MimicAnalyserManager
-from models import the_one_vanilla_no_specials_, the_one_vanilla_no_specials_opp_, the_one_vanilla_, the_one_vanilla_no_specials_rollback_
+from models import to_no_specials_, to_no_specials_opp_, to_, to_no_specials_rollback_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger
 from opponents.curriculum import WhiffPunisher
@@ -20,7 +20,7 @@ import logging
 
 if __name__ == "__main__":
 
-    setup_logger("analyse", stdout_level=logging.INFO, log_to_file=False)
+    setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
     custom_opponent = WhiffPunisher()
 
@@ -45,18 +45,16 @@ if __name__ == "__main__":
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
 
-    agent, loggables = the_one_vanilla_no_specials_rollback_(
+    agent, loggables = to_no_specials_rollback_(
         env.observation_space.shape[0],
         env.action_space.n,
-        qtable=False,
-        discretized=False,
     )
 
-    # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
-    # idle_distribution[0, 0] = 1.0
-    # agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
+    idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
+    idle_distribution[0, 0] = 1.0
+    agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
 
-    load_agent_model(agent, "the_one_vanilla_no_specials_rollback_curriculum")
+    load_agent_model(agent, "curriculum_advancer")
 
     def spammer():
         from itertools import cycle
@@ -111,7 +109,10 @@ if __name__ == "__main__":
 
         action = agent.act(obs, info)
 
-        predicted_opponent_action = ActionMap.simple_as_move(agent.recently_predicted_opponent_action)
+        if agent.recently_predicted_opponent_action is not None:
+            predicted_opponent_action = ActionMap.simple_as_move(agent.recently_predicted_opponent_action)
+        else:
+            predicted_opponent_action = None
         dpg.set_value("predicted_opponent_action", predicted_opponent_action.name if predicted_opponent_action is not None else "X")
 
         return action
