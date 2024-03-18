@@ -3,8 +3,6 @@ import torch
 import logging
 import random
 from torch import nn
-from torch.distributions import Categorical
-from copy import deepcopy
 from agents.action import ActionMap
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
@@ -12,7 +10,7 @@ from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
-from agents.a2c.a2c import A2CQLearner, ActorNetwork
+from agents.a2c.a2c import ActorNetwork
 from agents.mimic.agent import PlayerModel
 from agents.torch_utils import observation_invert_perspective_flattened
 from data import FootsiesDataset
@@ -75,6 +73,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             self.game_model_optimizer = torch.optim.SGD(self.game_model.parameters(), lr=game_model_learning_rate)
 
         self.current_observation = None
+        self.current_info = None
         self.current_representation = None
         # In case simplified, temporally extended actions are being used. We need to keep track of them
         self.current_simple_action = None
@@ -156,6 +155,7 @@ class FootsiesAgent(FootsiesAgentTorch):
     # It's in this function that the current observation and representation variables are updated
     def act(self, obs: torch.Tensor, info: dict) -> int:
         self.current_observation = obs
+        self.current_info = info
         if self.opponent_model is not None:
             predicted_opponent_action = self.opponent_model.predict(obs)
         elif self.rollback_as_opponent_model:
@@ -174,7 +174,7 @@ class FootsiesAgent(FootsiesAgentTorch):
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
         # Get the actions that were effectively performed by each player on the previous step
         if self.over_simple_actions:
-            agent_action, opponent_action = ActionMap.simples_from_torch_transition(self.current_observation, next_obs)
+            agent_action, opponent_action = ActionMap.simples_from_transition_ori(self.current_info, info)
             if self.remove_agent_special_moves:
                 # Convert the detected special move input (how did it even happen??) to a simple action
                 if agent_action == 8 or agent_action == 7:

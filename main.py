@@ -25,9 +25,9 @@ from agents.utils import snapshot_sb3_policy, wrap_policy
 from agents.torch_utils import hogwild
 from args import parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
-from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher
+from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher, UnsafePunisher
 from opponents.base import OpponentManager
-from agents.utils import find_footsies_ports, FootsiesEncourageAdvance
+from agents.utils import find_footsies_ports, FootsiesEncourageAdvance, FootsiesPhasicMoveProgress
 from intrinsic.base import IntrinsicRewardScheme
 
 LOGGER = logging.getLogger("main")
@@ -153,8 +153,8 @@ def train(
             # Determine the final game result, to provide to the self-play manager
             if terminated and (reward != 0.0):
                 result = 1 if reward > 0.0 else 0
-            elif truncated and (info["p1_guard"] != info["p2_guard"]):
-                result = 1 if info["p1_guard"] > info["p2_guard"] else 0
+            elif truncated and (info["guard"][0] != info["guard"][1]):
+                result = 1 if info["guard"][0] > info["guard"][1] else 0
 
             # Set a new opponent from the opponent pool
             if opponent_manager is not None:
@@ -182,7 +182,10 @@ def train(
 def create_env(args: EnvArgs) -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
-        env = FootsiesEnv(**args.kwargs)
+        env = FootsiesEnv(
+            # log_file=args.diayn_kwargs["log_dir"] + "/footsies.log",
+            **args.kwargs,
+        )
 
         if args.footsies_wrapper_adv:
             env = FootsiesEncourageAdvance(
@@ -192,9 +195,13 @@ def create_env(args: EnvArgs) -> Env:
             )
 
         if args.footsies_wrapper_norm:
-            env = FootsiesNormalized(env)
+            env = FootsiesNormalized(env, normalize_guard=args.footsies_wrapper_norm_guard)
+
+        if args.footsies_wrapper_phasic:
+            env = FootsiesPhasicMoveProgress(env)
 
         if args.footsies_wrapper_fs:
+            raise NotImplementedError("don't use the environment's frameskipping wrapper as it's deprecated")
             env = FootsiesFrameSkipped(env)
 
     else:
@@ -352,6 +359,7 @@ if __name__ == "__main__":
                 NSpecialSpammer(),
                 BSpecialSpammer(),
                 WhiffPunisher(),
+                UnsafePunisher(),
             )
 
         LOGGER.info("Activated self-play")

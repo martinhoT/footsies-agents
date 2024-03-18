@@ -1,6 +1,11 @@
 from .agent import FootsiesAgent
 from agents.ql.ql import QFunctionTable, QFunctionNetwork
 from agents.a2c.a2c import ValueNetwork, A2CQLearner
+from functools import partial
+
+
+def q_network_target_update_step(*, qf_network: QFunctionNetwork) -> int:
+    return qf_network._current_update_step
 
 
 def get_loggables(agent: FootsiesAgent) -> dict[str, list]:
@@ -25,6 +30,7 @@ def get_loggables(agent: FootsiesAgent) -> dict[str, list]:
 
     if isinstance(agent._critic, QFunctionNetwork):
         network_histograms.append(agent._critic.q_network)
+        custom_evaluators.append(("Learning/Q-network target update step", partial(q_network_target_update_step, qf_network=agent._critic)))
 
     if isinstance(agent._critic, ValueNetwork):
         network_histograms.append(agent._critic)

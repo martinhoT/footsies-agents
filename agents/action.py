@@ -1,5 +1,3 @@
-import torch
-import numpy as np
 from typing import Iterable
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 
@@ -24,7 +22,8 @@ class ActionMap:
 
     # Assuming player on the left side
     SIMPLE_AS_MOVE_TO_PRIMITIVE_MAP: dict[FootsiesMove, Iterable[tuple[bool, bool, bool]]] = {
-        FootsiesMove.STAND:         ((False, False, False),),
+        # STAND clears the possibility of performing a dash by inputting backward and forward
+        FootsiesMove.STAND:         ((True, True, False),),
         FootsiesMove.FORWARD:       ((False, True, False),),
         FootsiesMove.BACKWARD:      ((True, False, False),),
         FootsiesMove.DASH_FORWARD:  ((False, True, False), (False, False, False), (False, True, False)),
@@ -160,8 +159,13 @@ class ActionMap:
         # The player should have been able to perform an action, otherwise no simple action was effectively performed
         if was_actionable:
             # If the N/B_ATTACK was canceled into N_SPECIAL, we should return the N_ATTACK simple action
-            if previous_player_move in ActionMap.TEMPORAL_ACTIONS_CANCELABLE and player_move == FootsiesMove.N_SPECIAL:
-                return ActionMap.simple_from_move(FootsiesMove.N_ATTACK)
+            if previous_player_move in ActionMap.TEMPORAL_ACTIONS_CANCELABLE:
+                if player_move == FootsiesMove.N_SPECIAL:
+                    return ActionMap.simple_from_move(FootsiesMove.N_ATTACK)
+                # However, be careful! If the player is in hitstop, then we can't assume they are performing N_ATTACK here.
+                # Rather, we assume they are doing nothing unless they perform a valid move for this cancellation
+                else:
+                    return ActionMap.simple_from_move(FootsiesMove.STAND)
             
             # Otherwise, return the simple action extracted directly from the move
             else:
@@ -170,26 +174,27 @@ class ActionMap:
         return None
     
     @staticmethod
-    def simples_from_torch_transition(obs: torch.Tensor, next_obs: torch.Tensor):
-        """Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as PyTorch tensors. If an action was ineffectual, return `None`. This is a convenience method that should be used for obtaining simple actions from gameplay."""
-        p1_move_progress = obs[0, 32].item()
-        p2_move_progress = obs[0, 33].item()
-        p1_move_index = torch.argmax(obs[0, 2:17]).item()
-        p2_move_index = torch.argmax(obs[0, 17:32]).item()
-        p1_next_move_index = torch.argmax(next_obs[0, 2:17]).item()
-        p2_next_move_index = torch.argmax(next_obs[0, 17:32]).item()
+    def simples_from_transition_ori(obs: dict, next_obs: dict):
+        """Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as original observations. If an action was ineffectual, return `None`. This is a convenience method that should be used for obtaining simple actions from gameplay."""
+        p1_move_frame = obs["move_frame"][0]
+        p2_move_frame = obs["move_frame"][1]
+        p1_move_index = obs["move"][0]
+        p2_move_index = obs["move"][1]
+        p1_next_move_index = next_obs["move"][0]
+        p2_next_move_index = next_obs["move"][1]
+        
         obs_agent_action = ActionMap.simple_from_transition(
             previous_player_move_index=p1_move_index,
             previous_opponent_move_index=p2_move_index,
-            previous_player_move_progress=p1_move_progress,
-            previous_opponent_move_progress=p2_move_progress,
+            previous_player_move_progress=p1_move_frame,
+            previous_opponent_move_progress=p2_move_frame,
             player_move_index=p1_next_move_index,
         )
         obs_opponent_action = ActionMap.simple_from_transition(
             previous_player_move_index=p2_move_index,
             previous_opponent_move_index=p1_move_index,
-            previous_player_move_progress=p2_move_progress,
-            previous_opponent_move_progress=p1_move_progress,
+            previous_player_move_progress=p2_move_frame,
+            previous_opponent_move_progress=p1_move_frame,
             player_move_index=p2_next_move_index,
         )
 
@@ -210,38 +215,51 @@ class ActionMap:
     ## Utility methods
 
     @staticmethod
-    def is_in_hitstop(player_move_state: FootsiesMove, opponent_move_state: FootsiesMove, opponent_move_progress: float) -> bool:
+    def is_in_hitstop(player_move_state: FootsiesMove, opponent_move_state: FootsiesMove, opponent_move_frame: int) -> bool:
         """Whether the player, at the current move state, is in hitstop."""
         return (
             # The player should be performing an action that takes time and is cancelable
             player_move_state in ActionMap.TEMPORAL_ACTIONS_CANCELABLE
+            # TODO: Does this work with hitting the opponent again while they are guarding?
             # Opponent has just been hit
-            and opponent_move_progress == 0.0 and opponent_move_state in ActionMap.HIT_GUARD_STATES
+            and opponent_move_frame == 0 and opponent_move_state in ActionMap.HIT_GUARD_STATES
         )
 
     @staticmethod
-    def is_state_actionable(player_move_state: FootsiesMove, opponent_move_state: FootsiesMove, player_move_progress: float, opponent_move_progress: float) -> bool:
+    def is_in_hitstop_ori(obs: dict, p1: bool = True) -> bool:
+        """Whether the player, at the given original observation, is in hitstop."""
+        idx = 0 if p1 else 1
+        opponent_move_frame = obs["move_frame"][1 - idx]
+        player_move_index = obs["move"][idx]
+        opponent_move_index = obs["move"][1 - idx]
+        player_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
+        opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
+        return ActionMap.is_in_hitstop(player_move_state, opponent_move_state, opponent_move_frame)
+
+    @staticmethod
+    def is_state_actionable(player_move_state: FootsiesMove, opponent_move_state: FootsiesMove, player_move_frame: int, opponent_move_frame: int) -> bool:
         """Whether the player, at the current move state, is able to perform an action."""
-        in_hitstop = ActionMap.is_in_hitstop(player_move_state, opponent_move_state, opponent_move_progress)
+        in_hitstop = ActionMap.is_in_hitstop(player_move_state, opponent_move_state, opponent_move_frame)
         return (
             # Is the player in hitstop? (performing an action that takes time and the opponent was just hit)
             in_hitstop
             # Current move is finishing
-            or np.isclose(player_move_state.value.duration * player_move_progress + 1, player_move_state.value.duration)
+            or player_move_frame + 1 == player_move_state.value.duration
             # Is the player in a neutral state? i.e. states from which the player can always act
             or player_move_state in ActionMap.NEUTRAL_STATES
         )
     
     @staticmethod
-    def is_state_actionable_torch(obs: torch.Tensor) -> bool:
-        """Whether the player, at the current move state, is able to perform an action, from a given PyTorch observation (assumes player 1's perspective)."""
-        p1_move_progress = obs[0, 32].item()
-        p2_move_progress = obs[0, 33].item()
-        p1_move_index = torch.argmax(obs[0, 2:17]).item()
-        p2_move_index = torch.argmax(obs[0, 17:32]).item()
-        p1_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[p1_move_index]
-        p2_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[p2_move_index]
-        return ActionMap.is_state_actionable(p1_move_state, p2_move_state, p1_move_progress, p2_move_progress)
+    def is_state_actionable_ori(obs: dict, p1: bool = True) -> bool:
+        """Whether the player, at the current move state, is able to perform an action, from the given original observation (assumes player 1's perspective)."""
+        idx = 0 if p1 else 1
+        player_move_frame = obs["move_frame"][idx]
+        opponent_move_frame = obs["move_frame"][1 - idx]
+        player_move_index = obs["move"][idx]
+        opponent_move_index = obs["move"][1 - idx]
+        player_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
+        opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
+        return ActionMap.is_state_actionable(player_move_state, opponent_move_state, player_move_frame, opponent_move_frame)
 
     @staticmethod
     def is_simple_action_commital(simple: int) -> bool:

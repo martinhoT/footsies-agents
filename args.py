@@ -53,9 +53,11 @@ class EnvArgs:
     is_footsies: bool
     wrapper_time_limit: int
     footsies_wrapper_norm: bool
+    footsies_wrapper_norm_guard: bool
     footsies_wrapper_acd: bool
     footsies_wrapper_fs: bool
     footsies_wrapper_adv: bool
+    footsies_wrapper_phasic: bool
     diayn: bool
     diayn_kwargs: dict
     torch: bool
@@ -194,6 +196,11 @@ def parse_args() -> MainArgs:
         help="use the Normalized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
     )
     parser.add_argument(
+        "--footsies-wrapper-norm-no-guard",
+        action="store_true",
+        help="for the Normalized wrapper, disable normalization of the guard variable. Only has an effect if using the Normalized wrapper",
+    )
+    parser.add_argument(
         "--footsies-wrapper-acd",
         action="store_true",
         help="use the Action Combinations Discretized wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
@@ -207,6 +214,11 @@ def parse_args() -> MainArgs:
         "--footsies-wrapper-adv",
         action="store_true",
         help="use the Encourage Advance wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
+    )
+    parser.add_argument(
+        "--footsies-wrapper-phasic",
+        action="store_true",
+        help="use the Phasic Move Progress wrapper for FOOTSIES. Only has an effect when using the FOOTSIES environment",
     )
     parser.add_argument(
         "--footsies-curriculum",
@@ -468,9 +480,11 @@ def parse_args() -> MainArgs:
             is_footsies=is_footsies,
             wrapper_time_limit=args.wrapper_time_limit,
             footsies_wrapper_norm=args.footsies_wrapper_norm,
+            footsies_wrapper_norm_guard=not args.footsies_wrapper_norm_no_guard,
             footsies_wrapper_acd=args.footsies_wrapper_acd,
             footsies_wrapper_fs=args.footsies_wrapper_fs,
             footsies_wrapper_adv=args.footsies_wrapper_adv,
+            footsies_wrapper_phasic=args.footsies_wrapper_phasic,
             diayn=args.diayn,
             diayn_kwargs={
                 "skill_dim": args.diayn_skill_dim,

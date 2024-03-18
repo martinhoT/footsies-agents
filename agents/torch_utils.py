@@ -12,6 +12,7 @@ from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import find_footsies_ports
 from agents.action import ActionMap
+from abc import ABC, abstractmethod
 
 
 def create_layered_network(
@@ -321,7 +322,7 @@ class ActionHistoryAugmentation:
         # Fill history with no-ops
         self.history = deque([0] * n, maxlen=n)
     
-    def __call__(self, obs: torch.Tensor, action: int):
+    def __call__(self, obs: torch.Tensor, action: int) -> torch.Tensor:
         if not self.distinct or (self.history[-1] != action):
             self.history.append(action)
         
@@ -334,7 +335,7 @@ class TimeSinceLastCommitAugmentation:
         self.steps = steps
         self.t = 0.0
     
-    def __call__(self, obs: torch.Tensor, action: int):
+    def __call__(self, obs: torch.Tensor, action: int) -> torch.Tensor:
         if action is not None:
             commital = ActionMap.is_simple_action_commital(action)
             self.t = 0.0 if commital else (self.t + 1) % self.steps

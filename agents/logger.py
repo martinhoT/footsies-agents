@@ -121,7 +121,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             self.total_terminated_episodes += 1
         # We treat truncation, which should be by time limit, as termination
         elif truncated:
-            if info["p1_guard"] > info["p2_guard"]:
+            if info["guard"][0] > info["guard"][1]:
                 self.total_wins += 1
             self.total_terminated_episodes += 1
 

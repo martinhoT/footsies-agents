@@ -336,11 +336,6 @@ class A2CQLearner(A2CLearnerBase):
         self.postponed_learn: dict = None
         self.frameskipped_critic_updates = []
         self.frameskipped_critic_updates_cumulative_reward = 0.0
-        
-        # Consider a custom opponent policy when updating the Q-values.
-        # Since the opponent is part of the environment, this pretty much defines the transition dynamics
-        # and as such what kind of values we will obtain.
-        self._custom_opponent_policy = None
 
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
@@ -575,14 +570,3 @@ class A2CQLearner(A2CLearnerBase):
     @critic_learning_rate.setter
     def critic_learning_rate(self, learning_rate: float):
         self._critic.learning_rate = learning_rate
-
-    def consider_opponent_policy(self, opponent_policy: Callable[[torch.Tensor], torch.Tensor]):
-        """
-        Consider a specific opponent policy when calculating the Q-values.
-        With this, the Q-values will be calculated assuming the opponent behaves according to the given policy.
-        
-        Parameters
-        ----------
-        - `opponent_policy`: A callable that takes an environment observation (tensor) and outputs the probability distribution over opponent actions (of size `batch_size X action_size`). If `None`, will assume a uniform random opponent
-        """
-        self._custom_opponent_policy = opponent_policy

@@ -9,6 +9,9 @@ python3 main.py $agent \
     --footsies-wrapper-norm \
     --footsies-wrapper-acd \
     --log-frequency 1000 \
+    --wrapper-time-limit 1000 \
     -eB \
         dense_reward false \
+    -eS \
+        render_mode human \
     "$@"

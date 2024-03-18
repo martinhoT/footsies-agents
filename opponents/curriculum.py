@@ -31,6 +31,7 @@ class CurriculumManager(OpponentManager):
             NSpecialSpammer(),
             BSpecialSpammer(),
             WhiffPunisher(),
+            UnsafePunisher(),
         ], key=lambda o: o.difficulty)
         
         # An array of booleans that tracks the most recent wins of the agent (True if win, False otherwise)
@@ -352,3 +353,76 @@ class WhiffPunisher(CurriculumOpponent):
     @property
     def difficulty(self):
         return 2
+    
+
+class UnsafePunisher(CurriculumOpponent):
+    """This opponent stays idle, unless the agent attacks, in which case it blocks. It will retaliate if the agent performs either `N_SPECIAL` or `B_SPECIAL` and it blocks."""
+    def __init__(self):
+        self._primitive_action_queue = deque([])
+        self._simple_action = FootsiesMove.STAND
+        self._will_punish = False
+
+    def _compute_action(self, agent_move: FootsiesMove, our_move: FootsiesMove) -> FootsiesMove:
+        # If we hit the agent, finish them off
+        if agent_move == FootsiesMove.DAMAGE:
+            return FootsiesMove.N_ATTACK
+
+        # If we should start a punish, do it
+        if self._will_punish:
+            if our_move == FootsiesMove.STAND:
+                self._will_punish = False
+                return FootsiesMove.N_ATTACK
+            
+            # Just wait until we can act to perform the punish
+            else:
+                return FootsiesMove.STAND
+
+        # If the agent has blocked, set to look for the opportunity to punish as soon as possible, and wait until then
+        if agent_move in (FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL) and our_move in ActionMap.HIT_GUARD_STATES:
+            self._will_punish = True
+            return FootsiesMove.STAND
+        
+        # If the agent will perform an attack, block
+        if agent_move in (FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL):
+            return FootsiesMove.BACKWARD
+        
+        # Stand idle by default
+        return FootsiesMove.STAND
+
+    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+        # If there were actions that was previously queued, perform them.
+        # We also clean up the discrete action queue since they should be in sync.
+        if self._primitive_action_queue:
+            return self._primitive_action_queue.popleft()
+        
+        agent_move = ActionMap.move_from_move_index(obs["move"][0])
+        our_move = ActionMap.move_from_move_index(obs["move"][1])   
+
+        simple_action = self._compute_action(agent_move, our_move)
+
+        self._simple_action = ActionMap.simple_from_move(simple_action)
+        # We need to correct the action since it will be performed on the other side of the screen
+        self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
+
+        return self._primitive_action_queue.popleft()
+
+    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+        if self._primitive_action_queue:
+            return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
+
+        agent_move_idx = torch.argmax(next_obs[0, 2:17]).item()
+        agent_move = ActionMap.move_from_move_index(agent_move_idx)
+        our_move_idx = torch.argmax(next_obs[0, 17:32]).item()
+        our_move = ActionMap.move_from_move_index(our_move_idx)
+
+        simple_action = self._compute_action(agent_move, our_move)
+
+        self._simple_action = ActionMap.simple_from_move(simple_action)
+        # We need to correct the action since it will be performed on the other side of the screen
+        self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
+
+        return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
+
+    @property
+    def difficulty(self) -> int:
+        return 3

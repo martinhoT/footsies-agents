@@ -1,6 +1,5 @@
 import copy
 import dearpygui.dearpygui as dpg
-import torch
 import pprint
 import threading
 from datetime import datetime
@@ -13,14 +12,23 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.state import FootsiesBattleState, FootsiesState
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE, FOOTSIES_MOVE_ID_TO_INDEX
 from agents.action import ActionMap
-from collections import namedtuple
+from dataclasses import dataclass
 
 
-AnalyserState = namedtuple("AnalyserSavedState", ["battle_state", "observation", "info", "reward", "terminated", "truncated"])
+@dataclass
+class AnalyserState:
+    battle_state: FootsiesBattleState
 
+    previous_original_observation: dict
+    current_original_observation: dict
+    previous_observation: "any"
+    current_observation: "any"
 
-def footsies_move_from_one_hot(one_hot: torch.Tensor) -> FootsiesMove:
-    return FOOTSIES_MOVE_INDEX_TO_MOVE[torch.where(one_hot == 1.0)[0].item()]
+    previous_info: dict
+    current_info: dict
+    reward: float
+    terminated: bool
+    truncated: bool
 
 
 def editable_dpg_value(item: int | str):
@@ -30,7 +38,7 @@ def editable_dpg_value(item: int | str):
     )
 
 
-# NOTE: assumes no other wrapper that transforms the observation space is used (like FrameSkipped)
+# NOTE: assumes no other wrapper that transforms the observation space other than observation wrapper is used (like FrameSkipped)
 def transformed_observation_from_root(env: Env, root_obs: "any") -> "any":
     observation_wrappers: list[ObservationWrapper] = []
     current_env = env
@@ -86,10 +94,16 @@ class Analyser:
         if not normalized_observations:
             raise ValueError("the environment should have the normalized observations wrapper on")
 
+        # Store the current and previous environment information.
+        # The current and previous observations are those that are transformed and to be passed to the agent.
+        # The original current and previous observations are internal and supposed to be used by the analyser, which shouldn't care about which wrappers are being used.
+        self.current_original_observation = None
         self.current_observation = None
         self.current_info = None
+        self.previous_original_observation = None
         self.previous_observation = None
         self.previous_info = None
+
         self.requires_reset = True
 
         self._custom_battle_state_cached = None
@@ -114,7 +128,16 @@ class Analyser:
     def save_battle_state(self):
         battle_state = self.footsies_env.save_battle_state()
         self.saved_battle_states.append(AnalyserState(
-            battle_state, self.current_observation, self.current_info, self.reward, self.terminated, self.truncated
+            battle_state=battle_state,
+            previous_original_observation=self.previous_original_observation,
+            current_original_observation=self.current_original_observation,
+            previous_observation=self.previous_observation,
+            current_observation=self.current_observation,
+            previous_info=self.previous_info,
+            current_info=self.current_info,
+            reward=self.reward,
+            terminated=self.terminated,
+            truncated=self.truncated,
         ))
 
         current_saved_battle_state_list = self.saved_battle_states_labels
@@ -147,7 +170,11 @@ class Analyser:
     def load_battle_state_from_selected(self):
         saved_state = self.selected_saved_state
         self.load_battle_state(saved_state.battle_state)
-        self.update_state(saved_state.observation, saved_state.info, saved_state.reward, saved_state.terminated, saved_state.truncated)
+        self.update_state(saved_state.current_observation, saved_state.current_original_observation, saved_state.current_info, saved_state.reward, saved_state.terminated, saved_state.truncated,
+            previous_original_observation=saved_state.previous_original_observation,
+            previous_observation=saved_state.previous_observation,
+            previous_info=saved_state.previous_info,
+        )
 
     def update_current_action_from_agent(self):
         action = self.p1_action_source(self.current_observation, self.current_info)
@@ -159,32 +186,34 @@ class Analyser:
 
         self.action_left, self.action_right, self.action_attack = action_tuple
 
-    def update_state(self, observation: "any", info: dict, reward: float, terminated: bool, truncated: bool):
+    def update_state(self, observation: "any", original_observation: dict, info: dict, reward: float, terminated: bool, truncated: bool, *, previous_observation: "any" = None, previous_original_observation: dict = None, previous_info: dict = None):
         # Observation
-        self.previous_observation = self.current_observation
+        self.previous_original_observation = self.current_original_observation if previous_original_observation is None else previous_original_observation
+        self.previous_observation = self.current_observation if previous_observation is None else previous_observation
+        self.current_original_observation = original_observation
         self.current_observation = observation
 
-        if self.previous_observation is not None:
-            self.p1_guard_prev = round(self.previous_observation[0, 0].item() * 3)
-            self.p2_guard_prev = round(self.previous_observation[0, 1].item() * 3)
-            self.p1_move_prev = footsies_move_from_one_hot(self.previous_observation[0, 2:17])
-            self.p2_move_prev = footsies_move_from_one_hot(self.previous_observation[0, 17:32])
-            self.p1_move_progress_prev = self.previous_observation[0, 32].item()
-            self.p2_move_progress_prev = self.previous_observation[0, 33].item()
-            self.p1_position_prev = self.previous_observation[0, 34].item() * 4.6
-            self.p2_position_prev = self.previous_observation[0, 35].item() * 4.6
+        if self.previous_original_observation is not None:
+            self.p1_guard_prev = self.previous_original_observation["guard"][0]
+            self.p2_guard_prev = self.previous_original_observation["guard"][1]
+            self.p1_move_prev = ActionMap.move_from_move_index(self.previous_original_observation["move"][0])
+            self.p2_move_prev = ActionMap.move_from_move_index(self.previous_original_observation["move"][1])
+            self.p1_move_progress_prev = self.previous_original_observation["move_frame"][0] / self.p1_move_prev.value.duration
+            self.p2_move_progress_prev = self.previous_original_observation["move_frame"][1] / self.p2_move_prev.value.duration
+            self.p1_position_prev = self.previous_original_observation["position"][0]
+            self.p2_position_prev = self.previous_original_observation["position"][1]
 
-        self.p1_guard = round(self.current_observation[0, 0].item() * 3)
-        self.p2_guard = round(self.current_observation[0, 1].item() * 3)
-        self.p1_move = footsies_move_from_one_hot(self.current_observation[0, 2:17])
-        self.p2_move = footsies_move_from_one_hot(self.current_observation[0, 17:32])
-        self.p1_move_progress = self.current_observation[0, 32].item()
-        self.p2_move_progress = self.current_observation[0, 33].item()
-        self.p1_position = self.current_observation[0, 34].item() * 4.6
-        self.p2_position = self.current_observation[0, 35].item() * 4.6
+        self.p1_guard = self.current_original_observation["guard"][0]
+        self.p2_guard = self.current_original_observation["guard"][1]
+        self.p1_move = ActionMap.move_from_move_index(self.current_original_observation["move"][0])
+        self.p2_move = ActionMap.move_from_move_index(self.current_original_observation["move"][1])
+        self.p1_move_progress = self.current_original_observation["move_frame"][0] / self.p1_move.value.duration
+        self.p2_move_progress = self.current_original_observation["move_frame"][1] / self.p1_move.value.duration
+        self.p1_position = self.current_original_observation["position"][0]
+        self.p2_position = self.current_original_observation["position"][1]
 
         # Info
-        self.previous_info = self.current_info
+        self.previous_info = self.current_info if previous_info is None else previous_info
         self.current_info = info
         self.text_output = self.text_output_formatter.pformat(info)
         self.frame = info["frame"]
@@ -229,7 +258,8 @@ class Analyser:
 
             self.requires_reset = terminated or truncated
 
-        self.update_state(obs, info, reward, terminated, truncated)
+        original_observation = self.footsies_env.most_recent_observation
+        self.update_state(obs, original_observation, info, reward, terminated, truncated)
         
         self.custom_state_update_callback(self)
         self._custom_battle_state_cached = None
@@ -390,7 +420,7 @@ class Analyser:
 
                 dpg.add_text("ⓘ")
                 with dpg.tooltip(dpg.last_item()):
-                    dpg.add_text("Careful when using a dense reward scheme, since the environment internally keeps track of the cumulative reward and that is not reset!\nDon't perform reward-sensitive operations with save/load at the end of episodes in that case")
+                    dpg.add_text("Careful when using a dense reward scheme, since the environment internally keeps track of the cumulative reward and that is not reset!\nDon't perform reward-sensitive operations with save/load at the end of episodes in that case.")
             
             self.dpg_saved_battle_state_list = dpg.add_listbox([])
 

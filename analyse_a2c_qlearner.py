@@ -124,6 +124,7 @@ class QLearnerAnalyserManager:
         # DPG items
         self.attribute_modifier_window = None
         self.current_observation_index = None
+        self.current_action = None
 
     def add_custom_elements(self, analyser: Analyser):
         with dpg.window(label="Attribute modifier", show=False) as self.attribute_modifier_window:
@@ -158,12 +159,44 @@ class QLearnerAnalyserManager:
         
         self.policy_plot.setup(title="Policy distributions", value_range=(0.0, 1.0))
 
+        with dpg.group(horizontal=True):
+            dpg.add_text("Current action:")
+            self.current_action = dpg.add_text("")
+
     def update_policy_distribution(self, obs: torch.Tensor):
         policy_distribution = self.agent._actor.probabilities(obs, None).numpy(force=True).flatten()
         self.policy_plot.update(policy_distribution)
 
     def on_state_update(self, analyser: Analyser):
         obs: torch.Tensor = analyser.current_observation
+
+        # Make the agent learn first before presenting results, it's less confusing and we can immediately see the results
+        if self.online_learning and analyser.previous_observation is not None:
+            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
+            # Clone the observations, detached from the graph (clone() is differentiable, so we use detach()), 
+            # don't get internal references in the analyser since those can change dynamically
+            # (e.g. by loading battle states), which messes up the gradient computation graph
+            obs = obs.detach().clone()
+            next_obs = next_obs.detach().clone()
+
+            if not isinstance(obs, torch.Tensor) or not isinstance(next_obs, torch.Tensor):
+                raise RuntimeError("the online learning portion of the A2C analyser assumes the environment is providing PyTorch tensors as observations, but that is not the case!")
+
+            # If the agent is performing custom actions, we skip over `act` and `update` and pass information directly to the learner.
+            # NOTE: not recommended, since during `act` the agent performs important operations that affect the learning update.
+            if analyser.use_custom_action:
+                p1_simple, p2_simple = ActionMap.simples_from_transition_ori(info, next_info)
+
+                # Avoid using special moves if they weren't specified
+                if p1_simple is not None:
+                    p1_simple = min(p1_simple, self.action_dim - 1)
+                    
+                self.learner.learn(obs, next_obs, reward, terminated, truncated, obs_agent_action=p1_simple, obs_opponent_action=p2_simple)
+            # Otherwise, assume the agent is performing `act`.
+            else:
+                self.agent.current_info = info
+                self.agent.current_observation = obs
+                self.agent.update(next_obs, reward, terminated, truncated, next_info)
 
         if isinstance(self.learner.critic, QFunctionNetwork):
             q_values = self.learner.critic.q(obs, use_target_network=self.show_target_network)
@@ -177,25 +210,9 @@ class QLearnerAnalyserManager:
             dpg.set_value(self.current_observation_index, str(self.learner.critic._obs_idx(obs)))
 
         self.update_policy_distribution(obs)
-
-        if self.online_learning and analyser.previous_observation is not None:
-            obs, next_obs, reward, terminated, truncated, _, _ = analyser.most_recent_transition
-            # Clone the observations, detached from the graph (clone() is differentiable, so we use detach()), 
-            # don't get internal references in the analyser since those can change dynamically
-            # (e.g. by loading battle states), which messes up the gradient computation graph
-            obs = obs.detach().clone()
-            next_obs = next_obs.detach().clone()
-
-            if not isinstance(obs, torch.Tensor) or not isinstance(next_obs, torch.Tensor):
-                raise RuntimeError("the online learning portion of the A2C analyser assumes the environment is providing PyTorch tensors as observations, but that is not the case!")
-
-            p1_simple, p2_simple = ActionMap.simples_from_torch_transition(obs, next_obs)
-
-            # Avoid using special moves if they weren't specified
-            if p1_simple is not None:
-                p1_simple = min(p1_simple, self.action_dim - 1)
-
-            self.learner.learn(obs, next_obs, reward, terminated, truncated, obs_agent_action=p1_simple, obs_opponent_action=p2_simple)
+        
+        if self.agent.current_action is not None:
+            dpg.set_value(self.current_action, ActionMap.simple_as_move(self.agent.current_action).name)
 
 
 if __name__ == "__main__":

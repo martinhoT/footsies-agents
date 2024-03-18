@@ -11,10 +11,11 @@ from agents.action import ActionMap
 from main import load_agent_model
 from analyse_a2c_qlearner import QLearnerAnalyserManager
 from analyse_opponent_model import MimicAnalyserManager
-from models import to_no_specials_, to_no_specials_opp_, to_, to_no_specials_rollback_
+from models import to_no_specials_, to_no_specials_opp_, to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger
-from opponents.curriculum import WhiffPunisher
+from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher
+from agents.utils import FootsiesPhasicMoveProgress
 import logging
 
 
@@ -22,7 +23,7 @@ if __name__ == "__main__":
 
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
-    custom_opponent = WhiffPunisher()
+    custom_opponent = Backer()
 
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
@@ -32,29 +33,40 @@ if __name__ == "__main__":
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=False,
-        vs_player=True,
-        # opponent=custom_opponent.act,
+        dense_reward=True,
+        # vs_player=True,
+        opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
         FootsiesActionCombinationsDiscretized(
             FlattenObservation(
-                FootsiesNormalized(footsies_env)
+                # FootsiesPhasicMoveProgress(
+                    FootsiesNormalized(
+                        footsies_env,
+                        # normalize_guard=False,
+                    )
+                # )
             )
         ),
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
 
-    agent, loggables = to_no_specials_rollback_(
+    agent, loggables = to_no_specials_(
         env.observation_space.shape[0],
         env.action_space.n,
+        rollback=True,
+        actor_entropy_coef=0.5,
+        critic_agent_update="q_learning",
+        critic_opponent_update="q_learning",
+        # critic_target_update_rate=1000,
+        critic_table=True,
     )
 
-    idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
-    idle_distribution[0, 0] = 1.0
-    agent.a2c.learner.consider_opponent_policy(lambda o: idle_distribution)
+    # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
+    # idle_distribution[0, 0] = 1.0
 
-    load_agent_model(agent, "curriculum_advancer")
+    load_agent_model(agent, "curriculum_greedies_table")
 
     def spammer():
         from itertools import cycle
@@ -102,9 +114,9 @@ if __name__ == "__main__":
 
     def act(obs, info):
         # This is so bad, it's a repeat of update()'s last part (since the the_one doesn't have update() called, only the A2CAgent), but idc
-        prev_obs = agent.current_observation
+        prev_obs = agent.a2c.current_info
         if prev_obs is not None:
-            _, opponent_action = ActionMap.simples_from_torch_transition(prev_obs, obs)
+            _, opponent_action = ActionMap.simples_from_transition_ori(prev_obs, info)
             agent.previous_valid_opponent_action = opponent_action if opponent_action is not None else agent.previous_valid_opponent_action
 
         action = agent.act(obs, info)

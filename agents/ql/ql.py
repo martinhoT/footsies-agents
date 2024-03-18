@@ -6,6 +6,8 @@ from torch import nn
 from abc import ABC, abstractmethod
 from agents.torch_utils import create_layered_network
 from agents.torch_utils import ToMatrix
+from footsies_gym.moves import FootsiesMove
+from agents.action import ActionMap
 
 LOGGER = logging.getLogger("main.ql")
 
@@ -18,7 +20,7 @@ class QFunction(ABC):
         """Update the Q-value for the given state-action pair considering the provided TD error."""
 
     @abstractmethod
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, **kwargs) -> torch.Tensor:
         """Get the Q-value for the given action and observation. If an action is `None`, then return Q-values considering all actions."""
 
     @abstractmethod
@@ -163,7 +165,8 @@ class QFunction(ABC):
         self._update_q_value(obs, target, agent_action, opponent_action)
 
         if LOGGER.isEnabledFor(logging.DEBUG):
-            new_value = self.q(obs, agent_action, opponent_action=opponent_action)
+            # We don't use the target network, in case it's the neural network implementation, in order to check whether anything was updated at all
+            new_value = self.q(obs, agent_action, opponent_action=opponent_action, use_target_network=False)
             LOGGER.debug(f"At an observation with agent action %s and opponent action %s we had a Q-value of %s, now of %s, which was updated to %s + %s",
                 agent_action, opponent_action, cur_value, new_value, reward, nxt_value
             )
@@ -215,8 +218,7 @@ class QFunctionTable(QFunction):
         discount: float = 1.0,
         learning_rate: float = 1e-2,
         table_as_matrix: bool = False,
-        move_frame_n_bins: int = 5,
-        position_n_bins: int = 5,
+        position_n_bins: int = 10,
         environment: str = "footsies",
     ):
         """
@@ -233,7 +235,6 @@ class QFunctionTable(QFunction):
         - `table_as_matrix`: whether the table should be stored as a matrix. If `False`, will be stored as a dictionary.
         Storing as a matrix should have a computational performance improvement, but spends much, much more memory than using a dictionary.
         A dictionary is recommended
-        - `move_frame_n_bins`: how many separations to perform on the move frame observation variable when discretizing. Only valid for the "footsies" environment
         - `position_n_bins`: how many separations to perform on the position observation variable when discretizing. Only valid for the "footsies" environment
         - `environment`: the environment for which the Q-table is being instantiated. Currently only supports "footsies" and "mountain car"
         """
@@ -248,12 +249,11 @@ class QFunctionTable(QFunction):
         self.environment = environment
 
         if self.environment == "footsies":
-            self.move_frame_n_bins = move_frame_n_bins
             self.position_n_bins = position_n_bins
-            self._obs_dim = 4**2 * 15**2 * move_frame_n_bins**2 * position_n_bins**2
+            self.max_move_duration = max(move.value.duration for move in FootsiesMove)
+            self._obs_dim = 4**2 * 15**2 * self.max_move_duration**2 * position_n_bins**2
 
             # Leave some leeway for the start and end of the linear space, since the start and end are part of the observation
-            self.move_frame_bins = np.linspace(-0.1, 1.1, move_frame_n_bins)
             self.position_bins = np.linspace(-1.1, 1.1, position_n_bins)
 
         elif self.environment == "mountain car":
@@ -293,8 +293,15 @@ class QFunctionTable(QFunction):
         gu1, gu2 = tuple(np.round(obs[0:2] * 3))
         mo1 = np.argmax(obs[2:17])
         mo2 = np.argmax(obs[17:32])
-        mf1, mf2 = tuple(np.digitize(obs[32:34], self.move_frame_bins))
+
+        mo1_move = ActionMap.move_from_move_index(mo1)
+        mo2_move = ActionMap.move_from_move_index(mo2)
+
+        mf1 = round(obs[32] * mo1_move.value.duration)
+        mf2 = round(obs[33] * mo2_move.value.duration)
+
         po1, po2 = tuple(np.digitize(obs[34:36], self.position_bins))
+        
         # yikes
         return int(
             gu1
@@ -302,9 +309,9 @@ class QFunctionTable(QFunction):
             + 4**2 * mo1
             + 4**2 * 15 * mo2
             + 4**2 * 15**2 * mf1
-            + 4**2 * 15**2 * self.move_frame_n_bins * mf2
-            + 4**2 * 15**2 * self.move_frame_n_bins**2 * po1
-            + 4**2 * 15**2 * self.move_frame_n_bins**2 * self.position_n_bins * po2
+            + 4**2 * 15**2 * self.max_move_duration * mf2
+            + 4**2 * 15**2 * self.max_move_duration**2 * po1
+            + 4**2 * 15**2 * self.max_move_duration**2 * self.position_n_bins * po2
         )
 
     def _mountain_car_obs_idx(self, obs: torch.Tensor) -> int:
@@ -334,6 +341,8 @@ class QFunctionTable(QFunction):
 
         td_error = (target - self.q(obs, action, opponent_action).squeeze(dim=0).numpy(force=True))
 
+        LOGGER.debug("Update Q-value of observation %s to %s", obs_idx, target)
+
         if self.table_as_matrix:
             if self.considering_opponent:
                 self.table[obs_idx, opponent_action, action] += self._learning_rate * td_error
@@ -355,7 +364,7 @@ class QFunctionTable(QFunction):
                 self.table[obs_idx][action] += + self._learning_rate * td_error
                 self.update_frequency_table[obs_idx][action] += 1
 
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, **kwargs) -> float | torch.Tensor:
         if action is None:
             action = slice(None)
         if opponent_action is None:
@@ -560,7 +569,7 @@ class QFunctionNetwork(QFunction):
                 target_param.data.copy_(q_param.data)
             self._current_update_step = 0
     
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, use_target_network: bool = True) -> float | torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, *, use_target_network: bool = True, **kwargs) -> float | torch.Tensor:
         if action is None:
             action = slice(None)
         if opponent_action is None:
@@ -607,6 +616,7 @@ class QFunctionNetwork(QFunction):
         return self._opponent_action_dim is not None
 
 
+# NOTE: this is not considering the discretzation exactly as is in the Q-table (more specifically, the move frames are not handled the same way)
 class QFunctionNetworkDiscretized(QFunctionNetwork):
     """Q-value table that uses a neural network to approximate the Q-values. Observations are discretized in a similar way to the tabular Q-value estimation."""
 
@@ -702,9 +712,9 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
         obs_discretized = self._transform_obs(obs_discretized)
         super()._update_q_value(obs_discretized, target, action, opponent_action)
     
-    def q(self, obs: torch.Tensor, **kwargs) -> float | torch.Tensor:
+    def q(self, obs: torch.Tensor, *args, **kwargs) -> float | torch.Tensor:
         obs_discretized = self._transform_obs(obs)
-        return super().q(obs_discretized, **kwargs)
+        return super().q(obs_discretized, *args, **kwargs)
 
     @property
     def obs_dim(self) -> int:

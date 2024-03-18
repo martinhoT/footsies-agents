@@ -1,0 +1,2 @@
+#!/bin/sh
+./runners/curriculum.sh ./runners/footsies.sh to_no_specials --name curriculum_greedies_table --no-load -mS critic_agent_update q_learning critic_opponent_update q_learning -mN critic_lr 1.0 actor_entropy_coef 0.5 -mB critic_table true

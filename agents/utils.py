@@ -184,11 +184,11 @@ class AppendSimpleHistoryWrapper(ObservationWrapper):
     
 
 class FootsiesEncourageAdvance(Wrapper):
-    """Wrapper for providing a reward for advancing towards the opponent based on the distance between players. Must be put after `FootsiesNormalized`."""
+    """Wrapper for providing a reward for advancing towards the opponent based on the distance between players. Must be put after the original environment, since it assumes unnormalized positions."""
     
     def __init__(self, env,
         distance_cap: float = 4.0,
-        advance_reward: float = 0.1,
+        advance_reward: float = 0.02,
         log_dir: str = None,
     ):
         """
@@ -235,3 +235,28 @@ class FootsiesEncourageAdvance(Wrapper):
             self._episodes += 1
 
         return obs, reward, terminated, truncated, info
+
+
+class FootsiesPhasicMoveProgress(ObservationWrapper):
+    """Wrapper for bucketizing the move progress according to the move's phase (startup, active, recovery). Must be put after `FootsiesNormalized`, since it works with unflattened observations."""
+
+    def __init__(self, env):
+        super().__init__(env)
+
+        self.observation_space: spaces.Dict = env.observation_space
+        self.observation_space.spaces["move_frame"] = spaces.MultiDiscrete([3, 3])
+
+    def observation(self, obs: dict) -> dict:
+        obs = obs.copy()
+
+        p1_move = ActionMap.move_from_move_index(obs["move"][0])
+        p2_move = ActionMap.move_from_move_index(obs["move"][1])
+
+        p1_move_frame = round(obs["move_frame"][0] * p1_move.value.duration)
+        p2_move_frame = round(obs["move_frame"][1] * p2_move.value.duration)
+        p1_move_phase = 2 if p1_move.in_recovery(p1_move_frame) else 1 if p1_move.in_active(p1_move_frame) else 0
+        p2_move_phase = 2 if p2_move.in_recovery(p2_move_frame) else 1 if p2_move.in_active(p2_move_frame) else 0
+
+        obs["move_frame"] = (p1_move_phase, p2_move_phase)
+
+        return obs

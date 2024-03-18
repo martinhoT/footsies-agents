@@ -23,6 +23,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         opponent_action_dim: int,
         footsies: bool = True,
         use_opponents_perspective: bool = False,
+        consider_explicit_opponent_policy: bool = False,
+        act_according_to_qvalues_only: bool = False,
     ):
         """
         Footsies agent using the A2C algorithm, potentially with some modifications.
@@ -35,14 +37,17 @@ class FootsiesAgent(FootsiesAgentTorch):
         - `footsies`: whether to consider the FOOTSIES environment is being used. If `False`, the agent will not do any special treatment
         - `use_opponents_perspective`: whether to use the opponent's perspective for learning.
         Only valid for FOOTSIES, since it's an environment with 2 players on the same conditions (characters, more specifically)
+        - `consider_explicit_opponent_policy`: whether to calculate critic values assuming an explicit opponent policy.
+        The opponent policy is specified in the `next_opponent_policy` key of the `info` dictionary in `update`.
         """
-        # NOTE: we *could* use the opponent's perspective if we use the opponent model as the policy, but that makes this whole thing more iffy than it already is
+        # NOTE: we could (?) use the opponent's perspective if we use the opponent model as the policy, but that makes this whole thing more iffy than it already is
         if use_opponents_perspective:
             raise NotImplementedError("using the opponent's perspective for learning is not supported, mainly because it has not been figured out if it's valid or not")
 
         self.opponent_action_dim = opponent_action_dim
         self.footsies = footsies
         self.use_opponents_perspective = use_opponents_perspective
+        self.consider_explicit_opponent_policy = consider_explicit_opponent_policy
 
         self._learner = learner
         self._actor = learner.actor
@@ -60,6 +65,11 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_action = None
         self.current_action_iterator = None # only needed if using simple actions
 
+        # Whether the agent has performed an action during hitstop.
+        # While in hitstop, time is frozen, so the agent should only perform one action.
+        # Likewise, there should only be one update, from the moment the agent performs an action to the moment hitstop ends.
+        self._has_acted_in_hitstop = False
+
         # For logging
         self.cumulative_delta = 0
         self.cumulative_delta_n = 0
@@ -68,6 +78,16 @@ class FootsiesAgent(FootsiesAgentTorch):
         self._test_observations = None
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
+        # While in hitstop, don't perform any actions (just do no-op)
+        is_in_hitstop = ActionMap.is_in_hitstop_ori(info)
+        if self._has_acted_in_hitstop:
+            if is_in_hitstop:
+                return 0
+            else:
+                # If not in hitstop anymore, reset the flag
+                LOGGER.debug("The agent is no longer in hitstop, will continue acting and learning")
+                self._has_acted_in_hitstop = False
+        
         self.current_observation = obs
         self.current_info = info
         
@@ -88,22 +108,36 @@ class FootsiesAgent(FootsiesAgentTorch):
                 self.current_action = None
         
         if self.current_action is None:
+            # If we can't perform an action, don't even attempt one
+            if not ActionMap.is_state_actionable_ori(info):
+                return 0
+
             if deterministic:
                 self.current_action = self._learner.actor.probabilities(obs, next_opponent_action=predicted_opponent_action).argmax().item()
             else:
                 self.current_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
             self.current_action_iterator = iter(ActionMap.simple_to_discrete(self.current_action))
             action = next(self.current_action_iterator)
+
+            # If the action was performed in hitstop, then ignore the next frames, that are frozen in time, which just mess with the updates
+            if is_in_hitstop:
+                LOGGER.debug("Agent performed action %s in hitstop, will ignore any act and update until it is over", self.current_action)
+                self._has_acted_in_hitstop = True
         
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
+        # Don't update while in hitstop, since obs and next_obs are the same and we don't want bootstrapping during that period.
+        if self._has_acted_in_hitstop:
+            return
+
         obs = self.current_observation
+        prev_info = self.current_info
 
         if self.footsies:
             # We only use this method to determine whether the agent's action was frameskipped or not, and to get the opponent's action of course.
             # We treat the agent specially because we may want to use a different action space for them (e.g. remove special moves).
-            obs_agent_action, obs_opponent_action = ActionMap.simples_from_torch_transition(obs, next_obs)
+            obs_agent_action, obs_opponent_action = ActionMap.simples_from_transition_ori(prev_info, info)
             obs_agent_action = obs_agent_action if obs_agent_action is None else self.current_action
             if obs_agent_action is not None and obs_agent_action != self.current_action:
                 LOGGER.warning("From a transition, we determined that the agent's action was %s, but it was actually %s! There is a significant discrepancy here", obs_agent_action, self.current_action)
@@ -112,7 +146,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             obs_agent_action = self.current_action
             obs_opponent_action = None
 
-        next_opponent_policy = info.get("next_opponent_policy", None)
+        next_opponent_policy = info.get("next_opponent_policy", None) if self.consider_explicit_opponent_policy else None
         if next_opponent_policy is not None:
             next_opponent_policy = next_opponent_policy.unsqueeze(1)
 
