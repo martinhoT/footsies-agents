@@ -34,8 +34,8 @@ if __name__ == "__main__":
         sync_mode="synced_non_blocking",
         fast_forward=False,
         dense_reward=True,
-        # vs_player=True,
-        opponent=custom_opponent.act,
+        vs_player=True,
+        # opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
@@ -60,13 +60,13 @@ if __name__ == "__main__":
         critic_agent_update="q_learning",
         critic_opponent_update="q_learning",
         # critic_target_update_rate=1000,
-        critic_table=True,
+        # critic_table=True,
     )
 
     # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
     # idle_distribution[0, 0] = 1.0
 
-    load_agent_model(agent, "curriculum_greedies_table")
+    load_agent_model(agent, "curriculum_advancer")
 
     def spammer():
         from itertools import cycle

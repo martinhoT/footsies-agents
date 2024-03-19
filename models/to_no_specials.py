@@ -11,15 +11,19 @@ from agents.the_one.loggables import get_loggables
 CONSIDER_OPPONENT_ACTION = True
 
 def model_init(observation_space_size: int, action_space_size: int, *,
-    actor_lr: float = 1e-1,
+    actor_lr: float = 1e-2,
     critic_lr: float = 1e-2,
-    actor_entropy_coef: float = 0.0008,
+    actor_entropy_coef: float = 0.1,
     critic_tanh: bool = False,
     critic_discount: float = 0.99,
     critic_agent_update: str = "expected_sarsa",
     critic_opponent_update: str = "expected_sarsa",
     critic_target_update_rate: int = 100,
     critic_table: bool = False,
+    act_with_qvalues: bool = False,
+    alternative_advantage: bool = False,
+    broadcast_at_frameskip: bool = False,
+    consider_explicit_opponent_policy: bool = False,
     rollback: bool = False,
 ) -> tuple[TheOneAgent, dict[str, list]]:
     
@@ -77,6 +81,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         policy_cumulative_discount=False,
         agent_update_style=getattr(A2CQLearner.UpdateStyle, critic_agent_update.upper()),
         opponent_update_style=getattr(A2CQLearner.UpdateStyle, critic_opponent_update.upper()),
+        alternative_advantage=alternative_advantage,
+        broadcast_at_frameskip=broadcast_at_frameskip,
     )
 
     a2c = A2CAgent(
@@ -84,6 +90,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
         footsies=True,
         use_opponents_perspective=False,
+        consider_explicit_opponent_policy=consider_explicit_opponent_policy,
+        act_with_qvalues=act_with_qvalues,
     )
 
     agent = TheOneAgent(
@@ -95,7 +103,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         opponent_model=None,
         game_model=None,
         reaction_time_emulator=None,
-        over_simple_actions=True,
         remove_special_moves=True,
         rollback_as_opponent_model=rollback,
         game_model_learning_rate=1e-4,

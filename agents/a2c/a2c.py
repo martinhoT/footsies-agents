@@ -88,8 +88,8 @@ class ActorNetwork(nn.Module):
         """Randomly sample an action."""
         action_probabilities = self.probabilities(obs, next_opponent_action)
         action_distribution = Categorical(probs=action_probabilities)
-        self.action = action_distribution.sample()
-        return self.action
+        action = action_distribution.sample()
+        return action
 
     def clone(self) -> "ActorNetwork":
         """Create a clone of this actor network, useful for extracting a policy."""
@@ -295,6 +295,8 @@ class A2CQLearner(A2CLearnerBase):
         agent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         opponent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         intrinsic_critic: QFunction = None,
+        alternative_advantage: bool = True,
+        broadcast_at_frameskip: bool = False,
     ):
         """
         Implementation of a custom actor-critic algorithm with a Q-value table/network for the critic
@@ -309,6 +311,16 @@ class A2CQLearner(A2CLearnerBase):
         - `agent_update_style`: how to update the critic's Q-values considering the agent's policy
         - `opponent_update_style`: how to update the critic's Q-values considering the opponent's policy
         - `intrinsic_critic`: the critic for the intrinsic reward. If `None`, then no intrinsic reward is considered
+        - `alternative_advantage`: whether to use the alternative advantage formula, which considers the reward as-is and is less reliant on the critic converging to the correct values.
+        This should allow the actor to learn sooner
+        - `broadcast_at_frameskip`: when frameskipping (i.e. the agent's or opponent's action is `None`), we can do one of two things:
+            - Either consider the agent/opponent to be doing any action (update on all actions), corresponding to `True`
+            - Or consider the agent/opponent to still be doing the originating action before frameskipping (update on a single action), corresponding to `False`
+        
+        If using a Q-value table, it's recommended to use `broadcast_at_frameskip` with `True`, since it's more correct.
+        However, if using a function approximator such as a neural network, it's likely that the broadcasts will leak into the state in which the original action
+        was performed (since states are mostly similar), which will cause the Q-values to be uniform at that state.
+        In such cases, it's recommended to use `broadcast_at_frameskip` with `False`.
         """
         if not isinstance(agent_update_style, self.UpdateStyle):
             raise ValueError(f"'agent_update_style' must be an instance of {self.UpdateStyle}, not {type(agent_update_style)}")
@@ -316,6 +328,13 @@ class A2CQLearner(A2CLearnerBase):
             raise ValueError(f"'opponent_update_style' must be an instance of {self.UpdateStyle}, not {type(opponent_update_style)}")
         if agent_update_style == self.UpdateStyle.UNIFORM:
             LOGGER.warning("Considering the agent to be following a uniform random policy doesn't make much sense, and is not recommended")
+        if agent_update_style == self.UpdateStyle.SARSA:
+            raise NotImplementedError("SARSA updates are not supported for the agent")
+        if opponent_update_style == self.UpdateStyle.SARSA:
+            raise NotImplementedError("SARSA updates are not supported for the opponent")
+
+        if alternative_advantage:
+            raise NotImplementedError("the alternative advantage formula is not implemented yet")
 
         self._actor = actor
         self._critic = critic
@@ -325,6 +344,8 @@ class A2CQLearner(A2CLearnerBase):
         self.consider_opponent_action = actor.consider_opponent_action
         self._agent_update_style = agent_update_style
         self._opponent_update_style = opponent_update_style
+        self._alternative_advantage = alternative_advantage
+        self._broadcast_at_frameskip = broadcast_at_frameskip
 
         self.action_dim = self._critic.action_dim
         self.opponent_action_dim = self._critic.opponent_action_dim
@@ -332,10 +353,12 @@ class A2CQLearner(A2CLearnerBase):
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients' sign unchanged)
         self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), lr=actor_learning_rate, maximize=True)
 
-        self.action = None
-        self.postponed_learn: dict = None
         self.frameskipped_critic_updates = []
-        self.frameskipped_critic_updates_cumulative_reward = 0.0
+
+        # If we are not performing broadcasting during frameskipping, we need to remember the last action performed
+        # by the agent/opponent, the one that led to the frameskipping.
+        # The last agent's action is already tracking in self.current_action.
+        self._last_valid_opponent_action = None
 
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
@@ -380,9 +403,9 @@ class A2CQLearner(A2CLearnerBase):
             opponent_action = slice(None)
 
         # A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi.T Q(s, o, .)
-        q_soa = self._critic.q(obs, agent_action, opponent_action).detach()
+        q_soa = critic.q(obs, agent_action, opponent_action).detach()
         pi = self._actor(obs)[:, opponent_action, :].detach()
-        q_so = self._critic.q(obs, opponent_action=opponent_action).detach()
+        q_so = critic.q(obs, opponent_action=opponent_action).detach()
 
         # This Einstein summation equation computes the diagonal of a >2D tensor by considering the last two dimensions as matrices
         advantage = q_soa - torch.einsum("...ii->...i", pi @ q_so.transpose(-2, -1))
@@ -398,31 +421,88 @@ class A2CQLearner(A2CLearnerBase):
         
         return advantage
     
-    def _learn_complete(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, obs_agent_action: int | None, obs_opponent_action: int | None, next_obs_agent_action: int | None, next_obs_opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, intrinsic_reward: float = 0.0):
-        """Perform a complete update. This method is not called by the training loop since in practice it needs to be performed one-step later as we need to know the agent's and opponent's actual action on the next observation `next_obs`. The next opponent policy should be a column vector."""
+    def learn(
+        self,
+        obs: torch.Tensor,
+        next_obs: torch.Tensor,
+        reward: float,
+        terminated: bool,
+        truncated: bool,
+        *,
+        obs_agent_action: int | None,
+        obs_opponent_action: int | None,
+        agent_will_frameskip: bool,
+        opponent_will_frameskip: bool,
+        next_obs_opponent_policy: torch.Tensor | None = None,
+        intrinsic_reward: float = 0.0,
+        **kwargs,
+    ):
+        """
+        Update the actor and critic in this environment step.
+        
+        Extra parameters
+        ----------------
+        - `obs_agent_action`: which action the agent actually performed. Should match what was sampled, but can be `None` if the critic update should consider the agent to be unactionable
+        - `obs_opponent_action`: which action the opponent actually performed. May not match what was used at the time of sampling. Can be `None` if the opponent is unactionable
+        - `agent_will_frameskip`: whether the agent will be unactionable in the next step
+        - `opponent_will_frameskip`: whether the opponent will be unactionable in the next step
+        - `next_obs_opponent_policy`: the probability distribution over opponent actions for the next observation. Should be a column vector. Can be `None` as long as the update style is not Expected SARSA, or the episode terminated
+        - `intrinsic_reward`: the intrinsic reward from the environment
+        """
         # Update the Q-table. Save the TD error in case the caller wants to check it. The TD error is None if no critic update was performed
         self.td_error = None
 
-        # If the agent will be frameskipped, then we consider them to be doing any of their actions (uniform random policy).
-        if next_obs_agent_action is None:
-            # TODO: How about we have a column, which means we consider the action the agent performed at the beginning of frameskipping?
-            #       This is essentially the same idea we have when we perform rollback-based prediction of the opponent's next action.
-            next_obs_agent_policy = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
+        agent_is_frameskipped = obs_agent_action is None
+
+        # Update the last valid action that the agent/opponent performed, i.e. out of any frameskipping.
+        # This is needed if we don't broadcast when frameskipping, since we need to know which action the opponent did perform.
+        if obs_agent_action is not None:
+            self._last_valid_agent_action = obs_agent_action
+        elif self._last_valid_agent_action is None:
+            raise RuntimeError("the agent is being frameskipped, but we don't remember them having ever performed an action")
+        
+        if obs_opponent_action is not None:
+            self._last_valid_opponent_action = obs_opponent_action
+        elif self._last_valid_opponent_action is None:
+            raise RuntimeError("the opponent is being frameskipped, but we don't remember them having ever performed an action")
+
+        # If the agent will be frameskipped...
+        if agent_will_frameskip:
+            # ... then we consider they will be doing any of their actions (uniform random policy).
+            if self._broadcast_at_frameskip:
+                next_obs_agent_policy = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
+            # ... then we consider they will keep doing the action before frameskipping.
+            else:
+                obs_agent_action = self._last_valid_agent_action
+                next_obs_agent_policy = nn.functional.one_hot(torch.tensor(obs_agent_action), num_classes=self.action_dim).float().unsqueeze(1).expand(-1, self.opponent_action_dim)
+        
+        # If the agent could act, then it makes sense for it to have a policy.
+        # We have to construct it manually since it is not provided as an argument.
+        # It doesn't make sense to provide the policy as argument, since we already have access to it here.
+        # On the other hand, we don't have access to the opponent model, hence why it is explicitly provided.
         else:
+            # We don't consider the action that the opponent will perform, this is just the Q-value matrix to provide to the critic method,
+            # which will then sort how to consider the opponent's next actions internally.
             next_obs_agent_policy = self.actor.probabilities(next_obs, next_opponent_action=None).detach().squeeze().T
         
-        # The same thing above but for the opponent
-        if next_obs_opponent_action is None:
-            next_obs_opponent_policy = torch.ones(self.opponent_action_dim, 1).float() / (self.opponent_action_dim)
+        # If the opponent will be frameskipped...
+        if opponent_will_frameskip:
+            # ... then we consider they will be doing any of their actions (uniform random policy).
+            if self._broadcast_at_frameskip:
+                next_obs_opponent_policy = torch.ones(self.opponent_action_dim, 1).float() / (self.opponent_action_dim)
+            # ... then we consider they will keep doing the action before frameskipping.
+            else:
+                obs_opponent_action = self._last_valid_opponent_action
+                next_obs_opponent_policy = nn.functional.one_hot(torch.tensor(obs_opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
 
         # Schedule a critic update
         self.frameskipped_critic_updates.append(
-            (obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_agent_action, next_obs_opponent_action, next_obs_agent_policy, next_obs_opponent_policy, intrinsic_reward)
+            (obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_agent_policy, next_obs_opponent_policy, intrinsic_reward)
         )
 
         # If the agent will not be frameskipped, then we can perform the updates now.
         # If the game is finished, then we also perform all scheduled updates.
-        if next_obs_agent_action is not None or terminated or truncated:
+        if (not agent_will_frameskip) or terminated or truncated:
             # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
             previous_discount = self._critic.discount
             self._critic.discount = 1.0
@@ -430,36 +510,26 @@ class A2CQLearner(A2CLearnerBase):
 
             # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
             for frameskipped_update in reversed(self.frameskipped_critic_updates):
-                obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_action_, next_obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
+                obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
                 
-                # Disable Expected SARSA, keeping the agent's next action
-                if self._agent_update_style == self.UpdateStyle.SARSA:
-                    next_obs_agent_policy_ = None
-                # Disable SARSA, keeping the agent's next policy
-                elif self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
-                    next_obs_agent_action_ = None
+                # Keep the agent's next policy
+                if self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+                    pass
                 # Enable Q-learning, change agent's policy to greedy
                 elif self._agent_update_style == self.UpdateStyle.Q_LEARNING:
-                    next_obs_agent_action_ = None
                     next_obs_agent_policy_ = "greedy"
                 # Change agent's policy to be uniform
                 elif self._agent_update_style == self.UpdateStyle.UNIFORM:
-                    next_obs_agent_action_ = None
                     next_obs_agent_policy_ = "uniform"
                 
-                # Disable Expected SARSA, keeping the opponent's next action
-                if self._opponent_update_style == self.UpdateStyle.SARSA:
-                    next_obs_opponent_policy_ = None
-                # Disable SARSA, keeping the opponent's next policy
-                elif self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
-                    next_obs_opponent_action_ = None
+                # Keep the opponent's next policy
+                if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+                    pass
                 # Enable Q-learning, change opponent's policy to greedy
                 elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
-                    next_obs_opponent_action_ = None
                     next_obs_opponent_policy_ = "greedy"
                 # Change opponent's policy to be uniform
                 elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
-                    next_obs_opponent_action_ = None
                     next_obs_opponent_policy_ = "uniform"
 
                 # The kwargs that are shared between the critic and the intrinsic critic
@@ -468,8 +538,6 @@ class A2CQLearner(A2CLearnerBase):
                     "next_obs": next_obs_,
                     "agent_action": obs_agent_action_,
                     "opponent_action": obs_opponent_action_,
-                    "next_agent_action": next_obs_agent_action_,
-                    "next_opponent_action": next_obs_opponent_action_,
                     "next_agent_policy": next_obs_agent_policy_,
                     "next_opponent_policy": next_obs_opponent_policy_,
                 }
@@ -494,11 +562,8 @@ class A2CQLearner(A2CLearnerBase):
             self._critic.discount = previous_discount
             self.frameskipped_critic_updates.clear()
 
-        # If the agent action is None then that means the agent couldn't act, so it doesn't make sense to update the actor
-        if obs_agent_action is None:
-            pass
-        # If the agent did perform an action, then update the actor
-        else:
+        # If the agent did perform an action, then update the actor. It doesn't make sense to update otherwise.
+        if not agent_is_frameskipped:
             # If the opponent is being frameskipped, then we consider them as doing any of their actions.
             # Otherwise, we just update the portion of the policy concerned with the actually performed opponent action.
             self._update_actor(obs, obs_agent_action, obs_opponent_action)
@@ -508,41 +573,9 @@ class A2CQLearner(A2CLearnerBase):
 
         if terminated or truncated:
             self.cumulative_discount = 1.0
-
-    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, *, obs_agent_action: int, obs_opponent_action: int, next_obs_opponent_policy: torch.Tensor | None = None, intrinsic_reward: float = 0.0, **kwargs):
-        """
-        Update the actor and critic in this environment step. Should be preceded by an environment interaction with `sample_action()`.
+            self._last_valid_agent_action = None
+            self._last_valid_opponent_action = None
         
-        NOTE: actual learning occurs one-step later, since we need to know the opponent's actual action on the next observation
-
-        Extra parameters
-        ----------------
-        - `obs_agent_action`: which action the agent actually performed. Should match what was sampled, but can be `None` if the critic update should be done for all agent actions
-        - `obs_opponent_action`: which action the opponent actually performed. May not match what was used at the time of sampling
-        - `next_obs_opponent_policy`: the probability distribution over opponent actions for the next observation. Should be a column vector. Can be `None` as long as the update style is not Expected SARSA, or the episode terminated
-        - `intrinsic_reward`: the intrinsic reward from the environment
-        """
-        if self.postponed_learn is not None:
-            self._learn_complete(**self.postponed_learn, next_obs_agent_action=obs_agent_action, next_obs_opponent_action=obs_opponent_action)
-            
-            # If the episode terminated, just learn the last bit, don't even need to wait for the agent and opponent actions since they won't exist
-            if terminated or truncated:
-                self._learn_complete(obs=obs, next_obs=next_obs, reward=reward, terminated=terminated, truncated=truncated, obs_agent_action=obs_agent_action, obs_opponent_action=obs_opponent_action, next_obs_agent_action=None, next_obs_opponent_action=None, next_obs_opponent_policy=None, intrinsic_reward=intrinsic_reward)
-                self.postponed_learn = None
-                return
-            
-        self.postponed_learn = {
-            "obs": obs,
-            "next_obs": next_obs,
-            "reward": reward,
-            "terminated": terminated,
-            "truncated": truncated,
-            "obs_agent_action": obs_agent_action,
-            "obs_opponent_action": obs_opponent_action,
-            "next_obs_opponent_policy": next_obs_opponent_policy,
-            "intrinsic_reward": intrinsic_reward,
-        }
-
     @property
     def actor(self):
         return self._actor
@@ -570,3 +603,11 @@ class A2CQLearner(A2CLearnerBase):
     @critic_learning_rate.setter
     def critic_learning_rate(self, learning_rate: float):
         self._critic.learning_rate = learning_rate
+    
+    @property
+    def broadcast_at_frameskip(self) -> bool:
+        return self._broadcast_at_frameskip
+    
+    @broadcast_at_frameskip.setter
+    def broadcast_at_frameskip(self, value: bool):
+        self._broadcast_at_frameskip = value

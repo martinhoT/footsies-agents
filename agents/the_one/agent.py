@@ -33,15 +33,12 @@ class FootsiesAgent(FootsiesAgentTorch):
         game_model: AbstractGameModel = None,
         reaction_time_emulator: ReactionTimeEmulator = None,
         # Modifiers
-        over_simple_actions: bool = False,
         remove_special_moves: bool = False,
         rollback_as_opponent_model: bool = False,
         # Learning
         game_model_learning_rate: float = 1e-4,
     ):
         # Validate arguments
-        if not over_simple_actions:
-            raise NotImplementedError("non-simple actions are not yet supported")
         if rollback_as_opponent_model and opponent_model is not None:
             raise ValueError("can't have an opponent model when using the rollback strategy as an opponent predictor, can only use one or the other")
 
@@ -57,7 +54,6 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.opponent_model = opponent_model
         self.reaction_time_emulator = reaction_time_emulator
         #  Modifiers
-        self.over_simple_actions = over_simple_actions
         self.remove_agent_special_moves = remove_special_moves
         self.rollback_as_opponent_model = rollback_as_opponent_model
 
@@ -173,15 +169,12 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
         # Get the actions that were effectively performed by each player on the previous step
-        if self.over_simple_actions:
-            agent_action, opponent_action = ActionMap.simples_from_transition_ori(self.current_info, info)
-            if self.remove_agent_special_moves:
-                # Convert the detected special move input (how did it even happen??) to a simple action
-                if agent_action == 8 or agent_action == 7:
-                    LOGGER.warning("We detected the agent performing a special move, even though they can't perform special moves! Will convert to the respective attack action.\nCurrent observation: %s\nNext observation: %s", self.current_observation, next_obs)
-                    agent_action -= 2
-        else:
-            raise NotImplementedError("non-simple actions are not yet supported")
+        agent_action, opponent_action = ActionMap.simples_from_transition_ori(self.current_info, info)
+        if self.remove_agent_special_moves:
+            # Convert the detected special move input (how did it even happen??) to a simple action
+            if agent_action == 8 or agent_action == 7:
+                LOGGER.warning("We detected the agent performing a special move, even though they can't perform special moves! Will convert to the respective attack action.\nCurrent observation: %s\nNext observation: %s", self.current_observation, next_obs)
+                agent_action -= 2
 
         # Update the different models
         self.a2c.update(next_obs, reward, terminated, truncated, info)

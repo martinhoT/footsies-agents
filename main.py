@@ -123,6 +123,10 @@ def train(
         for episode in training_iterator:
             obs, info = env.reset()
 
+            # Immediately after a reset, we can notify the agent of the next opponent's policy
+            if tell_agent_of_opponent:
+                info["next_opponent_policy"] = opponent_manager.current_curriculum_opponent.peek(obs)
+
             terminated = False
             truncated = False
             result = 0.5 # by default, the game is a draw
@@ -156,6 +160,8 @@ def train(
             elif truncated and (info["guard"][0] != info["guard"][1]):
                 result = 1 if info["guard"][0] > info["guard"][1] else 0
 
+            LOGGER.debug("Episode finished with result %s, with termination (%s) or truncation (%s)", result, terminated, truncated)
+
             # Set a new opponent from the opponent pool
             if opponent_manager is not None:
                 should_change = opponent_manager.update_at_episode(result)
@@ -187,15 +193,15 @@ def create_env(args: EnvArgs) -> Env:
             **args.kwargs,
         )
 
+        if args.footsies_wrapper_norm:
+            env = FootsiesNormalized(env, normalize_guard=args.footsies_wrapper_norm_guard)
+
         if args.footsies_wrapper_adv:
             env = FootsiesEncourageAdvance(
                 env,
                 # Use the same logging directory of DIAYN, idc I want to test this fast
                 log_dir=args.diayn_kwargs["log_dir"],
             )
-
-        if args.footsies_wrapper_norm:
-            env = FootsiesNormalized(env, normalize_guard=args.footsies_wrapper_norm_guard)
 
         if args.footsies_wrapper_phasic:
             env = FootsiesPhasicMoveProgress(env)

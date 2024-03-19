@@ -8,10 +8,11 @@ from copy import deepcopy
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
-from agents.a2c.a2c import A2CLearnerBase, A2CQLearner, ActorNetwork, ValueNetwork
+from agents.a2c.a2c import A2CQLearner, ValueNetwork
 from agents.ql.ql import QFunction, QFunctionTable, QFunctionNetwork
 from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
 from agents.action import ActionMap
+from collections import deque
 
 LOGGER = logging.getLogger("main.a2c.agent")
 
@@ -24,7 +25,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         footsies: bool = True,
         use_opponents_perspective: bool = False,
         consider_explicit_opponent_policy: bool = False,
-        act_according_to_qvalues_only: bool = False,
+        act_with_qvalues: bool = False,
     ):
         """
         Footsies agent using the A2C algorithm, potentially with some modifications.
@@ -39,6 +40,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         Only valid for FOOTSIES, since it's an environment with 2 players on the same conditions (characters, more specifically)
         - `consider_explicit_opponent_policy`: whether to calculate critic values assuming an explicit opponent policy.
         The opponent policy is specified in the `next_opponent_policy` key of the `info` dictionary in `update`.
+        - `act_with_qvalues`: whether to act according to a softmax over Q-values, instead of using the actor's policy.
         """
         # NOTE: we could (?) use the opponent's perspective if we use the opponent model as the policy, but that makes this whole thing more iffy than it already is
         if use_opponents_perspective:
@@ -48,6 +50,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.footsies = footsies
         self.use_opponents_perspective = use_opponents_perspective
         self.consider_explicit_opponent_policy = consider_explicit_opponent_policy
+        self._act_with_qvalues = act_with_qvalues
 
         self._learner = learner
         self._actor = learner.actor
@@ -63,12 +66,15 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.current_observation = None
         self.current_info = None
         self.current_action = None
-        self.current_action_iterator = None # only needed if using simple actions
+        self.current_action_discretes = deque([]) # only needed if using simple actions
 
         # Whether the agent has performed an action during hitstop.
         # While in hitstop, time is frozen, so the agent should only perform one action.
         # Likewise, there should only be one update, from the moment the agent performs an action to the moment hitstop ends.
         self._has_acted_in_hitstop = False
+        # Whether the agent has made a decision in the previous act method.
+        # If it's False, then it means the agent was performing actions but they are a part of a previously made decision.
+        self._has_made_decision = False
 
         # For logging
         self.cumulative_delta = 0
@@ -78,6 +84,18 @@ class FootsiesAgent(FootsiesAgentTorch):
         self._test_observations = None
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
+        self._has_made_decision = False
+
+        # We need to update these variables before anything!
+        self.current_observation = obs
+        self.current_info = info
+
+        # If there are scheduled discrete actions, simply perform them.
+        # We need to perform this during potential hitstop, so it's before the next check.
+        # What's queued *should* be performed, regardless of what happens.
+        if self.current_action_discretes:
+            return self.current_action_discretes.popleft()
+
         # While in hitstop, don't perform any actions (just do no-op)
         is_in_hitstop = ActionMap.is_in_hitstop_ori(info)
         if self._has_acted_in_hitstop:
@@ -88,60 +106,91 @@ class FootsiesAgent(FootsiesAgentTorch):
                 LOGGER.debug("The agent is no longer in hitstop, will continue acting and learning")
                 self._has_acted_in_hitstop = False
         
-        self.current_observation = obs
-        self.current_info = info
-        
         # Perform the normal action selection not considering FOOTSIES and be done with it
         if not self.footsies:
-            self.current_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
+            if self.act_with_qvalues:
+                qs = self._learner.critic.q(obs, next_opponent_action=predicted_opponent_action).detach()
+                dist = Categorical(probs=nn.functional.softmax(qs))
+                self.current_action = dist.sample().item()
+            
+            else:
+                self.current_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
+
+            self._has_made_decision = True
+
             return self.current_action
 
         # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic
         if predicted_opponent_action is None:
             predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
 
-        if self.current_action is not None:
-            try:
-                action = next(self.current_action_iterator)
+        # Perform the action selection considering FOOTSIES, with simple actions
         
-            except StopIteration:
-                self.current_action = None
-        
-        if self.current_action is None:
-            # If we can't perform an action, don't even attempt one
-            if not ActionMap.is_state_actionable_ori(info):
-                return 0
+        # If we can't perform an action, don't even attempt one
+        if not ActionMap.is_state_actionable_ori(info):
+            return 0
+
+        if self.act_with_qvalues:
+            qs = self._learner.critic.q(obs, opponent_action=predicted_opponent_action).detach()
 
             if deterministic:
-                self.current_action = self._learner.actor.probabilities(obs, next_opponent_action=predicted_opponent_action).argmax().item()
+                simple_action = qs.argmax().item()
             else:
-                self.current_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
-            self.current_action_iterator = iter(ActionMap.simple_to_discrete(self.current_action))
-            action = next(self.current_action_iterator)
+                dist = Categorical(probs=nn.functional.softmax(qs, dim=-1))
+                simple_action = dist.sample().item()
 
-            # If the action was performed in hitstop, then ignore the next frames, that are frozen in time, which just mess with the updates
-            if is_in_hitstop:
-                LOGGER.debug("Agent performed action %s in hitstop, will ignore any act and update until it is over", self.current_action)
-                self._has_acted_in_hitstop = True
+        else:
+            if deterministic:
+                simple_action = self._learner.actor.probabilities(obs, next_opponent_action=predicted_opponent_action).argmax().item()
+            else:
+                simple_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
         
+        self.current_action = simple_action
+        self.current_action_discretes.extend(ActionMap.simple_to_discrete(self.current_action))
+        action = self.current_action_discretes.popleft()
+
+        # If the action was performed in hitstop, then ignore the next frames, that are frozen in time, which just mess with the updates
+        if is_in_hitstop:
+            LOGGER.debug("Agent performed action %s in hitstop, will ignore any further acts and updates until it is over (except the very next update)", self.current_action)
+            self._has_acted_in_hitstop = True
+
+        self._has_made_decision = True
+
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
         # Don't update while in hitstop, since obs and next_obs are the same and we don't want bootstrapping during that period.
-        if self._has_acted_in_hitstop:
+        if self._has_acted_in_hitstop and not self._has_made_decision:
             return
 
         obs = self.current_observation
         prev_info = self.current_info
 
+        # The opponent action is inferred from observation, while the agent's action is the one the agent actually performed.
+        # This means that the action spaces are slightly different for each: the opponent is internally using the primitive action space,
+        # which allows it to perform, for instance, special moves in such a way that the agent doesn't; the agent needs to allocate some
+        # time to charge the special moves.
         if self.footsies:
             # We only use this method to determine whether the agent's action was frameskipped or not, and to get the opponent's action of course.
             # We treat the agent specially because we may want to use a different action space for them (e.g. remove special moves).
             obs_agent_action, obs_opponent_action = ActionMap.simples_from_transition_ori(prev_info, info)
-            obs_agent_action = obs_agent_action if obs_agent_action is None else self.current_action
+
+            # We always consider the action that the agent performed to be the one that they indeed performed, not inferred from the observation.
+            # Unless we detect that we are being frameskipped, in which case we set that we are being frameskipped.
+            # We are being frameskipped if we detect it from observation, or if we are still technically performing an action (i.e. haven't made a decision right now).
+            if not self._has_made_decision:
+                obs_agent_action = None
+
+            # Override whatever the method detected above with the actual performed action.
+            # This is important for instance for special moves which require a sequence of primitive actions to be performed.
+            # If we don't perform this correction, we would consider each primitive action individually rather than the simple action as a whole.
+            elif obs_agent_action is not None:
+                obs_agent_action = self.current_action
+   
+            # NOTE: this should never happen due to the statements above
             if obs_agent_action is not None and obs_agent_action != self.current_action:
                 LOGGER.warning("From a transition, we determined that the agent's action was %s, but it was actually %s! There is a significant discrepancy here", obs_agent_action, self.current_action)
-
+            
         else:
             obs_agent_action = self.current_action
             obs_opponent_action = None
@@ -153,6 +202,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
+            agent_will_frameskip=(not ActionMap.is_state_actionable_ori(info, True)) or self.current_action_discretes,
+            opponent_will_frameskip=(not ActionMap.is_state_actionable_ori(info, False)) or self.current_action_discretes,
             next_obs_opponent_policy=next_opponent_policy,
             intrinsic_reward=info.get("intrinsic_reward", 0),
         )
@@ -164,27 +215,34 @@ class FootsiesAgent(FootsiesAgentTorch):
             if self._learner.td_error is not None:
                 self.cumulative_qtable_error += self._learner.td_error
                 self.cumulative_qtable_error_n += 1
+        
+        # If the episode is over, we need to reset episode variables, mainly the action that was performed!
+        # If we still had the queue of current actions active, we would perform them again in the next episode, which would also break the leaner update.
+        if terminated or truncated:
+            self.current_observation = None
+            self.current_info = None
 
-        # Learn using P2's perspective
-        # NOTE: only valid for FOOTSIES, since both players are using the same character
-        if self.footsies and self.use_opponents_perspective:
-            # Switch perspectives
-            p2_obs = observation_invert_perspective_flattened(obs)
-            p2_next_obs = observation_invert_perspective_flattened(next_obs)
+            self.current_action = None
+            self.current_action_discretes.clear()
+        
+            self._has_acted_in_hitstop = False
+            self._has_made_decision = False
 
-            self._learner.learn(p2_obs, p2_next_obs, reward, terminated, truncated,
-                obs_agent_action=obs_agent_action,
-                obs_opponent_action=obs_opponent_action,
-                obs_opponent_policy=None, # I didn't even think about this, likely 100% wrong
-                intrinsic_reward=info.get("intrinsic_reward", 0),
-            )
-
+    # NOTE: if by the time this function is called `act_with_qvalues` is true, then the extracted policy will act according to the Q-values as well
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        model = deepcopy(self._actor)
+        if self.act_with_qvalues:
+            critic = deepcopy(self._critic)
 
-        def internal_policy(obs):
-            probs = model(obs)
-            return Categorical(probs=probs).sample().item()
+            def internal_policy(obs):
+                logits = critic.q(obs)
+                return Categorical(logits=logits).sample().item()
+
+        else:
+            actor = deepcopy(self._actor)
+
+            def internal_policy(obs):
+                probs = actor(obs)
+                return Categorical(probs=probs).sample().item()
 
         return super()._extract_policy(env, internal_policy)
     
@@ -195,6 +253,14 @@ class FootsiesAgent(FootsiesAgentTorch):
     @property
     def learner(self) -> A2CQLearner:
         return self._learner
+
+    @property
+    def act_with_qvalues(self) -> bool:
+        return self._act_with_qvalues
+
+    @act_with_qvalues.setter
+    def act_with_qvalues(self, value: bool):
+        self._act_with_qvalues = value
 
     # Need to use custom save and load functions because we could use a tabular Q-function
     def load(self, folder_path: str):

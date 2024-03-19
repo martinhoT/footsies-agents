@@ -8,6 +8,7 @@ from gymnasium import spaces
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.action import ActionMap
 from footsies_gym.moves import FootsiesMove
+from footsies_gym.envs.footsies import FootsiesEnv
 from torch.utils.tensorboard import SummaryWriter
 
 # Some wrappers need to be handled in a special manner when extracting a policy for the FOOTSIES environment
@@ -184,7 +185,7 @@ class AppendSimpleHistoryWrapper(ObservationWrapper):
     
 
 class FootsiesEncourageAdvance(Wrapper):
-    """Wrapper for providing a reward for advancing towards the opponent based on the distance between players. Must be put after the original environment, since it assumes unnormalized positions."""
+    """Wrapper for providing a reward for advancing towards the opponent based on the distance between players."""
     
     def __init__(self, env,
         distance_cap: float = 4.0,
@@ -202,6 +203,8 @@ class FootsiesEncourageAdvance(Wrapper):
         """
         super().__init__(env)
 
+        self.footsies_env: FootsiesEnv = env.unwrapped
+
         self.distance_cap = distance_cap
         self.advance_reward = advance_reward
 
@@ -213,10 +216,12 @@ class FootsiesEncourageAdvance(Wrapper):
     def step(self, action: tuple[bool, bool, bool]) -> tuple[dict, float, bool, dict]:
         obs, reward, terminated, truncated, info = self.env.step(action)
 
-        distance_between_players = min(obs["position"][1] - obs["position"][0], self.distance_cap)
+        obs_original = self.footsies_env.most_recent_observation
+
+        distance_between_players = min(obs_original["position"][1] - obs_original["position"][0], self.distance_cap)
 
         # Reward agent for advancing forward, and close to the opponent
-        p1_move = ActionMap.move_from_move_index(info["p1_move"])
+        p1_move = ActionMap.move_from_move_index(obs_original["move"][0])
         if p1_move == FootsiesMove.FORWARD:
             extra = self.advance_reward * (self.distance_cap - distance_between_players) / self.distance_cap
             self._episode_extra_reward += extra
@@ -238,7 +243,7 @@ class FootsiesEncourageAdvance(Wrapper):
 
 
 class FootsiesPhasicMoveProgress(ObservationWrapper):
-    """Wrapper for bucketizing the move progress according to the move's phase (startup, active, recovery). Must be put after `FootsiesNormalized`, since it works with unflattened observations."""
+    """Wrapper for bucketizing the move progress according to the move's phase (startup, active, recovery). Must be put after `FootsiesNormalized`, since it works with unflattened observations and normalized move progress."""
 
     def __init__(self, env):
         super().__init__(env)

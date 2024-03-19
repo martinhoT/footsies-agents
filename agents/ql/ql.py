@@ -20,7 +20,7 @@ class QFunction(ABC):
         """Update the Q-value for the given state-action pair considering the provided TD error."""
 
     @abstractmethod
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, **kwargs) -> torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> torch.Tensor:
         """Get the Q-value for the given action and observation. If an action is `None`, then return Q-values considering all actions."""
 
     @abstractmethod
@@ -74,8 +74,6 @@ class QFunction(ABC):
         terminated: bool,
         agent_action: int | None = None,
         opponent_action: int | None = None,
-        next_agent_action: int | None = None,
-        next_opponent_action: int | None = None,
         next_agent_policy: torch.Tensor | str | None = None,
         next_opponent_policy: torch.Tensor | str | None = None,
     ) -> torch.Tensor:
@@ -90,17 +88,13 @@ class QFunction(ABC):
         - `terminated`: whether the episode has terminated normally (i.e. `next_obs` is a terminal observation)
         - `agent_action`: the action taken by the agent. If `None`, will perform frameskipping, considering all actions
         - `opponent_action`: the action taken by the opponent. If `None`, will perform frameskipping, considering all actions
-        - `next_agent_action`: the action taken by the agent in the next step. If not `None`, will consider the next Q-value for that action. This corresponds to SARSA
-        - `next_opponent_action`: the action taken by the opponent in the next step. If not `None`, will consider the next Q-value for that opponent action.
         WARNING: probably requires importance sampling, so it should not be used
         - `next_agent_policy`: the agent's policy evaluated at the next observation.
         Should be a matrix with agent actions in the rows and opponent actions in the columns.
-        If not `None`, will consider the next Q-values weighted by the current policy.
         This corresponds to Expected SARSA, or Q-learning if `agent_policy` happens to be greedy.
         Can also be a string: "greedy" for a greedy policy, or "uniform" for a uniform random policy.
         - `next_opponent_policy`: the opponent's policy evaluated at the next observation.
         Should be a column vector.
-        If not `None`, will weight the next Q-values according to how likely they are to happen under the opponent's policy.
         If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a uniform random policy in the next observation.
         Can also be a string: "greedy" for a greedy policy, or "uniform" for a uniform random policy.
         """
@@ -108,26 +102,14 @@ class QFunction(ABC):
             nxt_value = 0.0
         
         else:
-            if next_agent_action is not None and next_agent_policy is not None:
-                raise ValueError("'next_agent_action' and 'next_agent_policy' are mutually exclusive, as they dictate which kind of Q-value update to perform, but both were not None")
-            
-            if next_agent_action is None and next_agent_policy is None:
-                raise ValueError("either 'next_agent_action' or 'next_agent_policy' must be provided")
-
-            if next_opponent_action is not None and next_opponent_policy is not None:
-                raise ValueError("'next_opponent_action' and 'next_opponent_policy' are mutually exclusive, as they dictate which kind of Q-value update to perform, but both were not None")
-            
-            if next_opponent_action is None and next_opponent_policy is None:
-                raise ValueError("either 'next_opponent_action' or 'next_opponent_policy' must be provided")
-
-            # The target doesn't need gradients to flow through. We also squeeze, assuming only one observation is being considered in next_obs
-            next_qs = self.q(next_obs).detach().squeeze(dim=0)
+            # The target doesn't need gradients to flow through. We also squeeze, assuming only one observation is being considered in next_obs.
+            # If using a neural network, then we may need to consider using a target network to avoid instability.
+            next_qs = self.q(next_obs, use_target_network=True) if isinstance(self, QFunctionNetwork) else self.q(next_obs)
+            next_qs = next_qs.detach().squeeze(dim=0)
 
             # First compute the effective agent policy (a matrix or column vector), if needed.
             # If it was explicitly passed, then we don't need to artificially create one.
-            if next_agent_action is not None:
-                next_agent_policy = nn.functional.one_hot(torch.tensor([next_agent_action]), num_classes=self.action_dim).float().T
-            elif next_agent_policy == "uniform":
+            if next_agent_policy == "uniform":
                 next_agent_policy = torch.ones(self.action_dim).unsqueeze(1) / self.action_dim
             elif next_agent_policy == "greedy":
                 next_agent_policy = nn.functional.one_hot(torch.argmax(next_qs, dim=-1), num_classes=self.action_dim).float().T
@@ -137,9 +119,7 @@ class QFunction(ABC):
 
             # Then compute the effective opponent policy (a column vector), if needed.
             # If it was explicitly passed, then we don't need to artificially create one.
-            if next_opponent_action is not None:
-                next_opponent_policy = nn.functional.one_hot(torch.tensor([next_opponent_action]), num_classes=self.opponent_action_dim).float().T
-            elif next_opponent_policy == "uniform":
+            if next_opponent_policy == "uniform":
                 next_opponent_policy = torch.ones(self.opponent_action_dim).unsqueeze(1) / self.opponent_action_dim
             elif next_opponent_policy == "greedy":
                 # This one is tricky! The opponent's policy is a column vector (not conditioned on agent action),
@@ -166,7 +146,10 @@ class QFunction(ABC):
 
         if LOGGER.isEnabledFor(logging.DEBUG):
             # We don't use the target network, in case it's the neural network implementation, in order to check whether anything was updated at all
-            new_value = self.q(obs, agent_action, opponent_action=opponent_action, use_target_network=False)
+            if isinstance(self, QFunctionNetwork):
+                new_value = self.q(obs, agent_action, opponent_action=opponent_action, use_target_network=False)
+            else:
+                new_value = self.q(obs, agent_action, opponent_action=opponent_action)
             LOGGER.debug(f"At an observation with agent action %s and opponent action %s we had a Q-value of %s, now of %s, which was updated to %s + %s",
                 agent_action, opponent_action, cur_value, new_value, reward, nxt_value
             )
@@ -364,7 +347,7 @@ class QFunctionTable(QFunction):
                 self.table[obs_idx][action] += + self._learning_rate * td_error
                 self.update_frequency_table[obs_idx][action] += 1
 
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, **kwargs) -> float | torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
         if action is None:
             action = slice(None)
         if opponent_action is None:
@@ -569,7 +552,8 @@ class QFunctionNetwork(QFunction):
                 target_param.data.copy_(q_param.data)
             self._current_update_step = 0
     
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, *, use_target_network: bool = True, **kwargs) -> float | torch.Tensor:
+    # The target network is not used by default, being used only for estimating the Q-value of the next observation and avoid instability
+    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, *, use_target_network: bool = False) -> float | torch.Tensor:
         if action is None:
             action = slice(None)
         if opponent_action is None:
