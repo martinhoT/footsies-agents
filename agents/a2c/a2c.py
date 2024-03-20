@@ -296,6 +296,7 @@ class A2CQLearner(A2CLearnerBase):
         opponent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         intrinsic_critic: QFunction = None,
         alternative_advantage: bool = True,
+        accumulate_at_frameskip: bool = False,
         broadcast_at_frameskip: bool = False,
     ):
         """
@@ -312,6 +313,9 @@ class A2CQLearner(A2CLearnerBase):
         - `opponent_update_style`: how to update the critic's Q-values considering the opponent's policy
         - `intrinsic_critic`: the critic for the intrinsic reward. If `None`, then no intrinsic reward is considered
         - `alternative_advantage`: whether to use the alternative advantage formula, which considers the reward as-is and is less reliant on the critic converging to the correct values.
+        - `accumulate_at_frameskip`: whether to accumulate the updates when frameskipping. This way, the agent effectively.
+        The environment will lose some theoretical properties, such as the Markov property and stationarity.
+        It should, however, greatly facilitate credit assignment.
         This should allow the actor to learn sooner
         - `broadcast_at_frameskip`: when frameskipping (i.e. the agent's or opponent's action is `None`), we can do one of two things:
             - Either consider the agent/opponent to be doing any action (update on all actions), corresponding to `True`
@@ -333,9 +337,6 @@ class A2CQLearner(A2CLearnerBase):
         if opponent_update_style == self.UpdateStyle.SARSA:
             raise NotImplementedError("SARSA updates are not supported for the opponent")
 
-        if alternative_advantage:
-            raise NotImplementedError("the alternative advantage formula is not implemented yet")
-
         self._actor = actor
         self._critic = critic
         self._intrinsic_critic = intrinsic_critic
@@ -345,6 +346,7 @@ class A2CQLearner(A2CLearnerBase):
         self._agent_update_style = agent_update_style
         self._opponent_update_style = opponent_update_style
         self._alternative_advantage = alternative_advantage
+        self._accumulate_at_frameskip = accumulate_at_frameskip
         self._broadcast_at_frameskip = broadcast_at_frameskip
 
         self.action_dim = self._critic.action_dim
@@ -372,9 +374,8 @@ class A2CQLearner(A2CLearnerBase):
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
         return self.actor.sample_action(obs, next_opponent_action=next_opponent_action).item()
 
-    def _update_actor(self, obs: torch.Tensor, agent_action: int, opponent_action: int | None):
-        # Compute the TD delta
-        delta = self.compute_advantage(obs, agent_action, opponent_action)
+    def _update_actor(self, obs: torch.Tensor, opponent_action: int | None, agent_action: int, delta: torch.Tensor):
+        # Save the delta for tracking
         self.delta = delta.mean().item() # We might get a delta vector
         
         # Calculate the probability distribution at obs considering opponent action, and consider we did the given action
@@ -394,32 +395,81 @@ class A2CQLearner(A2CLearnerBase):
         if LOGGER.isEnabledFor(logging.DEBUG):
             new_action_probabilities = self.actor.probabilities(obs, opponent_action).detach()
             new_entropy = -torch.sum(torch.log(new_action_probabilities + 1e-8) * new_action_probabilities, dim=-1)
-            LOGGER.debug("Actor was updated using delta %s for action %s, going from a distribution of %s with entropy %s to a distribution of %s with entropy %s", delta, agent_action, action_probabilities, actor_entropy, new_action_probabilities, new_entropy)
+            LOGGER.debug("Actor was updated using delta %s for action %s and opponent action %s, going from a distribution of %s with entropy %s to a distribution of %s with entropy %s", delta, agent_action, opponent_action, action_probabilities, actor_entropy, new_action_probabilities, new_entropy)
 
-    def _compute_advantage_with_critic(self, obs: torch.Tensor, agent_action: int, opponent_action: int | None, critic: QFunction) -> torch.Tensor:
-        """Compute the advantage with the supplied `critic`."""
-        # If the opponent's action doesn't matter, since it's ineffectual, then compute the advantage considering all possible opponent actions.
-        # NOTE: another possibility would be to perform random sampling? But then it would probably take a long time before convergence...
-        if opponent_action is None:
-            opponent_action = slice(None)
+    def value(self, obs: torch.Tensor, opponent_action: int | None, critic: QFunction = None) -> torch.Tensor:
+        """
+        Get the value of a given state, according to the effective policy (depending on the set `update_style`).
 
-        # A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi.T Q(s, o, .)
-        q_soa = critic.q(obs, agent_action, opponent_action).detach()
-        pi = self._actor(obs)[:, opponent_action, :].detach()
+        The value is computed as a function of the Q-function and agent policy: `V(s, o) = pi(. | s, o).T Q(s, o, .)`.
+
+        If `critic` is `None`, then both the extrinsic and intrinsic reward critics will be used.
+        """
+        if critic is None:
+            extrinsic_value = self.value(obs, opponent_action, critic=self.critic)
+            if self.intrinsic_critic is not None:
+                intrinsic_value = self.value(obs, opponent_action, critic=self.intrinsic_critic)
+            else:
+                intrinsic_value = 0.0
+            return extrinsic_value + intrinsic_value
+        
         q_so = critic.q(obs, opponent_action=opponent_action).detach()
 
-        # This Einstein summation equation computes the diagonal of a >2D tensor by considering the last two dimensions as matrices
-        advantage = q_soa - torch.einsum("...ii->...i", pi @ q_so.transpose(-2, -1))
-        return advantage
+        if self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+            pi = self.actor.probabilities(obs, opponent_action).detach()
+        elif self._agent_update_style == self.UpdateStyle.Q_LEARNING:
+            greedy_action = torch.argmax(q_so, dim=-1, keepdim=True)
+            pi = nn.functional.one_hot(greedy_action, num_classes=self.action_dim).float()
+        elif self._agent_update_style == self.UpdateStyle.UNIFORM:
+            n_rows = 1 if opponent_action is not None else self.opponent_action_dim
+            pi = torch.ones(n_rows, self.action_dim).float() / self.action_dim
 
-    def compute_advantage(self, obs: torch.Tensor, agent_action: int, opponent_action: int | None) -> torch.Tensor:
-        """Compute the TD delta (a.k.a. advantage). May consider intrinsic reward if an intrisic critic was provided."""
-        advantage = self._compute_advantage_with_critic(obs, agent_action, opponent_action, self._critic)
+        # The policy doesn't need to be transposed since the last dimension is the action dimension.
+        # This Einstein summation equation computes the diagonal of a >2D tensor by considering the last two dimensions as matrices.
+        return torch.einsum("...ii->...i", pi @ q_so.transpose(-2, -1))
+
+    def advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, agent_action: int, opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, critic: QFunction = None) -> torch.Tensor:
+        """
+        Compute the advantage. May consider intrinsic reward if an intrinsic critic was provided.
         
-        if self._intrinsic_critic is not None:
-            intrinsic_advantage = self._compute_advantage_with_critic(obs, agent_action, opponent_action, self._intrinsic_critic)
-            advantage += intrinsic_advantage
+        The value is computed as a function of both the Q-function and agent policy:
+        - original: `A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi(. | s, o).T Q(s, o, .)`
+        - alternative: `... = R + pi(. | s', o).T Q(s', o, .) - pi(. | s, o).T Q(s, o, .)`
+
+        If `critic` is `None`, then both the extrinsic and intrinsic reward critics will be used.
+        """
+        if critic is None:
+            extrinsic_advantage = self.advantage(obs, next_obs, reward, terminated, agent_action, opponent_action, next_obs_opponent_policy, critic=self.critic)
+            if self.intrinsic_critic is not None:
+                intrinsic_advantage = self.advantage(obs, next_obs, reward, terminated, agent_action, opponent_action, next_obs_opponent_policy, critic=self.intrinsic_critic)
+            else:
+                intrinsic_advantage = 0.0
+            return extrinsic_advantage + intrinsic_advantage
         
+        if self._alternative_advantage:
+            if terminated:
+                v_so_next = 0.0
+            
+            else:
+                v_s_next = self.value(next_obs, opponent_action=None, critic=critic).detach().squeeze(0)
+                
+                if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+                    next_opp_pi = next_obs_opponent_policy
+                elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
+                    next_opp_pi = nn.functional.one_hot(torch.argmin(v_s_next), num_classes=self.opponent_action_dim).unsqueeze(1).float()
+                elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
+                    next_opp_pi = torch.ones(self.opponent_action_dim, 1).float() / self.opponent_action_dim
+                
+                v_so_next = next_opp_pi.T @ v_s_next
+
+            q_soa = reward + v_so_next
+            
+        else:
+            q_soa = critic.q(obs, agent_action, opponent_action).detach()
+        
+        v_so = self.value(obs, opponent_action, critic=critic).detach()
+
+        advantage = q_soa - v_so
         return advantage
     
     def learn(
@@ -452,8 +502,6 @@ class A2CQLearner(A2CLearnerBase):
         """
         # Update the Q-table. Save the TD error in case the caller wants to check it. The TD error is None if no critic update was performed
         self.td_error = None
-
-        agent_is_frameskipped = obs_agent_action is None
 
         # Update the last valid action that the agent/opponent performed, i.e. out of any frameskipping.
         # This is needed if we don't broadcast when frameskipping, since we need to know which action the opponent did perform.
@@ -508,34 +556,16 @@ class A2CQLearner(A2CLearnerBase):
         # If the agent will not be frameskipped, then we can perform the updates now.
         # If the game is finished, then we also perform all scheduled updates.
         if (not agent_will_frameskip) or terminated or truncated:
-            # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
-            previous_discount = self._critic.discount
-            self._critic.discount = 1.0
-            total_td_error = 0.0
+            total_reward = sum(update[1] for update in self.frameskipped_critic_updates)
+            total_intrinsic_reward = sum(update[8] for update in self.frameskipped_critic_updates)
 
-            # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
-            for frameskipped_update in reversed(self.frameskipped_critic_updates):
-                obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
-                
-                # Keep the agent's next policy
-                if self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
-                    pass
-                # Enable Q-learning, change agent's policy to greedy
-                elif self._agent_update_style == self.UpdateStyle.Q_LEARNING:
-                    next_obs_agent_policy_ = "greedy"
-                # Change agent's policy to be uniform
-                elif self._agent_update_style == self.UpdateStyle.UNIFORM:
-                    next_obs_agent_policy_ = "uniform"
-                
-                # Keep the opponent's next policy
-                if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
-                    pass
-                # Enable Q-learning, change opponent's policy to greedy
-                elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
-                    next_obs_opponent_policy_ = "greedy"
-                # Change opponent's policy to be uniform
-                elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
-                    next_obs_opponent_policy_ = "uniform"
+            if self._accumulate_at_frameskip:
+                obs_ = self.frameskipped_critic_updates[0][0]
+                next_obs_ = self.frameskipped_critic_updates[-1][2]
+                obs_agent_action_ = self.frameskipped_critic_updates[0][4]
+                obs_opponent_action_ = self.frameskipped_critic_updates[0][5] # we assume the first opponent action, as it's technically the last one we see
+                next_obs_agent_policy_ = self.frameskipped_critic_updates[-1][6]
+                next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
 
                 # The kwargs that are shared between the critic and the intrinsic critic
                 critic_kwargs = {
@@ -548,30 +578,88 @@ class A2CQLearner(A2CLearnerBase):
                 }
 
                 td_error = self._critic.update(
-                    reward=reward_,
-                    terminated=terminated_,
+                    reward=total_reward,
+                    terminated=terminated,
                     **critic_kwargs,
                 )
 
                 # The intrinsic critic not only updates using the intrinsic reward only, but also doesn't consider episode boundaries (is non-episodic), as recommended by the RND paper
                 if self._intrinsic_critic is not None:
                     td_error += self._intrinsic_critic.update(
-                        reward=intrinsic_reward_,
+                        reward=total_intrinsic_reward,
                         terminated=False,
                         **critic_kwargs,
                     )
+                
+                td_error = torch.mean(td_error).item()
 
-                total_td_error = total_td_error + torch.mean(td_error).item()
-            
-            self.td_error = total_td_error
-            self._critic.discount = previous_discount
+            else:
+                # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
+                previous_discount = self._critic.discount
+                self._critic.discount = 1.0
+
+                # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
+                for frameskipped_update in reversed(self.frameskipped_critic_updates):
+                    obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
+                    
+                    # Keep the agent's next policy
+                    if self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+                        pass
+                    # Enable Q-learning, change agent's policy to greedy
+                    elif self._agent_update_style == self.UpdateStyle.Q_LEARNING:
+                        next_obs_agent_policy_ = "greedy"
+                    # Change agent's policy to be uniform
+                    elif self._agent_update_style == self.UpdateStyle.UNIFORM:
+                        next_obs_agent_policy_ = "uniform"
+                    
+                    # Keep the opponent's next policy
+                    if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+                        pass
+                    # Enable Q-learning, change opponent's policy to greedy
+                    elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
+                        next_obs_opponent_policy_ = "greedy"
+                    # Change opponent's policy to be uniform
+                    elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
+                        next_obs_opponent_policy_ = "uniform"
+
+                    # The kwargs that are shared between the critic and the intrinsic critic
+                    critic_kwargs = {
+                        "obs": obs_,
+                        "next_obs": next_obs_,
+                        "agent_action": obs_agent_action_,
+                        "opponent_action": obs_opponent_action_,
+                        "next_agent_policy": next_obs_agent_policy_,
+                        "next_opponent_policy": next_obs_opponent_policy_,
+                    }
+
+                    td_error = self._critic.update(
+                        reward=reward_,
+                        terminated=terminated_,
+                        **critic_kwargs,
+                    )
+
+                    # The intrinsic critic not only updates using the intrinsic reward only, but also doesn't consider episode boundaries (is non-episodic), as recommended by the RND paper
+                    if self._intrinsic_critic is not None:
+                        td_error += self._intrinsic_critic.update(
+                            reward=intrinsic_reward_,
+                            terminated=False,
+                            **critic_kwargs,
+                        )
+
+                    td_error = torch.mean(td_error).item()
+                    self._critic.discount = previous_discount
+
+            # The agent only performed an action at the beginning of frameskipping. It doesn't make sense to update at any other observation.
+            obs_ = self.frameskipped_critic_updates[0][0]
+            next_obs_ = self.frameskipped_critic_updates[-1][2]
+            obs_agent_action_ = self.frameskipped_critic_updates[0][4]
+            obs_opponent_action_ = self.frameskipped_critic_updates[0][5]
+            next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
+            advantage = self.advantage(obs_, next_obs_, total_reward + total_intrinsic_reward, terminated, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_)
+            self._update_actor(obs_, obs_opponent_action_, obs_agent_action_, advantage)
+
+            self.td_error = td_error
             self.frameskipped_critic_updates.clear()
-
-        # If the agent did perform an action, then update the actor. It doesn't make sense to update otherwise.
-        if not agent_is_frameskipped:
-            # If the opponent is being frameskipped, then we consider them as doing any of their actions.
-            # Otherwise, we just update the portion of the policy concerned with the actually performed opponent action.
-            self._update_actor(obs, obs_agent_action, obs_opponent_action)
 
         if self.policy_cumulative_discount:
             self.cumulative_discount *= self.critic.discount

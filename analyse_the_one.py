@@ -59,16 +59,17 @@ if __name__ == "__main__":
         rollback=True,
 
         actor_entropy_coef=0.1,
-        critic_agent_update="q_learning",
+        critic_agent_update="expected_sarsa",
         critic_opponent_update="q_learning",
         critic_target_update_rate=100000,
         broadcast_at_frameskip=False,
+        alternative_advantage=True,
         # critic_table=True,
     )
 
     logged_agent = TrainingLoggerWrapper(
         agent,
-        2000,
+        10000,
         log_dir="runs/analysis",
         episode_reward=True,
         average_reward=True,

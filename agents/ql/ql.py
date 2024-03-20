@@ -124,7 +124,7 @@ class QFunction(ABC):
             elif next_opponent_policy == "greedy":
                 # This one is tricky! The opponent's policy is a column vector (not conditioned on agent action),
                 # so we need to implicitly take the agent's policy into account in the Q-values
-                next_opponent_policy = nn.functional.one_hot(torch.argmax(next_q_opp), num_classes=self.opponent_action_dim).unsqueeze(1).float()
+                next_opponent_policy = nn.functional.one_hot(torch.argmin(next_q_opp), num_classes=self.opponent_action_dim).unsqueeze(1).float()
 
             # Finally, aggregate the next Q-values according to the opponent's policy
             next_q = next_opponent_policy.T @ next_q_opp
