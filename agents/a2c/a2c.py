@@ -358,6 +358,7 @@ class A2CQLearner(A2CLearnerBase):
         # If we are not performing broadcasting during frameskipping, we need to remember the last action performed
         # by the agent/opponent, the one that led to the frameskipping.
         # The last agent's action is already tracking in self.current_action.
+        self._last_valid_agent_action = None
         self._last_valid_opponent_action = None
 
         # Discount throughout a single episode
@@ -466,6 +467,12 @@ class A2CQLearner(A2CLearnerBase):
         elif self._last_valid_opponent_action is None:
             raise RuntimeError("the opponent is being frameskipped, but we don't remember them having ever performed an action")
 
+        if not self.broadcast_at_frameskip:
+            obs_agent_action = self._last_valid_agent_action
+
+        if not self.broadcast_at_frameskip:
+            obs_opponent_action = self._last_valid_opponent_action
+
         # If the agent will be frameskipped...
         if agent_will_frameskip:
             # ... then we consider they will be doing any of their actions (uniform random policy).
@@ -473,7 +480,6 @@ class A2CQLearner(A2CLearnerBase):
                 next_obs_agent_policy = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
             # ... then we consider they will keep doing the action before frameskipping.
             else:
-                obs_agent_action = self._last_valid_agent_action
                 next_obs_agent_policy = nn.functional.one_hot(torch.tensor(obs_agent_action), num_classes=self.action_dim).float().unsqueeze(1).expand(-1, self.opponent_action_dim)
         
         # If the agent could act, then it makes sense for it to have a policy.
@@ -492,7 +498,6 @@ class A2CQLearner(A2CLearnerBase):
                 next_obs_opponent_policy = torch.ones(self.opponent_action_dim, 1).float() / (self.opponent_action_dim)
             # ... then we consider they will keep doing the action before frameskipping.
             else:
-                obs_opponent_action = self._last_valid_opponent_action
                 next_obs_opponent_policy = nn.functional.one_hot(torch.tensor(obs_opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
 
         # Schedule a critic update

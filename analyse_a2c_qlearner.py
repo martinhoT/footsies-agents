@@ -105,12 +105,14 @@ class QLearnerAnalyserManager:
         agent: A2CAgent,
         action_dim: int,
         opponent_action_dim: int,
+        include_online_learning: bool = True,
     ):
         self.agent = agent
         # Assume it's the QLearner to avoid headache
         self.learner: A2CQLearner = agent.learner
         self.action_dim = action_dim
         self.opponent_action_dim = opponent_action_dim
+        self._include_online_learning = include_online_learning
 
         self.online_learning = False
         self.show_target_network = False
@@ -130,6 +132,7 @@ class QLearnerAnalyserManager:
         with dpg.window(label="Attribute modifier", show=False) as self.attribute_modifier_window:
             dpg.add_text("Actor")
             dpg.add_slider_float(label="Learning rate", default_value=self.learner.actor_learning_rate, min_value=0.0, max_value=1.0, callback=lambda s, a: setattr(self.learner, "actor_learning_rate", a))
+            dpg.add_slider_float(label="Entropy loss coef", default_value=self.learner.actor_entropy_loss_coef, min_value=0.0, max_value=1.0, callback=lambda s, a: setattr(self.learner, "actor_entropy_loss_coef", a))
 
             dpg.add_separator()
 
@@ -138,8 +141,9 @@ class QLearnerAnalyserManager:
             dpg.add_slider_float(label="Discount", default_value=self.learner.critic.discount, min_value=0.0, max_value=1.0, callback=lambda s, a: setattr(self.learner.critic, "discount", a))
 
         with dpg.group(horizontal=True):
-            dpg.add_button(label="Open attribute modifier", callback=lambda: dpg.show_item(self.attribute_modifier_window))            
-            dpg.add_checkbox(label="Online learning", default_value=self.online_learning, callback=lambda s, a: setattr(self, "online_learning", a))
+            dpg.add_button(label="Open attribute modifier", callback=lambda: dpg.show_item(self.attribute_modifier_window))
+            if self._include_online_learning:
+                dpg.add_checkbox(label="Online learning", default_value=self.online_learning, callback=lambda s, a: setattr(self, "online_learning", a))
 
         dpg.add_separator()
 
@@ -171,7 +175,7 @@ class QLearnerAnalyserManager:
         obs: torch.Tensor = analyser.current_observation
 
         # Make the agent learn first before presenting results, it's less confusing and we can immediately see the results
-        if self.online_learning and analyser.previous_observation is not None:
+        if self.online_learning and analyser.most_recent_transition is not None:
             obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
             # Clone the observations, detached from the graph (clone() is differentiable, so we use detach()), 
             # don't get internal references in the analyser since those can change dynamically

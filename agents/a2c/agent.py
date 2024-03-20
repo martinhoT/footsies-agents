@@ -103,7 +103,6 @@ class FootsiesAgent(FootsiesAgentTorch):
                 return 0
             else:
                 # If not in hitstop anymore, reset the flag
-                LOGGER.debug("The agent is no longer in hitstop, will continue acting and learning")
                 self._has_acted_in_hitstop = False
         
         # Perform the normal action selection not considering FOOTSIES and be done with it
@@ -186,7 +185,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             # If we don't perform this correction, we would consider each primitive action individually rather than the simple action as a whole.
             elif obs_agent_action is not None:
                 obs_agent_action = self.current_action
-   
+            
             # NOTE: this should never happen due to the statements above
             if obs_agent_action is not None and obs_agent_action != self.current_action:
                 LOGGER.warning("From a transition, we determined that the agent's action was %s, but it was actually %s! There is a significant discrepancy here", obs_agent_action, self.current_action)
@@ -202,8 +201,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
-            agent_will_frameskip=(not ActionMap.is_state_actionable_ori(info, True)) or self.current_action_discretes,
-            opponent_will_frameskip=(not ActionMap.is_state_actionable_ori(info, False)) or self.current_action_discretes,
+            agent_will_frameskip=(not ActionMap.is_state_actionable_ori(info, True)) or (len(self.current_action_discretes) > 0),
+            opponent_will_frameskip=not ActionMap.is_state_actionable_ori(info, False),
             next_obs_opponent_policy=next_opponent_policy,
             intrinsic_reward=info.get("intrinsic_reward", 0),
         )

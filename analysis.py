@@ -243,6 +243,11 @@ class Analyser:
         terminated, truncated = False, False
 
         if self.requires_reset:
+            # We need to reset these variables or else we will report an inter-episode transition which doesn't make sense.
+            self.current_info = None
+            self.current_observation = None
+            self.current_original_observation = None
+
             self.episode_counter += 1
             obs, info = self.env.reset()
 
@@ -303,9 +308,11 @@ class Analyser:
         return battle_state
 
     @property
-    def most_recent_transition(self) -> tuple["any", "any", float, bool, bool, dict, dict]:
-        """The most recent environment transition tuple `(obs, next_obs, reward, terminated, truncated, info, next_info)`"""
-        return (self.previous_observation, self.current_observation, self.reward, self.terminated, self.truncated, self.previous_info, self.current_info)
+    def most_recent_transition(self) -> tuple["any", "any", float, bool, bool, dict, dict] | None:
+        """The most recent environment transition tuple `(obs, next_obs, reward, terminated, truncated, info, next_info)`. If there hasn't been such a transition yet, return `None`."""
+        if self.previous_observation is not None:
+            return (self.previous_observation, self.current_observation, self.reward, self.terminated, self.truncated, self.previous_info, self.current_info)
+        return None
 
     p1_guard_prev: int = editable_dpg_value("p1_guard_prev")
     p2_guard_prev: int = editable_dpg_value("p2_guard_prev")

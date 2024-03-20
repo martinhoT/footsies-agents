@@ -16,6 +16,7 @@ from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger
 from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher
 from agents.utils import FootsiesPhasicMoveProgress
+from agents.logger import TrainingLoggerWrapper
 import logging
 
 
@@ -23,7 +24,7 @@ if __name__ == "__main__":
 
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
-    custom_opponent = Backer()
+    custom_opponent = WhiffPunisher()
 
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
@@ -32,10 +33,10 @@ if __name__ == "__main__":
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=False,
-        dense_reward=True,
-        vs_player=True,
-        # opponent=custom_opponent.act,
+        fast_forward=True,
+        dense_reward=False,
+        # vs_player=True,
+        opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
@@ -56,17 +57,33 @@ if __name__ == "__main__":
         env.observation_space.shape[0],
         env.action_space.n,
         rollback=True,
-        actor_entropy_coef=0.5,
+
+        actor_entropy_coef=0.1,
         critic_agent_update="q_learning",
         critic_opponent_update="q_learning",
-        # critic_target_update_rate=1000,
+        critic_target_update_rate=100000,
+        broadcast_at_frameskip=False,
         # critic_table=True,
     )
+
+    logged_agent = TrainingLoggerWrapper(
+        agent,
+        2000,
+        log_dir="runs/analysis",
+        episode_reward=True,
+        average_reward=True,
+        win_rate=True,
+        truncation=True,
+        episode_length=True,
+        **loggables,
+    )
+
+    logged_agent.preprocess(env)
 
     # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
     # idle_distribution[0, 0] = 1.0
 
-    load_agent_model(agent, "curriculum_advancer")
+    # load_agent_model(agent, "curriculum_greedies")
 
     def spammer():
         from itertools import cycle
@@ -86,6 +103,7 @@ if __name__ == "__main__":
         agent.a2c,
         action_dim=agent.action_dim,
         opponent_action_dim=agent.opponent_action_dim,
+        include_online_learning=False,
     )
 
     if agent.opponent_model is not None:
@@ -102,6 +120,8 @@ if __name__ == "__main__":
         with dpg.group(horizontal=True):
             dpg.add_text("Predicted opponent action:")
             dpg.add_text("X", tag="predicted_opponent_action")
+        
+        dpg.add_checkbox(label="Online learning", default_value=False, tag="the_one_online_learning")
 
         qlearner_manager.add_custom_elements(analyser)
         if mimic_manager is not None:
@@ -111,6 +131,10 @@ if __name__ == "__main__":
         qlearner_manager.on_state_update(analyser)
         if mimic_manager is not None:
             mimic_manager.predict_next_move(analyser)
+        
+        if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
+            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
+            logged_agent.update(next_obs, reward, terminated, truncated, next_info)
 
     def act(obs, info):
         # This is so bad, it's a repeat of update()'s last part (since the the_one doesn't have update() called, only the A2CAgent), but idc
@@ -119,7 +143,7 @@ if __name__ == "__main__":
             _, opponent_action = ActionMap.simples_from_transition_ori(prev_obs, info)
             agent.previous_valid_opponent_action = opponent_action if opponent_action is not None else agent.previous_valid_opponent_action
 
-        action = agent.act(obs, info)
+        action = logged_agent.act(obs, info)
 
         if agent.recently_predicted_opponent_action is not None:
             predicted_opponent_action = ActionMap.simple_as_move(agent.recently_predicted_opponent_action)
