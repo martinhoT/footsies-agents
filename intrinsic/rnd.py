@@ -4,6 +4,7 @@ from agents.torch_utils import create_layered_network
 from intrinsic.base import IntrinsicRewardScheme
 from collections import namedtuple
 from typing import Callable
+from math import sqrt
 
 
 class RNDNetwork(nn.Module):
@@ -43,11 +44,14 @@ class RandomNetworkDistillation:
         self._target = rnd_generator()
         self._predictor = rnd_generator()
 
+        self._input_size = self._target.layers[0].in_features
+        self._output_size = self._target.layers[-1].out_features
+
         # Initialize the networks randomly
-        for param in self._target.parameters():
-            nn.init.uniform_(param.data, -1.0, 1.0)
-        for param in self._predictor.parameters():
-            nn.init.uniform_(param.data, -1.0, 1.0)
+        # for param in self._target.parameters():
+        #     nn.init.uniform_(param.data, -1 / sqrt(self._input_size), 1 / sqrt(self._output_size))
+        # for param in self._predictor.parameters():
+        #     nn.init.uniform_(param.data, -1 / sqrt(self._input_size), 1 / sqrt(self._output_size))
 
         self._target.requires_grad_(False)
         self._optimizer = torch.optim.SGD(self._predictor.parameters(), lr=learning_rate)
@@ -61,11 +65,10 @@ class RandomNetworkDistillation:
         return (target - prediction).pow(2).mean()
 
     def update(self, obs: torch.Tensor, reward_intrinsic: torch.Tensor):
-        self._batch.append(self.Transition(obs, reward_intrinsic))
+        self._batch.append(reward_intrinsic)
         
         if len(self._batch) >= self._mini_batch_size:
-            intrinsic_rewards = torch.vstack([transition.reward_intrinsic for transition in self._batch])
-            observations = torch.vstack([transition.obs for transition in self._batch])
+            intrinsic_rewards = torch.vstack(self._batch)
 
             self._optimizer.zero_grad()
 
@@ -83,9 +86,10 @@ class RNDScheme(IntrinsicRewardScheme):
     
     def update_and_reward(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict) -> float:
         # Intrinsic reward is calculated before the update
-        intrinsic_reward = self.rnd.reward(next_obs).item()
+        intrinsic_reward = self.rnd.reward(next_obs)
         self.rnd.update(next_obs, intrinsic_reward)
-        return intrinsic_reward
+        # Only do item() here! We need to let intrinsic_reward be a part of the computational graph in update()
+        return intrinsic_reward.item()
     
     @staticmethod
     def basic(obs_dim: int = 36, embedding_dim: int = 8) -> "IntrinsicRewardScheme":

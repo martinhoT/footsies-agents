@@ -99,6 +99,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.episode_reward = 0
         self.episode_length = 0
         self.average_reward = 0 # exponentially weighted average
+        self.average_intrinsic_reward = 0 # exponentially weighted average
         self.total_wins = 0
         self.total_terminated_episodes = 0
 
@@ -111,6 +112,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.episode_reward += reward
         self.episode_length += 1
         self.average_reward = self.average_reward_coef * self.average_reward + (1 - self.average_reward_coef) * reward
+        self.average_intrinsic_reward = self.average_reward_coef * self.average_intrinsic_reward + (1 - self.average_reward_coef) * info.get("intrinsic_reward", 0.0)
         self.current_step += 1
 
         # Update the win rate tracker (only really valid for FOOTSIES)
@@ -161,6 +163,15 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                     self.average_reward,
                     self.current_step,
                 )
+
+                # Let's avoid writing 0s, which will happen if we are not even using intrinsic rewards
+                if self.average_intrinsic_reward != 0.0:
+                    self.summary_writer.add_scalar(
+                        "Performance/Average intrinsic reward",
+                        self.average_intrinsic_reward,
+                        self.current_step,
+                    )
+
             if self.win_rate_enabled:
                 self.summary_writer.add_scalar(
                     "Performance/Win rate",

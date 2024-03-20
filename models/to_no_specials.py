@@ -13,20 +13,22 @@ CONSIDER_OPPONENT_ACTION = True
 def model_init(observation_space_size: int, action_space_size: int, *,
     actor_lr: float = 1e-2,
     critic_lr: float = 1e-2,
-    actor_entropy_coef: float = 0.1,
+    actor_entropy_coef: float = 0.02,
     critic_tanh: bool = False,
-    critic_discount: float = 0.99,
+    critic_discount: float = 0.9,
     critic_agent_update: str = "expected_sarsa",
     critic_opponent_update: str = "expected_sarsa",
-    critic_target_update_rate: int = 100,
+    critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
-    alternative_advantage: bool = False,
+    alternative_advantage: bool = True,
     broadcast_at_frameskip: bool = False,
     consider_explicit_opponent_policy: bool = False,
+    accumulate_at_frameskip: bool = True,
     rollback: bool = False,
+    perceive_intrinsic_reward: bool = False,
 ) -> tuple[TheOneAgent, dict[str, list]]:
-    
+
     obs_dim = observation_space_size
     action_dim = ActionMap.n_simple() - 2
     opponent_action_dim = ActionMap.n_simple()
@@ -73,6 +75,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             target_network_update_interval=critic_target_update_rate,
         )
 
+    intrinsic_critic = deepcopy(critic) if perceive_intrinsic_reward else None
+
     learner = A2CQLearner(
         actor=actor,
         critic=critic,
@@ -82,7 +86,9 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         agent_update_style=getattr(A2CQLearner.UpdateStyle, critic_agent_update.upper()),
         opponent_update_style=getattr(A2CQLearner.UpdateStyle, critic_opponent_update.upper()),
         alternative_advantage=alternative_advantage,
+        accumulate_at_frameskip=accumulate_at_frameskip,
         broadcast_at_frameskip=broadcast_at_frameskip,
+        intrinsic_critic=intrinsic_critic,
     )
 
     a2c = A2CAgent(

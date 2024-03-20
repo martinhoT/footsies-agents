@@ -337,12 +337,14 @@ if __name__ == "__main__":
     if args.misc.load:
         load_agent_model(agent, args.agent.name)
 
-    # Set a good default agent for self-play (FOOTSIES only), and create the self-play manager
+    # Create the custom opponent manager (self-play or curriculum), or nothing if None
+    opponent_manager = None
     if args.self_play.enabled:
         footsies_env: FootsiesEnv = env.unwrapped
         snapshot_method = (lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env))
         starter_opponent = snapshot_method()
 
+        # Set a good default agent for self-play
         footsies_env.set_opponent(starter_opponent)
         opponent_manager = SelfPlayManager(
             snapshot_method=snapshot_method,
