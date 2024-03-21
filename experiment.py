@@ -55,7 +55,9 @@ class TrialManager:
 if __name__ == "__main__":
     args = parse_args_experiment()
 
-    optimize_module_str = ".".join(("agents", args.agent_name, "optimize"))
+    raise NotImplementedError("This script is not yet updated to the new API")
+
+    optimize_module_str = ".".join(("agents", args.agent.modelagent_name, "optimize"))
     optimize_module = importlib.import_module(optimize_module_str)
     
     define_model_function: Callable[[optuna.Trial], FootsiesAgentBase] = optimize_module.define_model
@@ -83,7 +85,7 @@ if __name__ == "__main__":
         env=env,
         define_model_function=define_model_function,
         objective_function=objective_function,
-        total_episodes=args.total_episodes,
+        total_episodes=args.episodes,
     )
 
     study = optuna.create_study(
@@ -91,7 +93,7 @@ if __name__ == "__main__":
         sampler=None,   # TPESampler
         pruner=None,    # MedianPruner
         study_name=args.study_name,
-        direction=args.direction,
+        direction="maximize" if args.maximize else "minimize",
         load_if_exists=True,
     )
     study.optimize(trialManager.run, n_trials=args.n_trials, show_progress_bar=True)

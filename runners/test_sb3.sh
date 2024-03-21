@@ -4,10 +4,9 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 
 $agent_script \
     "$@" \
-    --no-save \
-    --no-log \
-    -eS \
+    --misc.no-save \
+    --misc.no-log \
+    --env.kwargs \
         render_mode human \
-    -eB \
         fast_forward false \
         vs_player true

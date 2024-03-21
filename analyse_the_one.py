@@ -33,7 +33,7 @@ if __name__ == "__main__":
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=True,
+        fast_forward=False,
         dense_reward=False,
         vs_player=True,
         # opponent=custom_opponent.act,
@@ -76,6 +76,7 @@ if __name__ == "__main__":
         win_rate=True,
         truncation=True,
         episode_length=True,
+        test_states_number=1,
         **loggables,
     )
 
@@ -84,7 +85,7 @@ if __name__ == "__main__":
     # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
     # idle_distribution[0, 0] = 1.0
 
-    load_agent_model(agent, "curriculum_standard")
+    load_agent_model(agent, "curriculum_granular_fs")
 
     def spammer():
         from itertools import cycle

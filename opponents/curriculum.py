@@ -22,7 +22,7 @@ class CurriculumManager(OpponentManager):
     ):
         self._win_rate_threshold = win_rate_threshold
     
-        self._current_opponent_idx = 0
+        self._next_opponent_idx = 1
         self._opponents = sorted([
             Idle(),
             Backer(),
@@ -53,11 +53,11 @@ class CurriculumManager(OpponentManager):
         self._agent_wins.clear()
         self._current_episodes = 0
 
-        if self._current_opponent_idx + 1 >= len(self._opponents):
+        if self._next_opponent_idx >= len(self._opponents):
             return None
 
-        self._current_opponent_idx += 1
-        new_opponent = self._opponents[self._current_opponent_idx]
+        new_opponent = self._opponents[self._next_opponent_idx]
+        self._next_opponent_idx += 1
         return new_opponent
     
     def update_at_episode(self, game_result: float):
@@ -71,13 +71,13 @@ class CurriculumManager(OpponentManager):
         opponent_change = False
 
         if self._is_next_opponent_ready():
-            previous_opponent = self._opponents[self._current_opponent_idx]
+            previous_opponent = self._opponents[self._next_opponent_idx]
             previous_wins = sum(self._agent_wins)
             previous_episodes = self._current_episodes
 
             new_opponent = self._advance()
 
-            LOGGER.info(f"Agent has surpassed opponent '{previous_opponent.__class__.__name__}' with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
+            LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
             opponent_change = True
 
         # Logging
@@ -92,11 +92,11 @@ class CurriculumManager(OpponentManager):
 
     @property
     def current_opponent(self) -> Callable[[dict], tuple[bool, bool, bool]]:
-        return self._opponents[self._current_opponent_idx].act
+        return self._opponents[self._next_opponent_idx].act
 
     @property
     def exhausted(self) -> bool:
-        return self._current_opponent_idx >= len(self._opponents)
+        return self._next_opponent_idx >= len(self._opponents)
     
     @property
     def current_recent_win_rate(self) -> float:
@@ -104,7 +104,7 @@ class CurriculumManager(OpponentManager):
 
     @property
     def current_curriculum_opponent(self) -> "CurriculumOpponent":
-        return self._opponents[self._current_opponent_idx]
+        return self._opponents[self._next_opponent_idx]
 
 
 class CurriculumOpponent(ABC):

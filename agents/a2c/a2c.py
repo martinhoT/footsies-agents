@@ -11,6 +11,17 @@ from enum import Enum
 LOGGER = logging.getLogger("main.a2c")
 
 
+def epoched(learning_method: Callable[..., None]):
+    def wrapper(self, *args, **kwargs):
+        self.epochs
+        self.timesteps
+        self.minibatch_number
+
+
+        learning_method(self, *args, **kwargs)
+    return wrapper
+
+
 class ValueNetwork(nn.Module):
     def __init__(
         self,
@@ -62,15 +73,17 @@ class ActorNetwork(nn.Module):
         self.actor_layers = create_layered_network(obs_dim, output_dim, hidden_layer_sizes, hidden_layer_activation)
         if consider_opponent_action:
             self.actor_layers.append(ToMatrix(opponent_action_dim, action_dim))
-        self.actor_layers.append(nn.Softmax(dim=-1))
+        self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, obs: torch.Tensor):
         rep = self._representation(obs)
 
-        return self.actor_layers(rep)
+        logits = self.actor_layers(rep)
+        return self.softmax(logits)
     
     def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
-        return self.actor_layers(rep)
+        logits = self.actor_layers(rep)
+        return self.softmax(logits)
     
     @property
     def consider_opponent_action(self) -> bool:
@@ -292,6 +305,7 @@ class A2CQLearner(A2CLearnerBase):
         actor_entropy_loss_coef: float = 0.0,
         actor_learning_rate: float = 1e-4,
         policy_cumulative_discount: bool = False,
+        actor_gradient_clipping: float = None,
         agent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         opponent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         intrinsic_critic: QFunction = None,
@@ -309,6 +323,7 @@ class A2CQLearner(A2CLearnerBase):
         - `actor_entropy_loss_coef`: the coefficient for the entropy loss in the actor's loss function, i.e. how much to prioritize policy entropy over reward
         - `actor_learning_rate`: the learning rate for the actor
         - `policy_cumulative_discount`: whether to discount the policy more the more steps are taken in the environment
+        - `actor_gradient_clipping`: the maximum norm of the actor's gradients. If `None`, then no clipping is performed
         - `agent_update_style`: how to update the critic's Q-values considering the agent's policy
         - `opponent_update_style`: how to update the critic's Q-values considering the opponent's policy
         - `intrinsic_critic`: the critic for the intrinsic reward. If `None`, then no intrinsic reward is considered
@@ -343,6 +358,7 @@ class A2CQLearner(A2CLearnerBase):
         self.actor_entropy_loss_coef = actor_entropy_loss_coef
         self.policy_cumulative_discount = policy_cumulative_discount
         self.consider_opponent_action = actor.consider_opponent_action
+        self._actor_gradient_clipping = actor_gradient_clipping
         self._agent_update_style = agent_update_style
         self._opponent_update_style = opponent_update_style
         self._alternative_advantage = alternative_advantage
@@ -387,8 +403,11 @@ class A2CQLearner(A2CLearnerBase):
 
         actor_entropy = -torch.sum(action_log_probabilities * action_probabilities, dim=-1)
         actor_delta = self.cumulative_discount * delta * action_log_probabilities[..., agent_action]
-        actor_score = torch.mean((1 - self.actor_entropy_loss_coef) * actor_delta + self.actor_entropy_loss_coef * actor_entropy)
+        actor_score = torch.mean(actor_delta + self.actor_entropy_loss_coef * actor_entropy)
         actor_score.backward()
+
+        if self._actor_gradient_clipping is not None:
+            nn.utils.clip_grad.clip_grad_norm_(self.actor.parameters(), self._actor_gradient_clipping)
 
         self.actor_optimizer.step()
 

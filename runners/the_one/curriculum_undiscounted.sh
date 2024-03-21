@@ -1,2 +1,2 @@
 #!/bin/sh
-./runners/curriculum.sh ./runners/footsies.sh to_no_specials --no-load -mB consider_explicit_opponent_policy true --name curriculum_undiscounted -mN critic_discount 1.0
+./runners/curriculum.sh ./runners/footsies.sh to_no_specials --misc.no-load --agent.kwargs consider_explicit_opponent_policy true --agent.name curriculum_undiscounted --agent.kwargs critic_discount 1.0

@@ -52,7 +52,7 @@ def import_agent(agent_model: str, env: Env, parameters: dict) -> tuple[Footsies
     return agent, loggables
 
 
-def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
+def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved") -> bool:
     agent_folder_path = os.path.join(folder, model_name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
     if not is_footsies_agent:
@@ -66,10 +66,12 @@ def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, 
             agent.load(agent_folder_path)
         else:
             agent.set_parameters(agent_folder_path)
-        LOGGER.info("Agent '%s' loaded", model_name)
 
-    else:
-        LOGGER.info("Can't load agent '%s', there was no agent saved!", model_name)
+        LOGGER.info("Agent '%s' loaded", model_name)
+        return True
+
+    LOGGER.info("Can't load agent '%s', there was no agent saved!", model_name)    
+    return False
 
 
 def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
@@ -189,7 +191,6 @@ def create_env(args: EnvArgs) -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
         env = FootsiesEnv(
-            # log_file=args.diayn_kwargs["log_dir"] + "/footsies.log",
             **args.kwargs,
         )
 
@@ -199,8 +200,7 @@ def create_env(args: EnvArgs) -> Env:
         if args.footsies_wrapper_adv:
             env = FootsiesEncourageAdvance(
                 env,
-                # Use the same logging directory of DIAYN, idc I want to test this fast
-                log_dir=args.diayn_kwargs["log_dir"],
+                log_dir=args.log_dir,
             )
 
         if args.footsies_wrapper_phasic:
@@ -228,19 +228,18 @@ def create_env(args: EnvArgs) -> Env:
         env = TransformObservation(env, lambda obs: torch.from_numpy(obs).float().unsqueeze(0))
 
     # Final miscellaneous wrappers
-    if args.diayn:
+    if args.diayn.enabled:
         env = DIAYNWrapper(
             env,
             DIAYN(
                 observation_dim=env.observation_space.shape[0],
-                skill_dim=args.diayn_kwargs["skill_dim"],
-                include_baseline=args.diayn_kwargs["include_baseline"],
-                discriminator_learning_rate=args.diayn_kwargs["discriminator_learning_rate"],
-                discriminator_hidden_layer_sizes=args.diayn_kwargs["discriminator_hidden_layer_sizes"],
-                discriminator_hidden_layer_activation=args.diayn_kwargs["discriminator_hidden_layer_activation"],
+                skill_dim=args.diayn.skill_dim,
+                include_baseline=args.diayn.include_baseline,
+                discriminator_learning_rate=args.diayn.discriminator_learning_rate,
+                discriminator_hidden_layer_sizes=args.diayn.discriminator_hidden_layer_sizes,
+                discriminator_hidden_layer_activation=args.diayn.discriminator_hidden_layer_activation,
             ),
-            log_dir=args.diayn_kwargs["log_dir"],
-            log_interval=args.diayn_kwargs["log_frequency"],
+            log_dir=args.log_dir,
         )
 
     return env
@@ -283,10 +282,9 @@ def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: 
 
 if __name__ == "__main__":
     args = parse_args()
-    # Perform some argument post-processing
-    log_dir = os.path.join("runs", args.agent.name)
-    args.env.diayn_kwargs["log_dir"] = log_dir
-    
+    # Use the same logging directory as the one the environment uses. Everything should be logging to the same place.
+    log_dir = args.env.log_dir
+
     # Alleviate the need of specifically specifying different ports for each parallel instance.
     # Still, allow the user to specify specific ports if they want to.
     game_port, opponent_port, remote_control_port = find_footsies_ports()

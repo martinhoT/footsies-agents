@@ -1,2 +1,2 @@
 #!/bin/sh
-./runners/curriculum.sh ./runners/footsies.sh to_no_specials --no-load -mB consider_explicit_opponent_policy true --name curriculum_greedies -mS critic_agent_update q_learning critic_opponent_update q_learning
+./runners/curriculum.sh ./runners/footsies.sh to_no_specials --misc.no-load --agent.kwargs consider_explicit_opponent_policy true --agent.name curriculum_greedies --agent.kwargs critic_agent_update q_learning critic_opponent_update q_learning

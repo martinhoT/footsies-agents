@@ -4,14 +4,13 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 
 # This is supposed to be the very last script in the runner script chain
 python3 main.py $agent \
-    --torch \
-    --footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
-    --footsies-wrapper-norm \
-    --footsies-wrapper-acd \
-    --log-frequency 1000 \
-    --wrapper-time-limit 3000 \
-    -eB \
+    --env.torch \
+    --env.footsies-wrapper-norm \
+    --env.footsies-wrapper-acd \
+    --env.wrapper-time-limit 3000 \
+    --env.kwargs \
+        footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
         dense_reward false \
-    -eS \
         render_mode human \
+    --misc.log-frequency 1000 \
     "$@"

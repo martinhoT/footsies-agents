@@ -4,6 +4,6 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 
 $agent_script \
     "$@" \
-    --footsies-curriculum \
-    -eS \
+    --curriculum \
+    --env.kwargs \
         sync_mode synced_non_blocking
