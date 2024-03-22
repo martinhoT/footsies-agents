@@ -1,25 +1,13 @@
-from typing import Callable
 import torch
 import logging
 from torch import nn
 from torch.distributions import Categorical
-from agents.torch_utils import create_layered_network, ToMatrix
+from agents.torch_utils import create_layered_network, ToMatrix, epoched
 from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
 from enum import Enum
 
 LOGGER = logging.getLogger("main.a2c")
-
-
-def epoched(learning_method: Callable[..., None]):
-    def wrapper(self, *args, **kwargs):
-        self.epochs
-        self.timesteps
-        self.minibatch_number
-
-
-        learning_method(self, *args, **kwargs)
-    return wrapper
 
 
 class ValueNetwork(nn.Module):
@@ -390,6 +378,7 @@ class A2CQLearner(A2CLearnerBase):
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
         return self.actor.sample_action(obs, next_opponent_action=next_opponent_action).item()
 
+    @epoched(timesteps=2048, epochs=10, minibatch_size=64)
     def _update_actor(self, obs: torch.Tensor, opponent_action: int | None, agent_action: int, delta: torch.Tensor):
         # Save the delta for tracking
         self.delta = delta.mean().item() # We might get a delta vector

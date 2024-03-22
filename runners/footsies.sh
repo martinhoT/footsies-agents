@@ -9,8 +9,10 @@ python3 main.py $agent \
     --env.footsies-wrapper-acd \
     --env.wrapper-time-limit 3000 \
     --env.kwargs \
-        footsies-path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
-        dense_reward false \
+        game_path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
+    --env.kwargs \
+        dense_reward False \
+    --env.kwargs \
         render_mode human \
     --misc.log-frequency 1000 \
     "$@"

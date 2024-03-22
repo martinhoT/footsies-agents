@@ -19,6 +19,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         average_reward: bool = False,
         average_reward_coef: float = None,
         win_rate: bool = False,
+        win_rate_over_last: int = 100,
         truncation: bool = False,
         episode_length: bool = False,
         network_histograms: List[nn.Module] = None,
@@ -49,7 +50,9 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         average_reward_coef: float
             the coefficient of the exponentially weighted average of the reward. If `None`, will be `1 - 1 / log_frequency`
         win_rate: bool
-            the agent's win rate. Only makes sense for the FOOTSIES environment
+            the agent's win rate considering the last N episodes (games). Only makes sense for the FOOTSIES environment
+        win_rate_over_last: int
+            over how many episodes to calculate the win rate
         truncation: bool
             the number of truncated episodes
         episode_length: bool
@@ -100,8 +103,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.episode_length = 0
         self.average_reward = 0 # exponentially weighted average
         self.average_intrinsic_reward = 0 # exponentially weighted average
-        self.total_wins = 0
-        self.total_terminated_episodes = 0
+        self.recent_wins: deque[bool] = deque([], maxlen=win_rate_over_last)
 
     def act(self, obs, *args, **kwargs) -> "any":
         return self.agent.act(obs, *args, **kwargs)
@@ -118,14 +120,10 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         # Update the win rate tracker (only really valid for FOOTSIES)
         # NOTE: draws decrease win rate
         if terminated:
-            if reward > 0.0:
-                self.total_wins += 1
-            self.total_terminated_episodes += 1
+            self.recent_wins.append(reward > 0.0)
         # We treat truncation, which should be by time limit, as termination
         elif truncated:
-            if info["guard"][0] > info["guard"][1]:
-                self.total_wins += 1
-            self.total_terminated_episodes += 1
+            self.recent_wins.append(info["guard"][0] > info["guard"][1])
 
         # Write logs (at the episode level)
         if terminated or truncated:
@@ -174,8 +172,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
             if self.win_rate_enabled:
                 self.summary_writer.add_scalar(
-                    "Performance/Win rate",
-                    (self.total_wins / self.total_terminated_episodes) if self.total_terminated_episodes > 0 else 0.5,
+                    f"Performance/Win rate over the last {self.recent_wins.maxlen} games",
+                    (sum(self.recent_wins) / len(self.recent_wins)) if self.recent_wins else 0.5,
                     self.current_step,
                 )
 

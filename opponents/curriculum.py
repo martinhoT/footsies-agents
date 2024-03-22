@@ -31,7 +31,7 @@ class CurriculumManager(OpponentManager):
             NSpecialSpammer(),
             BSpecialSpammer(),
             WhiffPunisher(),
-            UnsafePunisher(),
+            # UnsafePunisher(), # The UnsafePunisher can easily stall the agent. At least WhiffPunisher approaches the agent, but stalling should be possible there as well.
         ], key=lambda o: o.difficulty)
         
         # An array of booleans that tracks the most recent wins of the agent (True if win, False otherwise)
@@ -71,7 +71,7 @@ class CurriculumManager(OpponentManager):
         opponent_change = False
 
         if self._is_next_opponent_ready():
-            previous_opponent = self._opponents[self._next_opponent_idx]
+            previous_opponent = self.current_curriculum_opponent
             previous_wins = sum(self._agent_wins)
             previous_episodes = self._current_episodes
 
@@ -79,6 +79,9 @@ class CurriculumManager(OpponentManager):
 
             LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
             opponent_change = True
+
+        else:
+            self.current_curriculum_opponent.reset()
 
         # Logging
         if self._summary_writer is not None:
@@ -92,7 +95,7 @@ class CurriculumManager(OpponentManager):
 
     @property
     def current_opponent(self) -> Callable[[dict], tuple[bool, bool, bool]]:
-        return self._opponents[self._next_opponent_idx].act
+        return self._opponents[self._next_opponent_idx - 1].act
 
     @property
     def exhausted(self) -> bool:
@@ -104,14 +107,14 @@ class CurriculumManager(OpponentManager):
 
     @property
     def current_curriculum_opponent(self) -> "CurriculumOpponent":
-        return self._opponents[self._next_opponent_idx]
+        return self._opponents[self._next_opponent_idx - 1]
 
 
 class CurriculumOpponent(ABC):
 
     @abstractmethod
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
-        """The method by which the opponent performs actions"""
+        """The method by which the opponent performs actions."""
 
     @abstractmethod
     def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
@@ -120,7 +123,10 @@ class CurriculumOpponent(ABC):
     @property
     @abstractmethod
     def difficulty(self) -> int:
-        pass
+        """The estimated relative difficulty of this opponent."""
+
+    def reset(self):
+        """Reset any opponent state that was built during this episode."""
 
 
 class Idle(CurriculumOpponent):
@@ -157,17 +163,7 @@ class Backer(CurriculumOpponent):
 
 class NSpammer(CurriculumOpponent):
     def __init__(self):
-        self._action_cycle = cycle([
-            (False, False, True),
-            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.startup), # Wait for the attack to start before attacking again
-            *([(False, False, True)] * FootsiesMove.N_ATTACK.value.active), # Attack during active frames
-            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.recovery), # Wait until the attack finishes before moving forward
-            (True, False, False),
-            (True, False, False),
-            (True, False, False),
-        ])
-
-        self._peeked_action = None
+        self.reset()
 
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         if self._peeked_action is not None:
@@ -190,6 +186,18 @@ class NSpammer(CurriculumOpponent):
         simple = ActionMap.simple_from_move(simple)
         return nn.functional.one_hot(torch.tensor(simple), num_classes=ActionMap.n_simple()).float()
 
+    def reset(self):
+        self._action_cycle = cycle([
+            (False, False, True),
+            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.startup), # Wait for the attack to start before attacking again
+            *([(False, False, True)] * FootsiesMove.N_ATTACK.value.active), # Attack during active frames
+            *([(False, False, False)] * FootsiesMove.N_ATTACK.value.recovery), # Wait until the attack finishes before moving forward
+            (True, False, False),
+            (True, False, False),
+            (True, False, False),
+        ])
+        self._peeked_action = None
+
     @property
     def difficulty(self) -> int:
         return 1
@@ -197,17 +205,7 @@ class NSpammer(CurriculumOpponent):
 
 class BSpammer(CurriculumOpponent):
     def __init__(self):
-        self._action_cycle = cycle([
-            (True, False, True),
-            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.startup), # Wait for the attack to start before attacking again
-            *([(False, False, True)] * FootsiesMove.B_ATTACK.value.active), # Attack during active frames
-            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.recovery), # Wait until the attack finishes before moving forward
-            (True, False, False),
-            (True, False, False),
-            (True, False, False),
-        ])
-
-        self._peeked_action = None
+        self.reset()
     
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         if self._peeked_action is not None:
@@ -233,15 +231,23 @@ class BSpammer(CurriculumOpponent):
     @property
     def difficulty(self) -> int:
         return 1
+    
+    def reset(self):
+        self._action_cycle = cycle([
+            (True, False, True),
+            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.startup), # Wait for the attack to start before attacking again
+            *([(False, False, True)] * FootsiesMove.B_ATTACK.value.active), # Attack during active frames
+            *([(False, False, False)] * FootsiesMove.B_ATTACK.value.recovery), # Wait until the attack finishes before moving forward
+            (True, False, False),
+            (True, False, False),
+            (True, False, False),
+        ])
+        self._peeked_action = None
 
 
 class NSpecialSpammer(CurriculumOpponent):
     def __init__(self):
-        self._action_cycle = cycle([
-            *([(False, False, True)] * 60),
-            (False, False, False),
-        ])
-
+        self.reset()
         self._probs = torch.zeros((ActionMap.n_simple(),)).float()
         self._probs[ActionMap.simple_from_move(FootsiesMove.N_SPECIAL)] = 1.0
     
@@ -255,14 +261,15 @@ class NSpecialSpammer(CurriculumOpponent):
     def difficulty(self) -> int:
         return 2
 
+    def reset(self):
+        self._action_cycle = cycle([
+            *([(False, False, True)] * 60),
+            (False, False, False),
+        ])
+
 
 class BSpecialSpammer(CurriculumOpponent):
     def __init__(self):
-        self._action_cycle = cycle([
-            *([(False, False, True)] * 60),
-            (True, False, False),
-        ])
-
         self._probs = torch.zeros((ActionMap.n_simple(),)).float()
         self._probs[ActionMap.simple_from_move(FootsiesMove.B_SPECIAL)] = 1.0
     
@@ -275,6 +282,12 @@ class BSpecialSpammer(CurriculumOpponent):
     @property
     def difficulty(self) -> int:
         return 2
+
+    def reset(self):
+        self._action_cycle = cycle([
+            *([(False, False, True)] * 60),
+            (True, False, False),
+        ])
 
 
 class WhiffPunisher(CurriculumOpponent):
@@ -353,6 +366,10 @@ class WhiffPunisher(CurriculumOpponent):
     @property
     def difficulty(self):
         return 2
+
+    def reset(self):
+        self._primitive_action_queue.clear()
+        self._simple_action = FootsiesMove.STAND
     
 
 class UnsafePunisher(CurriculumOpponent):
@@ -426,3 +443,8 @@ class UnsafePunisher(CurriculumOpponent):
     @property
     def difficulty(self) -> int:
         return 3
+
+    def reset(self):
+        self._primitive_action_queue.clear()
+        self._simple_action = FootsiesMove.STAND
+        self._will_punish = False

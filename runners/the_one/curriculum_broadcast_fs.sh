@@ -1,2 +1,2 @@
 #!/bin/sh
-./runners/curriculum.sh ./runners/footsies.sh to_no_specials --misc.no-load --agent.kwargs consider_explicit_opponent_policy true --agent.name curriculum_broadcast_fs --agent.kwargs broadcast_at_frameskip true
+./runners/curriculum.sh ./runners/footsies.sh to_no_specials --misc.no-load --agent.kwargs critic_opponent_update q_learning --agent.name curriculum_broadcast_fs --agent.kwargs broadcast_at_frameskip True

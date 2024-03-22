@@ -12,7 +12,8 @@ from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import find_footsies_ports
 from agents.action import ActionMap
-from abc import ABC, abstractmethod
+from functools import wraps
+from torch.utils.data import DataLoader, Dataset
 
 
 def create_layered_network(
@@ -270,6 +271,36 @@ def hidden_layer_parameters_from_specifications(
     hidden_layer_activation = getattr(nn, hidden_layer_activation_specification)
 
     return hidden_layer_sizes, hidden_layer_activation
+
+
+# TODO: should be vectorized (i.e. dataset is a tensor), but this means that the learning method should also be vectorized, which it isn't
+def epoched(timesteps: int, epochs: int, minibatch_size: int, dataset_class: Dataset):
+    def epoched_decorator(learning_method: Callable[..., None]):
+        updates: list[tuple[list, dict]] = []
+        dataset: Dataset = None
+        dataloader: DataLoader = None
+
+        @wraps(learning_method)
+        def wrapped(self, *args: torch.Tensor, **kwargs: torch.Tensor):
+            nonlocal updates
+            nonlocal dataset
+            nonlocal dataloader
+
+            updates.append((args, kwargs))
+
+            if len(dataset) >= timesteps:
+                dataset = dataset_class(updates)
+                dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
+
+                for _ in range(epochs):
+                    for minibatch in dataloader:
+                        learning_method(self, *minibatch)
+                
+                updates.clear()
+            
+        return wrapped
+
+    return epoched_decorator
 
 
 class ImitationLearner:

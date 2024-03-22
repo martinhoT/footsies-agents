@@ -5,7 +5,7 @@ from intrinsic.base import IntrinsicRewardScheme
 from intrinsic.counts import CountBasedScheme
 from intrinsic.icm import ICMScheme
 from intrinsic.rnd import RNDScheme
-from typing import Literal
+from typing import Literal, Dict
 from torch import nn
 
 
@@ -44,7 +44,7 @@ class MainArgs:
         if self.env.is_footsies:
             if "game_path" not in self.env.kwargs:
                 raise ValueError(
-                    "the path to the FOOTSIES executable should be specified when using the FOOTSIES environment, through the environment keyword arguments ('game_path')"
+                    "the path to the FOOTSIES executable should be specified when using the FOOTSIES environment, through the environment keyword argument ('game_path')"
                 )
         
         self.env.log_dir = f"{self.env.log_dir}/{self.agent.name}"
@@ -97,9 +97,9 @@ class MiscArgs:
 
 @dataclass
 class AgentArgs:
-    model: str
+    model: tyro.conf.Positional[str]
     """Name of the agent initializer/class to use, either from the 'models' folder or from Stable-Baselines3"""
-    kwargs: dict[str, int | float | bool | str] = field(default_factory=dict)
+    kwargs: tyro.conf.UseAppendAction[Dict[str, int | float | bool | str]] = field(default_factory=dict)
     """Keyword arguments to pass to the agent initializer/constructor"""
     name: str | None = None
     """The name of the agent, for saving, loading and logging. If `None`, will use `model` as the name"""
@@ -117,7 +117,7 @@ class EnvArgs:
 
     name: str = "FOOTSIES"
     """Gymnasium environment to use. The special value 'FOOTSIES' instantiates the FOOTSIES environment"""
-    kwargs: dict[str, int | float | bool | str] = field(default_factory=dict)
+    kwargs: tyro.conf.UseAppendAction[Dict[str, int | float | bool | str]] = field(default_factory=dict)
     """Keyword arguments to pass to the environment contructor"""
     wrapper_time_limit: int = 99 * 60 # NOTE: not actually sure if it's 60, for FOOTSIES it may be 50
     """Add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES"""
