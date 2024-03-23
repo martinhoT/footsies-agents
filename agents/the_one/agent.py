@@ -176,6 +176,11 @@ class FootsiesAgent(FootsiesAgentTorch):
                 LOGGER.warning("We detected the agent performing a special move, even though they can't perform special moves! Will convert to the respective attack action.\nCurrent observation: %s\nNext observation: %s", self.current_observation, next_obs)
                 agent_action -= 2
 
+        if self.opponent_model is not None:
+            if "next_opponent_policy" in info:
+                LOGGER.warning("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
+            info["next_opponent_policy"] = self.opponent_model.probability_distribution(next_obs)
+
         # Update the different models
         self.a2c.update(next_obs, reward, terminated, truncated, info)
         if self.game_model is not None:

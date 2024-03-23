@@ -273,10 +273,22 @@ def hidden_layer_parameters_from_specifications(
     return hidden_layer_sizes, hidden_layer_activation
 
 
-# TODO: should be vectorized (i.e. dataset is a tensor), but this means that the learning method should also be vectorized, which it isn't
-def epoched(timesteps: int, epochs: int, minibatch_size: int, dataset_class: Dataset):
+def epoched(timesteps: int, epochs: int, minibatch_size: int):
+    """Makes a function call 'epoched'. This accumulate different values of its arguments into batches, and so all positional arguments be tensors."""
+    class ArgumentDataset(Dataset):
+        def __init__(self, args: list[list]):
+            # Convert all arguments to tensors.
+            # We squeeze the first dimension of those that are already tensors to avoid having the dataloader unnecessarily add another batch dimension.
+            self.args = [[(torch.tensor(a) if not isinstance(a, torch.Tensor) else a.squeeze(0)) for a in arg] for arg in args]
+            
+        def __len__(self) -> int:
+            return len(self.args)
+
+        def __getitem__(self, idx) -> list[torch.Tensor]:
+            return self.args[idx]
+
     def epoched_decorator(learning_method: Callable[..., None]):
-        updates: list[tuple[list, dict]] = []
+        updates: list[list] = []
         dataset: Dataset = None
         dataloader: DataLoader = None
 
@@ -286,15 +298,16 @@ def epoched(timesteps: int, epochs: int, minibatch_size: int, dataset_class: Dat
             nonlocal dataset
             nonlocal dataloader
 
-            updates.append((args, kwargs))
+            updates.append(args)
 
-            if len(dataset) >= timesteps:
-                dataset = dataset_class(updates)
+            if len(updates) >= timesteps:
+                dataset = ArgumentDataset(updates)
                 dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
 
+                epoch_data = {}
                 for _ in range(epochs):
                     for minibatch in dataloader:
-                        learning_method(self, *minibatch)
+                        learning_method(self, *minibatch, epoch_data=epoch_data)
                 
                 updates.clear()
             

@@ -28,6 +28,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     accumulate_at_frameskip: bool = True,
     rollback: bool = False,
     perceive_intrinsic_reward: bool = False,
+    ppo: bool = False,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -87,6 +88,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         actor_gradient_clipping=actor_gradient_clipping,
         agent_update_style=getattr(A2CQLearner.UpdateStyle, critic_agent_update.upper()),
         opponent_update_style=getattr(A2CQLearner.UpdateStyle, critic_opponent_update.upper()),
+        ppo_objective=ppo,
         alternative_advantage=alternative_advantage,
         accumulate_at_frameskip=accumulate_at_frameskip,
         broadcast_at_frameskip=broadcast_at_frameskip,

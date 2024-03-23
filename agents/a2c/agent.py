@@ -211,8 +211,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.cumulative_delta += self._learner.delta
         self.cumulative_delta_n += 1
         if isinstance(self._learner, A2CQLearner):
-            if self._learner.td_error is not None:
-                self.cumulative_qtable_error += self._learner.td_error
+            if self._learner.extrinsic_td_error is not None:
+                self.cumulative_qtable_error += self._learner.extrinsic_td_error
                 self.cumulative_qtable_error_n += 1
         
         # If the episode is over, we need to reset episode variables, mainly the action that was performed!
