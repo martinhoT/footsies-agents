@@ -7,6 +7,7 @@ from agents.a2c.a2c import A2CQLearner, ActorNetwork
 from agents.ql.ql import QFunctionNetwork, QNetwork, QFunctionTable
 from agents.the_one.loggables import get_loggables
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
+from agents.the_one.reaction_time import ReactionTimeEmulator
 
 
 CONSIDER_OPPONENT_ACTION = True
@@ -16,6 +17,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     ppo: bool = False,
     remove_special_moves: bool = True,
     perceive_intrinsic_reward: bool = False,
+    use_reaction_time: bool = False,
     
     # Opponent modifiers
     rollback: bool = False,
@@ -140,17 +142,31 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     else:
         opponent_model = None
 
+    if use_reaction_time:
+        reaction_time_emulator = ReactionTimeEmulator(
+            inaction_probability=0.0,
+            history_size=30,
+            # These don't matter since they will be substituted by the call below
+            multiplier=1.0,
+            additive=0.0,
+        )
+        reaction_time_emulator.confine_to_range(15, 30, action_dim)
+
+    else:
+        reaction_time_emulator = None
+
     agent = TheOneAgent(
         obs_dim=obs_dim,
         action_dim=action_dim,
         opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
         a2c=a2c,
-        representation=None,
         opponent_model=opponent_model,
-        game_model=None,
-        reaction_time_emulator=None,
+        reaction_time_emulator=reaction_time_emulator,
         remove_special_moves=remove_special_moves,
         rollback_as_opponent_model=rollback,
+        # Not used
+        representation=None,
+        game_model=None,
         game_model_learning_rate=1e-4,
     )
 

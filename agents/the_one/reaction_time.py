@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Callable, TypeVar
 from collections import deque
+from torch.distributions import Categorical
 
 
 T = TypeVar("T")
@@ -38,9 +39,10 @@ class ReactionTimeEmulator:
 
     @staticmethod
     def entropy(distribution: np.ndarray, safety: float = 1e-8) -> float:
-        """Get entropy of a probability distribution, measured in bits"""
-        # TODO: should the safety value be included in the probability portion of the formula? That makes the sum of probabilities not be 1
-        return -np.nansum((distribution + safety) * np.log2(distribution + safety))
+        """Get entropy of a probability distribution, measured in nats."""
+        # Should the safety value be included in the probability portion of the formula? That makes the sum of probabilities not be 1. Probably not.
+        # We measure entropy in nats to match the way entropy is measured in PyTorch by default.
+        return -np.nansum((distribution) * np.log(distribution + safety))
     
     @staticmethod
     def bernoulli_distribution(probability: float) -> np.ndarray:
@@ -48,7 +50,7 @@ class ReactionTimeEmulator:
 
     @property
     def inaction_probability(self) -> float:
-        """The probability of doing nothing"""
+        """The probability of doing nothing."""
         return self._inaction_probability
 
     @inaction_probability.setter
@@ -61,7 +63,7 @@ class ReactionTimeEmulator:
     def confine_to_range(self, minimum: int, maximum: int, agent_n_actions: int):
         """
         Define the multiplier and additive parameters to confine the reaction time to a defined range.
-        Make sure to apply this operation after other parameters of the emulator, such as the inaction probability, are set
+        Make sure to apply this operation after other parameters of the emulator, such as the inaction probability, are set.
         """
         if maximum >= self._history_size:
             raise ValueError(f"the maximum value cannot be equal to or greater than the defined history size ({maximum} >= {self._history_size})")
@@ -74,11 +76,10 @@ class ReactionTimeEmulator:
         self._additive = c
 
     def maximum_decision_entropy(self, agent_n_actions: int) -> float:
-        """Calculate the maximum possible decision entropy"""
-        return self._inaction_entropy + (1 - self.inaction_probability) * np.log2(agent_n_actions)
+        """Calculate the maximum possible decision entropy."""
+        return self._inaction_entropy + (1 - self.inaction_probability) * np.log(agent_n_actions)
 
     # TODO: consider only options from the opponent that can actually be done (doesn't make sense to use when the opponent can't do anything)
-    # TODO: maybe hardcode the environment model, and simply slap the opponent action into the observation
     def decision_distribution(
         self,
         perceived_observation: T,
@@ -99,6 +100,8 @@ class ReactionTimeEmulator:
         It is assumed that the action `0` signifies inaction (doing nothing)
         """
         
+        raise DeprecationWarning("This method is deprecated and should not be used.")
+
         opponent_distribution = opponent_distribution_source(perceived_observation).reshape((-1, 1))
         
         agent_distribution_matrix = np.array([
@@ -112,7 +115,7 @@ class ReactionTimeEmulator:
         
         return np.sum(opponent_distribution * agent_distribution_matrix, axis=0).squeeze()
 
-    def reaction_time(self, decision_distribution: np.ndarray, previous_reaction_time: int = None) -> int:
+    def reaction_time(self, decision_distribution: Categorical, previous_reaction_time: int = None) -> int:
         """
         Calculate reaction time in time steps given a decision distribution.
         
@@ -123,7 +126,7 @@ class ReactionTimeEmulator:
         The returned reaction time will not be bounded if this value is `None`
         """
 
-        decision_entropy = self._inaction_entropy + (1 - self._inaction_probability) * self.entropy(decision_distribution)
+        decision_entropy = self._inaction_entropy + (1 - self._inaction_probability) * decision_distribution.entropy()
 
         if previous_reaction_time is None:
             previous_reaction_time = float("+inf")
@@ -131,37 +134,23 @@ class ReactionTimeEmulator:
         return min(previous_reaction_time + 1, np.ceil(self._multiplier * decision_entropy + self._additive))
     
     def register_observation(self, observation: T):
-        """Register an observation of the environment into the observation history. Should be performed at every environment step, before perceiving an observation"""
+        """Register an observation of the environment into the observation history. Should be performed at every environment step, before perceiving an observation."""
         self._observations.append(observation)
 
     def perceive(self, reaction_time: int) -> T:
-        """Get an observation according to the provided reaction time. For a reaction time of 0, return the observation at the current instant"""
+        """Get an observation according to the provided reaction time. For a reaction time of 0, return the observation at the current instant."""
         return self._observations[-(reaction_time + 1)]
     
     def register_and_perceive(
         self,
         observation: T,
-        agent_distribution_source: Callable[[T], np.ndarray],
-        opponent_distribution_source: Callable[[T], np.ndarray],
-        environment_model: Callable[[T, int, int], T],
+        decision_distribution: Categorical,
     ) -> tuple[T, int]:
         """
-        Perform registration and perception of a delayed observation all in a single method, for convenience. This is the primary method that should be used at every environment step
+        Perform registration and perception of a delayed observation all in a single method, for convenience. This is the primary method that should be used at every environment step.
         
-        Note: the decision entropy is calculated according to the last reaction time computed through this method, which is initially positive infinity (perceives the oldest observation)
+        Note: the decision entropy is calculated according to the last reaction time computed through this method, which is initially positive infinity (perceives the oldest observation).
         """
-        
-        last_perceived_observation = self.perceive(
-            min(self._previous_reaction_time, self._history_size - 1)
-        )
-
-        decision_distribution = self.decision_distribution(
-            last_perceived_observation,
-            agent_distribution_source,
-            opponent_distribution_source,
-            environment_model
-        )
-
         reaction_time = self.reaction_time(decision_distribution, self._previous_reaction_time)
 
         self.register_observation(observation)
@@ -172,6 +161,6 @@ class ReactionTimeEmulator:
         return perceived_observation, reaction_time
 
     def fill_history(self, observation: T):
-        """Fill the observation history with a single observation. Should be done initially, immediately after an environment reset"""
+        """Fill the observation history with a single observation. Should be done initially, immediately after an environment reset."""
         self._observations.clear()
         self._observations.extend([observation] * self._history_size)

@@ -90,6 +90,12 @@ class ActorNetwork(nn.Module):
         action_probabilities = self(obs)
         return action_probabilities.take_along_dim(next_opponent_actions[:, None, None], dim=1)
 
+    def decision_distribution(self, obs: torch.Tensor, next_opponent_policy: torch.Tensor) -> Categorical:
+        """Get the decision probabilities and distribution for the given observation and next opponent policy. The next opponent policy should have dimensions `batch_dim X opponent_action_dim`."""
+        probs = next_opponent_policy @ self.probabilities(obs, None)
+        distribution = Categorical(probs=probs)
+        return distribution
+
     def sample_action(self, obs: torch.Tensor, next_opponent_action: int) -> torch.Tensor:
         """Randomly sample an action."""
         action_probabilities = self.probabilities(obs, next_opponent_action)

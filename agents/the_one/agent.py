@@ -39,7 +39,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         game_model_learning_rate: float = 1e-4,
     ):
         """
-        FOOTSIES agent that integrates an opponent-aware reinforcement learning algorithm with an opponent model.
+        FOOTSIES agent that integrates an opponent-aware reinforcement learning algorithm with an opponent model, along with reaction time.
         
         Parameters
         ----------
@@ -88,6 +88,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.game_model is not None:
             self.game_model_optimizer = torch.optim.SGD(self.game_model.parameters(), lr=game_model_learning_rate)
 
+        # The variables regarding the currently perceived observation and information.
+        # If using reaction time, these may be delayed in time.
         self.current_observation = None
         self.current_info = None
         self.current_representation = None
@@ -171,6 +173,11 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     # It's in this function that the current observation and representation variables are updated
     def act(self, obs: torch.Tensor, info: dict) -> int:
+        # Update the reaction time emulator and subsitute obs with a perceived observation, which is delayed.
+        if self.reaction_time_emulator is not None:
+            decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation)
+            obs, _ = self.reaction_time_emulator.register_and_perceive(obs, decision_distribution)
+
         self.current_observation = obs
         self.current_info = info
         if self.opponent_model is not None:
