@@ -148,7 +148,7 @@ class PlayerModel:
         self._network = player_model_network
         self.scars = scar_store
         self.loss_dynamic_weights = loss_dynamic_weights
-        self.loss_dynamic_weights_max = loss_dynamic_weights_max
+        self.loss_dynamic_weights_max = torch.tensor(loss_dynamic_weights_max)
 
         # Cross entropy loss
         # TODO: check if even with "none" reduction the weights are applied

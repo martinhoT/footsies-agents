@@ -56,7 +56,6 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_info = None
 
         self._test_observations = None
-        self._test_actions = None
 
         # Logging
         self._p1_cumulative_loss = 0
@@ -86,9 +85,9 @@ class FootsiesAgent(FootsiesAgentBase):
         if self._learn_p2 and p2_simple is not None:
             loss = self._p2_model.update(self.current_observation, p2_simple, 1.0)
             self._p2_cumulative_loss += loss
-            self._p2_cumulative_loss += 1
+            self._p2_cumulative_loss_n += 1
 
-    def decision_entropy(self, obs: torch.Tensor, p1: bool) -> float:
+    def decision_entropy(self, obs: torch.Tensor, p1: bool) -> torch.Tensor:
         """The decision entropy of the player model at the given observation."""
         model = self._p1_model if p1 else self._p2_model
         dist = model.network.distribution(obs)
@@ -106,7 +105,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self._p1_model.save(p1_path)
         self._p2_model.save(p2_path)
 
-    def evaluate_p1_average_loss_and_clear(self, p1: bool) -> float:
+    def evaluate_p1_average_loss_and_clear(self) -> float:
         res = (
             (self._p1_cumulative_loss / self._p1_cumulative_loss_n)
             if self._p1_cumulative_loss_n != 0
@@ -129,13 +128,9 @@ class FootsiesAgent(FootsiesAgentBase):
         return res
 
     def _initialize_test_states(self, test_states: List[torch.Tensor]):
-        if self._test_observations is None or self._test_actions is None:
-            # If the state is terminal, then there will be no action. Discard those states
-            observations, actions = map(
-                np.array, zip(*filter(lambda sa: sa[1] is not None, test_states))
-            )
-            self._test_observations = torch.tensor(observations, dtype=torch.float32)
-            self._test_actions = torch.tensor(actions, dtype=torch.float32)
+        if self._test_observations is None:
+            test_observations, _ = zip(*test_states)
+            self._test_observations = torch.vstack(test_observations)
 
     def evaluate_divergence_between_players(
         self, test_states: List[tuple[Any, Any]]
@@ -147,9 +142,10 @@ class FootsiesAgent(FootsiesAgentBase):
         """
         self._initialize_test_states(test_states)
 
-        p1_probs = self.p1_model.network.probabilities(self._test_observations)
-        p2_probs = self.p2_model.network.probabilities(self._test_observations)
-        divergence = nn.functional.kl_div(p1_probs, p2_probs)
+        with torch.no_grad():
+            p1_probs = self.p1_model.network.probabilities(self._test_observations).detach()
+            p2_probs = self.p2_model.network.probabilities(self._test_observations).detach()
+            divergence = nn.functional.kl_div(p1_probs.log(), p2_probs.log(), reduction="batchmean", log_target=True)
 
         return divergence
 
@@ -158,7 +154,7 @@ class FootsiesAgent(FootsiesAgentBase):
     ) -> float:
         self._initialize_test_states(test_states)
 
-        return self.decision_entropy(self._test_observations, p1=p1)
+        return self.decision_entropy(self._test_observations, p1=p1).mean().item()
 
     # NOTE: this only works if the class was defined to be over primitive actions
     def extract_policy(
