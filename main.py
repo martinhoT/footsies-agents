@@ -3,6 +3,7 @@ import importlib
 import gymnasium as gym
 import torch
 import logging
+import json
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
@@ -47,12 +48,17 @@ def import_agent(agent_model: str, env: Env, parameters: dict) -> tuple[Footsies
     model_init_module_str = ".".join(("models", agent_model))
     model_init_module = importlib.import_module(model_init_module_str)
 
-    agent, loggables = model_init_module.model_init(observation_space_size=env.observation_space.shape[0], action_space_size=env.action_space.n, **parameters)
+    agent, loggables = model_init_module.model_init(
+        observation_space_size=env.observation_space.shape[0],
+        action_space_size=env.action_space.n,
+        **parameters
+    )
 
     return agent, loggables
 
 
-def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved") -> bool:
+def load_agent(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved") -> bool:
+    """Load the trained parameters of the `agent` from disk."""
     agent_folder_path = os.path.join(folder, model_name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
     if not is_footsies_agent:
@@ -74,7 +80,8 @@ def load_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, 
     return False
 
 
-def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
+def save_agent(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
+    """Save the trained parameters of the `agent` to disk."""
     agent_folder_path = os.path.join(folder, model_name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
 
@@ -84,6 +91,24 @@ def save_agent_model(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, 
     # Both FOOTSIES and SB3 agents use the same method and signature (mostly)
     agent.save(agent_folder_path)
     LOGGER.info("Agent '%s' saved", model_name)
+
+
+def load_agent_parameters(model_name: str, folder: str = "saved") -> dict:
+    """Load the agent initialization parameters from disk."""
+    agent_folder_path = os.path.join(folder, model_name)
+    
+    # Save the parameters used to instantiate this agent
+    with open(os.path.join(agent_folder_path, "parameters.json"), "rt") as f:
+        return json.load(f)
+
+
+def save_agent_parameters(parameters: dict, model_name: str, folder: str = "saved"):
+    """Save the agent initialization parameters to disk."""
+    agent_folder_path = os.path.join(folder, model_name)
+    
+    # Save the parameters used to instantiate this agent
+    with open(os.path.join(agent_folder_path, "parameters.json"), "wt") as f:
+        json.dump(parameters, f)
 
 
 def train(
@@ -333,7 +358,7 @@ if __name__ == "__main__":
         LOGGER.info(agent_initialization_msg)
 
     if args.misc.load:
-        load_agent_model(agent, args.agent.name)
+        load_agent(agent, args.agent.name)
 
     # Create the custom opponent manager (self-play or curriculum), or nothing if None
     opponent_manager = None
@@ -481,6 +506,7 @@ if __name__ == "__main__":
             train(agent, env, **train_kwargs)
 
     if args.misc.save:
-        save_agent_model(agent, args.agent.name)
+        save_agent(agent, args.agent.name)
+        save_agent_parameters(args.agent.kwargs, args.agent.name)
 
     env.close()

@@ -6,12 +6,12 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
-from analysis import Analyser
+from scripts.analysis.analysis import Analyser
 from agents.action import ActionMap
-from main import load_agent_model
+from main import load_agent
 from analyse_a2c_qlearner import QLearnerAnalyserManager
 from analyse_opponent_model import MimicAnalyserManager
-from models import to_no_specials_, to_no_specials_opp_, to_
+from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger
 from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
     # idle_distribution[0, 0] = 1.0
 
-    load_agent_model(agent, "curriculum_granular_fs")
+    load_agent(agent, "curriculum_granular_fs")
 
     def spammer():
         from itertools import cycle

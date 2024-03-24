@@ -1,3 +1,4 @@
+import torch
 from typing import Iterable
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 
@@ -174,7 +175,7 @@ class ActionMap:
         return None
     
     @staticmethod
-    def simples_from_transition_ori(obs: dict, next_obs: dict):
+    def simples_from_transition_ori(obs: dict, next_obs: dict) -> tuple[int, int]:
         """Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as original observations. If an action was ineffectual, return `None`. This is a convenience method that should be used for obtaining simple actions from gameplay."""
         p1_move_frame = obs["move_frame"][0]
         p2_move_frame = obs["move_frame"][1]
@@ -200,6 +201,32 @@ class ActionMap:
 
         return obs_agent_action, obs_opponent_action
     
+    @staticmethod
+    def simples_from_transition_torch(obs: torch.Tensor, next_obs: torch.Tensor) -> tuple[int, int]:
+        """Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as PyTorch tensors. If an action was ineffectual, return `None`. This is a convenience method that should be used for obtaining simple actions from gameplay."""
+        p1_move_progress = obs[0, 32].item()
+        p2_move_progress = obs[0, 33].item()
+        p1_move_index = torch.argmax(obs[0, 2:17]).item()
+        p2_move_index = torch.argmax(obs[0, 17:32]).item()
+        p1_next_move_index = torch.argmax(next_obs[0, 2:17]).item()
+        p2_next_move_index = torch.argmax(next_obs[0, 17:32]).item()
+        obs_agent_action = ActionMap.simple_from_transition(
+            previous_player_move_index=p1_move_index,
+            previous_opponent_move_index=p2_move_index,
+            previous_player_move_progress=p1_move_progress,
+            previous_opponent_move_progress=p2_move_progress,
+            player_move_index=p1_next_move_index,
+        )
+        obs_opponent_action = ActionMap.simple_from_transition(
+            previous_player_move_index=p2_move_index,
+            previous_opponent_move_index=p1_move_index,
+            previous_player_move_progress=p2_move_progress,
+            previous_opponent_move_progress=p1_move_progress,
+            player_move_index=p2_next_move_index,
+        )
+
+        return obs_agent_action, obs_opponent_action
+
     @staticmethod
     def simple_as_move(simple: int) -> FootsiesMove:
         """Obtain the `FootsiesMove` that identifies the given simple action."""

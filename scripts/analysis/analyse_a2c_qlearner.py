@@ -6,12 +6,12 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
-from analysis import Analyser
+from scripts.analysis.analysis import Analyser
 from agents.action import ActionMap
 from agents.a2c.a2c import A2CQLearner
 from agents.a2c.agent import FootsiesAgent as A2CAgent
 from agents.ql.ql import QFunctionNetwork, QFunctionTable
-from main import load_agent_model
+from main import load_agent
 
 
 SIMPLE_ACTION_LABELS_GEN = lambda labels, n: tuple((move.name, i / n + (1 / (n * 2))) for i, move in enumerate(labels))
@@ -258,7 +258,7 @@ if __name__ == "__main__":
         }
     )
 
-    load_agent_model(agent, "a2c_qlearner_il")
+    load_agent(agent, "a2c_qlearner_il")
 
     def spammer():
         from itertools import cycle

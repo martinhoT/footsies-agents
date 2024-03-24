@@ -4,10 +4,10 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
-from analysis import Analyser, footsies_move_from_one_hot
+from scripts.analysis.analysis import Analyser, footsies_move_from_one_hot
 from agents.game_model.agent import FootsiesAgent as GameModelAgent
 from agents.action import ActionMap
-from main import load_agent_model
+from main import load_agent
 
 
 AGENT: GameModelAgent = None
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         hidden_layer_activation_specification="ReLU",
     )
 
-    load_agent_model(AGENT, "game_model_one_layer_2")
+    load_agent(AGENT, "game_model_one_layer_2")
 
     analyser = Analyser(
         env=env,

@@ -9,10 +9,10 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
-from analysis import Analyser
+from scripts.analysis.analysis import Analyser
 from agents.mimic.agent import FootsiesAgent as OpponentModelAgent, PlayerModel, PlayerModelNetwork
 from agents.action import ActionMap
-from main import load_agent_model
+from main import load_agent
 from agents.torch_utils import observation_invert_perspective_flattened
 
 
@@ -300,7 +300,7 @@ class MimicAnalyserManager:
                 dpg.add_slider_float(label="Scar detection threshold", default_value=self.p1_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p1_model, "scar_detection_threshold", a))
                 dpg.add_slider_float(label="Smoothed loss coef", default_value=self.p1_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p1_model, "smoothed_loss_coef", a))
                 dpg.add_slider_float(label="Move transition scale", default_value=self.p1_model.move_transition_scale, max_value=1000.0, min_value=1.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p1_model, "move_transition_scale", a))
-                dpg.add_slider_float(label="Learning rate", default_value=self.p1_model.optimizer.param_groups[0]["lr"], max_value=1e-2, min_value=1e-6, width=200, enabled=True, callback=lambda s, a: self.p1_model.set_learning_rate(a))
+                dpg.add_slider_float(label="Learning rate", default_value=self.p1_model.optimizer.param_groups[0]["lr"], max_value=1e-2, min_value=1e-6, width=200, enabled=True, callback=lambda s, a: setattr(self.p1_model, "learning_rate", a))
 
             else:
                 dpg.add_text("No player 1 model")
@@ -312,7 +312,7 @@ class MimicAnalyserManager:
                 dpg.add_slider_float(label="Scar detection threshold", default_value=self.p2_model.scar_detection_threshold, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p2_model, "scar_detection_threshold", a))
                 dpg.add_slider_float(label="Smoothed loss coef", default_value=self.p2_model.smoothed_loss_coef, max_value=1.0, min_value=0.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p2_model, "smoothed_loss_coef", a))
                 dpg.add_slider_float(label="Move transition scale", default_value=self.p2_model.move_transition_scale, max_value=1000.0, min_value=1.0, width=200, enabled=True, callback=lambda s, a: setattr(self.p2_model, "move_transition_scale", a))
-                dpg.add_slider_float(label="Learning rate", default_value=self.p2_model.optimizer.param_groups[0]["lr"], max_value=1e-2, min_value=1e-6, width=200, enabled=True, callback=lambda s, a: self.p2_model.set_learning_rate(a))
+                dpg.add_slider_float(label="Learning rate", default_value=self.p2_model.optimizer.param_groups[0]["lr"], max_value=1e-2, min_value=1e-6, width=200, enabled=True, callback=lambda s, a: setattr(self.p2_model, "learning_rate", a))
             
             else:
                 dpg.add_text("No player 2 model")
@@ -366,7 +366,7 @@ class MimicAnalyserManager:
         if self.learn_p1 and p1_simple is not None:
             self.p1_model.update(obs, p1_simple)
 
-            self.p1_gradient_plot.update(self.p1_model.network.parameters())
+            self.p1_gradient_plot.update(self.p1_model._network.parameters())
             self.p1_loss_plot.update(self.p1_model.most_recent_loss, self.p1_model.smoothed_loss, self.p1_model.scar_detection_threshold)
             dpg.set_value(self.p1_scar_size, len(self.p1_model.x_batch_as_list))
         
@@ -374,7 +374,7 @@ class MimicAnalyserManager:
         if self.learn_p2 and p2_simple is not None:
             self.p2_model.update(obs, p2_simple)
             
-            self.p2_gradient_plot.update(self.p2_model.network.parameters())
+            self.p2_gradient_plot.update(self.p2_model._network.parameters())
             self.p2_loss_plot.update(self.p2_model.most_recent_loss, self.p2_model.smoothed_loss, self.p2_model.scar_detection_threshold)
             dpg.set_value(self.p2_scar_size, len(self.p2_model.x_batch_as_list))
         
@@ -382,14 +382,14 @@ class MimicAnalyserManager:
         p1_distribution_predicted = None
         if self.p1_mirror_p2:
             obs_inverted = observation_invert_perspective_flattened(obs)
-            p1_distribution_predicted = self.p2_model.probability_distribution(obs_inverted).squeeze()
+            p1_distribution_predicted = self.p2_model.probabilities(obs_inverted).squeeze()
         elif self.p1_model is not None:
-            p1_distribution_predicted = self.p1_model.probability_distribution(obs).squeeze()
+            p1_distribution_predicted = self.p1_model.probabilities(obs).squeeze()
         
         # Get probability distribution of P2 model
         p2_distribution_predicted = None
         if self.p2_model is not None:
-            p2_distribution_predicted = self.p2_model.probability_distribution(obs).squeeze()
+            p2_distribution_predicted = self.p2_model.probabilities(obs).squeeze()
 
         # Get probability distributions from the action tables
         p1_distribution_estimated = self.p1_action_table.probability_distribution(obs) # we don't mirror this one, it's not that important
@@ -410,7 +410,7 @@ class MimicAnalyserManager:
         except StopIteration:
             # We need to craft the observation to be as if P1 is the one experiencing it (since P2 model was trained inverted)
             obs_inverted = observation_invert_perspective_flattened(obs)
-            probs = self.p2_model.probability_distribution(obs_inverted).squeeze()
+            probs = self.p2_model.probabilities(obs_inverted).squeeze()
             distribution = torch.distributions.Categorical(probs=probs)
             action = distribution.sample().item()
             self.p2_predicted_action_iterator = iter(ActionMap.simple_to_discrete(action))
@@ -473,7 +473,7 @@ if __name__ == "__main__":
 
     agent = OpponentModelAgent(
         observation_space_size=obs_dim,
-        action_space_size=action_dim,
+        action_dim=action_dim,
         tile_coding=False,
         append_last_actions_n=0,
         append_last_actions_distinct=False,

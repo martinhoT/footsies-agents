@@ -16,7 +16,14 @@ from agents.action import ActionMap
 from io import BufferedIOBase
 
 
-FootsiesTransition = tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, bool]
+@dataclass
+class FootsiesTransition:
+    obs:            np.ndarray
+    next_obs:       np.ndarray
+    reward:         float
+    p1_action:      np.ndarray
+    p2_action:      np.ndarray
+    terminated:     bool
 
 
 # repr is False to avoid printing the entire episode, which is especially important when debugging
@@ -269,9 +276,12 @@ class FootsiesDataset:
         env.close()
 
 
-# TODO: make this return tensors
 class FootsiesTorchDataset(Dataset):
-    """Flattened dataset of transitions, for usage with PyTorch's `DataLoader`."""
+    """
+    Flattened dataset of transitions, for usage with PyTorch's `DataLoader`.
+    
+    Returns tuples of (`obs`, `next_obs`, `reward`, `p1_action`, `p2_action`, `terminated`)
+    """
     def __init__(self, dataset: FootsiesDataset):
         self._dataset = dataset
 

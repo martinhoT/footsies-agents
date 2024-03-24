@@ -11,7 +11,7 @@ from agents.the_one.model import FullModel, RepresentationModule, AbstractGameMo
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
 from agents.a2c.a2c import ActorNetwork
-from agents.mimic.agent import PlayerModel
+from agents.mimic.mimic import PlayerModel
 from agents.torch_utils import observation_invert_perspective_flattened
 from data import FootsiesDataset
 
@@ -27,20 +27,40 @@ class FootsiesAgent(FootsiesAgentTorch):
         action_dim: int,
         opponent_action_dim: int,
         # Modules
-        representation: RepresentationModule,
         a2c: A2CAgent,
-        opponent_model: PlayerModel = None,
-        game_model: AbstractGameModel = None,
-        reaction_time_emulator: ReactionTimeEmulator = None,
+        representation: RepresentationModule | None = None,
+        opponent_model: PlayerModel | None = None,
+        game_model: AbstractGameModel | None = None,
+        reaction_time_emulator: ReactionTimeEmulator | None = None,
         # Modifiers
         remove_special_moves: bool = False,
         rollback_as_opponent_model: bool = False,
         # Learning
         game_model_learning_rate: float = 1e-4,
     ):
+        """
+        FOOTSIES agent that integrates an opponent-aware reinforcement learning algorithm with an opponent model.
+        
+        Parameters
+        ----------
+        - `obs_dim`: the dimensionality of the observations
+        - `action_dim`: the dimensionality of the actions
+        - `opponent_action_dim`: the dimensionality of the opponent's actions
+        - `a2c`: the opponent-aware reinforcement learning agent implementation
+        - `representation`: a representation network that is shared among various networks, or `None` if one is not used
+        - `opponent_model`: the opponent model, or `None` if one is not to be used
+        - `game_model`: the game model, or `None` if one is not to be used
+        - `reaction_time_emulator`: the reaction time emulator, or `None` if one is not to be used
+        - `remove_special_moves`: whether to explicitly not consider special moves as part of the agent's action space
+        - `rollback_as_opponent_model`: whether to use rollback-based prediction as a stand-in for the opponent model.
+        Only makes sense to be used if the opponent model is `None`
+        - `game_model_learning_rate`: the learning rate of the player model
+        """
         # Validate arguments
         if rollback_as_opponent_model and opponent_model is not None:
             raise ValueError("can't have an opponent model when using the rollback strategy as an opponent predictor, can only use one or the other")
+        if game_model is not None:
+            raise ValueError("using a game model is not supported")
 
         # Store required values
         #  Dimensions
@@ -60,7 +80,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         # To report in the `model` property
         self._full_model = FullModel(
             game_model=self.game_model,
-            opponent_model=None if self.opponent_model is None else self.opponent_model.network,
+            opponent_model=None if self.opponent_model is None else self.opponent_model._network,
             actor_critic=self.a2c.model,
         )
 
@@ -80,11 +100,12 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Merely for tracking
         self._recently_predicted_opponent_action = None
 
-        # Loss trackers
-        self.cumulative_loss_game_model = 0
-        self.cumulative_loss_game_model_n = 0
-        self.cumulative_loss_opponent_model = 0
-        self.cumulative_loss_opponent_model_n = 0
+        # Logging
+        self._cumulative_loss_game_model = 0
+        self._cumulative_loss_game_model_n = 0
+        self._cumulative_loss_opponent_model = 0
+        self._cumulative_loss_opponent_model_n = 0
+        self._test_observations = []
 
     def env_concat(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -179,14 +200,16 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.opponent_model is not None:
             if "next_opponent_policy" in info:
                 LOGGER.warning("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
-            info["next_opponent_policy"] = self.opponent_model.probability_distribution(next_obs)
+            info["next_opponent_policy"] = self.opponent_model.probabilities(next_obs)
 
         # Update the different models
         self.a2c.update(next_obs, reward, terminated, truncated, info)
         if self.game_model is not None:
             self._update_game_model(self.current_observation, agent_action, opponent_action, next_obs)
         if self.opponent_model is not None and opponent_action is not None:
-            self.opponent_model.update(self.current_observation, opponent_action)
+            loss = self.opponent_model.update(self.current_observation, opponent_action)
+            self._cumulative_loss_opponent_model += loss
+            self._cumulative_loss_opponent_model_n += 1
 
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
@@ -210,8 +233,8 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         self.game_model_optimizer.step()
 
-        self.cumulative_loss_game_model += game_model_loss.item()
-        self.cumulative_loss_game_model_n += 1
+        self._cumulative_loss_game_model += game_model_loss.item()
+        self._cumulative_loss_game_model_n += 1
 
     def initialize(
         self,
@@ -344,22 +367,32 @@ class FootsiesAgent(FootsiesAgentTorch):
             opponent_model_path = os.path.join(folder_path, "opponent_model")
             self.opponent_model.save(opponent_model_path)
 
-    def evaluate_average_loss_game_model(self) -> float:
+    def evaluate_average_loss_game_model_and_clear(self) -> float:
         res = (
-            self.cumulative_loss_game_model / self.cumulative_loss_game_model_n
-        ) if self.cumulative_loss_game_model_n != 0 else 0
+            self._cumulative_loss_game_model / self._cumulative_loss_game_model_n
+        ) if self._cumulative_loss_game_model_n != 0 else 0
 
-        self.cumulative_loss_game_model = 0
-        self.cumulative_loss_game_model_n = 0
+        self._cumulative_loss_game_model = 0
+        self._cumulative_loss_game_model_n = 0
 
         return res
 
-    def evaluate_average_loss_opponent_model(self) -> float:
+    def evaluate_average_loss_opponent_model_and_clear(self) -> float:
         res = (
-            self.cumulative_loss_opponent_model / self.cumulative_loss_opponent_model_n
-        ) if self.cumulative_loss_opponent_model_n != 0 else 0
+            self._cumulative_loss_opponent_model / self._cumulative_loss_opponent_model_n
+        ) if self._cumulative_loss_opponent_model_n != 0 else 0
 
-        self.cumulative_loss_opponent_model = 0
-        self.cumulative_loss_opponent_model_n = 0
+        self._cumulative_loss_opponent_model = 0
+        self._cumulative_loss_opponent_model_n = 0
 
         return res
+
+    def _initialize_test_states(self, test_states: list[torch.Tensor]):
+        if self._test_observations is None:
+            test_observations, _ = zip(*test_states)
+            self._test_observations = torch.vstack(test_observations)
+
+    def evaluate_average_opponent_model_entropy(self, test_states: list[torch.Tensor]) -> float:
+        self._initialize_test_states(test_states)
+
+        return self.opponent_model.network.distribution(self._test_observations).entropy().mean()
