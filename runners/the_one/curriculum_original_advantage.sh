@@ -1,2 +1,2 @@
 #!/bin/sh
-./runners/curriculum.sh ./runners/footsies.sh to_no_specials --misc.no-load --agent.kwargs critic_opponent_update q_learning --agent.name curriculum_original_advantage --agent.kwargs alternative_advantage False
+./runners/curriculum.sh ./runners/footsies.sh to --misc.no-load --agent.name curriculum_original_advantage --agent.kwargs alternative_advantage False

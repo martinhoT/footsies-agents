@@ -23,7 +23,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     rollback: bool = False,
     use_opponent_model: bool = False,
     critic_opponent_update: str = "expected_sarsa",
-    consider_explicit_opponent_policy: bool = False,
+    consider_explicit_opponent_policy: bool = True,
     opponent_model_dynamic_loss_weights: bool = True,
     
     # Highly-tunable hyperparameters

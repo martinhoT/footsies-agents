@@ -28,15 +28,15 @@ from args import parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
 from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher, UnsafePunisher
 from opponents.base import OpponentManager
-from agents.utils import find_footsies_ports, FootsiesEncourageAdvance, FootsiesPhasicMoveProgress
+from agents.utils import find_footsies_ports, FootsiesEncourageAdvance, FootsiesPhasicMoveProgress, AppendSimpleHistoryWrapper
 from intrinsic.base import IntrinsicRewardScheme
 
 LOGGER = logging.getLogger("main")
 
 
-def import_sb3(agent_model: str, env: Env, parameters: dict) -> BaseAlgorithm:
+def import_sb3(model: str, env: Env, parameters: dict) -> BaseAlgorithm:
     import stable_baselines3
-    agent_class = stable_baselines3.__dict__[agent_model.upper()]
+    agent_class = stable_baselines3.__dict__[model.upper()]
     return agent_class(
         policy="MlpPolicy", # we assume we will never need the CnnPolicy
         env=env,
@@ -44,8 +44,8 @@ def import_sb3(agent_model: str, env: Env, parameters: dict) -> BaseAlgorithm:
     )
 
 
-def import_agent(agent_model: str, env: Env, parameters: dict) -> tuple[FootsiesAgentBase, dict[str, list]]:
-    model_init_module_str = ".".join(("models", agent_model))
+def import_agent(model: str, env: Env, parameters: dict) -> tuple[FootsiesAgentBase, dict[str, list]]:
+    model_init_module_str = ".".join(("models", model))
     model_init_module = importlib.import_module(model_init_module_str)
 
     agent, loggables = model_init_module.model_init(
@@ -57,9 +57,9 @@ def import_agent(agent_model: str, env: Env, parameters: dict) -> tuple[Footsies
     return agent, loggables
 
 
-def load_agent(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved") -> bool:
+def load_agent(agent: FootsiesAgentBase | BaseAlgorithm, name: str, folder: str = "saved") -> bool:
     """Load the trained parameters of the `agent` from disk."""
-    agent_folder_path = os.path.join(folder, model_name)
+    agent_folder_path = os.path.join(folder, name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
     if not is_footsies_agent:
         agent_folder_path = agent_folder_path + ".zip"
@@ -73,16 +73,16 @@ def load_agent(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder
         else:
             agent.set_parameters(agent_folder_path)
 
-        LOGGER.info("Agent '%s' loaded", model_name)
+        LOGGER.info("Agent '%s' loaded", name)
         return True
 
-    LOGGER.info("Can't load agent '%s', there was no agent saved!", model_name)    
+    LOGGER.info("Can't load agent '%s', there was no agent saved!", name)    
     return False
 
 
-def save_agent(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder: str = "saved"):
+def save_agent(agent: FootsiesAgentBase | BaseAlgorithm, name: str, folder: str = "saved"):
     """Save the trained parameters of the `agent` to disk."""
-    agent_folder_path = os.path.join(folder, model_name)
+    agent_folder_path = os.path.join(folder, name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
 
     if is_footsies_agent and not os.path.exists(agent_folder_path):
@@ -90,21 +90,21 @@ def save_agent(agent: FootsiesAgentBase | BaseAlgorithm, model_name: str, folder
 
     # Both FOOTSIES and SB3 agents use the same method and signature (mostly)
     agent.save(agent_folder_path)
-    LOGGER.info("Agent '%s' saved", model_name)
+    LOGGER.info("Agent '%s' saved", name)
 
 
-def load_agent_parameters(model_name: str, folder: str = "saved") -> dict:
+def load_agent_parameters(name: str, folder: str = "saved") -> dict:
     """Load the agent initialization parameters from disk."""
-    agent_folder_path = os.path.join(folder, model_name)
+    agent_folder_path = os.path.join(folder, name)
     
     # Save the parameters used to instantiate this agent
     with open(os.path.join(agent_folder_path, "parameters.json"), "rt") as f:
         return json.load(f)
 
 
-def save_agent_parameters(parameters: dict, model_name: str, folder: str = "saved"):
+def save_agent_parameters(parameters: dict, name: str, folder: str = "saved"):
     """Save the agent initialization parameters to disk."""
-    agent_folder_path = os.path.join(folder, model_name)
+    agent_folder_path = os.path.join(folder, name)
     
     # Save the parameters used to instantiate this agent
     with open(os.path.join(agent_folder_path, "parameters.json"), "wt") as f:
@@ -222,6 +222,18 @@ def create_env(args: EnvArgs) -> Env:
         if args.footsies_wrapper_norm:
             env = FootsiesNormalized(env, normalize_guard=args.footsies_wrapper_norm_guard)
 
+        if args.footsies_wrapper_history:
+            env = AppendSimpleHistoryWrapper(env,
+                p1=args.footsies_wrapper_history.get("p1", True),
+                n=args.footsies_wrapper_history.get("p1_n", 5),
+                distinct=args.footsies_wrapper_history.get("p1_distinct", True),
+            )
+            env = AppendSimpleHistoryWrapper(env,
+                p1=args.footsies_wrapper_history.get("p2", True),
+                n=args.footsies_wrapper_history.get("p2_n", 5),
+                distinct=args.footsies_wrapper_history.get("p2_distinct", True),
+            )
+
         if args.footsies_wrapper_adv:
             env = FootsiesEncourageAdvance(
                 env,
@@ -273,6 +285,10 @@ def create_env(args: EnvArgs) -> Env:
 def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: int = logging.DEBUG, log_to_file: bool = True, multiprocessing: bool = False) -> logging.Logger:
     from logging.handlers import RotatingFileHandler
     from sys import stdout
+
+    # Capture all warnings that are issued with the `warnings` package.
+    # The advantage of `warnings` is that they are only issued once.
+    logging.captureWarnings(True)
 
     logger = logging.getLogger("main")
     logger.setLevel(logging.DEBUG)

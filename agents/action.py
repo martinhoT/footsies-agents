@@ -148,7 +148,7 @@ class ActionMap:
         """Obtain the simple action corresponding to the given `FootsiesMove`. \n\n NOTE: `N_SPECIAL` is not correctly classified when canceling into it from `N/B_ATTACK`"""
         return ActionMap.SIMPLE_FROM_MOVE_MAP[move]
 
-    # TODO: the very first frame of temporal actions is being counted as actionable
+    # NOTE: the very first frame of temporal actions is the action that originated that temporal action
     @staticmethod
     def simple_from_transition(previous_player_move_index: int, previous_opponent_move_index: int, previous_player_move_progress: float, previous_opponent_move_progress: float, player_move_index: int) -> int:
         """Correctly infer the simple action that was effectively performed in a game transition. If the action was ineffectual, return `None`. This is the method that should be used for obtaining simple actions from gameplay."""

@@ -77,18 +77,17 @@ class ActorNetwork(nn.Module):
     def consider_opponent_action(self) -> bool:
         return self._consider_opponent_action
     
-    def probabilities(self, obs: torch.Tensor, next_opponent_action: int | None) -> torch.Tensor:
-        """Get the action probability distribution for the given observation and predicted opponent action."""
+    def probabilities(self, obs: torch.Tensor, next_opponent_action: torch.Tensor | int | None) -> torch.Tensor:
+        """Get the action probability distribution for the given observation and predicted opponent action. If the next opponent action is a tensor, then it should be 1-dimensional."""
         if next_opponent_action is None:
             next_opponent_action = slice(None)
 
-        action_probabilities = self(obs)[:, next_opponent_action, :]
-        return action_probabilities
+        if isinstance(next_opponent_action, (int, slice)):
+            action_probabilities = self(obs)[:, next_opponent_action, :]
+            return action_probabilities
 
-    def probabilities_batch(self, obs: torch.Tensor, next_opponent_actions: torch.Tensor) -> torch.Tensor:
-        """Get the action probability distribution for the given batch of observations and predicted opponent actions (should be a 1-dimensional tensor)."""
         action_probabilities = self(obs)
-        return action_probabilities.take_along_dim(next_opponent_actions[:, None, None], dim=1)
+        return action_probabilities.take_along_dim(next_opponent_action[:, None, None], dim=1)
 
     def decision_distribution(self, obs: torch.Tensor, next_opponent_policy: torch.Tensor) -> Categorical:
         """Get the decision probabilities and distribution for the given observation and next opponent policy. The next opponent policy should have dimensions `batch_dim X opponent_action_dim`."""
@@ -398,18 +397,17 @@ class A2CQLearner(A2CLearnerBase):
         return self.actor.sample_action(obs, next_opponent_action=next_opponent_action).item()
 
     # @epoched(timesteps=2048, epochs=10, minibatch_size=64)
-    @epoched(timesteps=100, epochs=3, minibatch_size=50)
     def _update_actor(self, obs: torch.Tensor, opponent_action: torch.Tensor | int | None, agent_action: torch.Tensor | int, delta: torch.Tensor, *, epoch_data: dict = None):
         # Save the delta for tracking
         self.delta = delta.mean().item() # We might get a delta vector
         
         # Calculate the probability distribution at obs considering opponent action, and consider we did the given action
-        if opponent_action is None:
-            action_probabilities = self.actor.probabilities(obs, opponent_action)
-        else:
-            action_probabilities = self.actor.probabilities_batch(obs, opponent_action)
+        action_probabilities = self.actor.probabilities(obs, opponent_action)
         action_log_probabilities = torch.log(action_probabilities + 1e-8)
-        action_log_probability = action_log_probabilities.take_along_dim(agent_action[:, None, None], dim=-1)
+        if isinstance(agent_action, torch.Tensor):
+            action_log_probability = action_log_probabilities.take_along_dim(agent_action[:, None, None], dim=-1)
+        else:
+            action_log_probability = action_log_probabilities[..., agent_action]
 
         # Update the actor network
         self.actor_optimizer.zero_grad()

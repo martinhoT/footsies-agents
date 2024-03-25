@@ -5,6 +5,7 @@ from agents.torch_utils import create_layered_network, InputClip, DebugStoreRece
 from collections.abc import Generator
 from collections import deque
 from dataclasses import dataclass
+from math import log
 
 LOGGER = logging.getLogger("main.mimic")
 
@@ -26,7 +27,11 @@ class PlayerModelNetwork(nn.Module):
     ):
         super().__init__()
 
+        if use_sigmoid_output:
+            raise NotImplementedError("sigmoid output is not supported yet")
+
         self._action_dim = action_dim
+        self._use_sigmoid_output = use_sigmoid_output
 
         self.layers = create_layered_network(
             obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation
@@ -37,7 +42,9 @@ class PlayerModelNetwork(nn.Module):
         if input_clip:
             self.layers.append(InputClip(-1, 1, leaky_coef=input_clip_leaky_coef))
 
-        self.final = nn.Sigmoid() if use_sigmoid_output else nn.Softmax(dim=1)
+        self.sigmoid = nn.Sigmoid()
+        self.softmax = nn.Softmax(dim=1)
+        self.log_softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.layers(obs)
@@ -45,7 +52,12 @@ class PlayerModelNetwork(nn.Module):
     def probabilities(self, obs: torch.Tensor) -> torch.Tensor:
         """The action probabilities at the given observation."""
         logits = self(obs)
-        return self.final(logits)
+        return self.softmax(logits)
+
+    def log_probabilities(self, obs: torch.Tensor) -> torch.Tensor:
+        """The action log-probabilities at the given observation"""
+        logits = self(obs)
+        return self.log_softmax(logits)
 
     def distribution(self, obs: torch.Tensor) -> torch.distributions.Categorical:
         """The action distribution at the given observation."""
@@ -67,15 +79,14 @@ class ScarStore:
     - `update` the scar store
     """
 
-    def __init__(self, obs_dim: int, max_size: int = 1000, min_loss: float = 0.1):
+    def __init__(self, obs_dim: int, max_size: int = 1000, min_loss: float = 2.2):
         """
         A storage for scars, i.e. examples that exhibited larger-than-expected loss.
 
         Parameters
         ----------
         - `max_size`: the maximum number of scars we keep track of
-        - `min_loss`: the multiplicative threshold beyond which we detect a training example as being a scar
-          (e.g., 0.5 stands for 50% higher than the minimum loss)
+        - `min_loss`: the minimum loss value beyond which we detect a training example as being a scar
         """
         self._max_size = max_size
         self._min_loss = min_loss
@@ -94,7 +105,7 @@ class ScarStore:
     def include(self, obs: torch.Tensor, action: int, multiplier: float):
         """Include a new example into the scar store as another example."""
         if self._loss[self._idx] >= self._min_loss:
-            LOGGER.warning("The opponent model is forgetting scars! (previous loss: %s, minimum loss: %s). This might be a sign of either a small scar storage or an unforgiving minimum loss.", self._scars[self._idx].loss, self._min_loss)
+            LOGGER.warning("The opponent model is forgetting scars! (previous loss: %s, minimum loss: %s). This might be a sign of either a small scar storage or an unforgiving minimum loss.", self._loss[self._idx], self._min_loss)
         
         self._obs[self._idx, :] = obs
         self._action[self._idx] = action
@@ -109,9 +120,24 @@ class ScarStore:
 
     def update(self, loss: torch.Tensor):
         """Update the scar storage. The `loss` should be unreduced (e.g. no averaging over the batch), and thus have the same batch size as the other arguments."""
+        self._loss = loss
         # Invalidate examples that already have acceptable loss.
         # Setting the multiplier to 0 will make the example innefectual during training, and will effectively be ignored.
-        self._multiplier[loss < self._min_loss] = 0.0
+        self._multiplier[self._loss < self._min_loss] = 0.0
+    
+    @property
+    def min_loss(self) -> float:
+        """The minimum loss required to classify a training example as being a scar."""
+        return self._min_loss
+    
+    @min_loss.setter
+    def min_loss(self, min_loss: float):
+        self._min_loss = min_loss
+
+    @property
+    def max_size(self) -> int:
+        """The maximum number of scars we keep track of."""
+        return self._max_size
 
 
 class PlayerModel:
@@ -122,6 +148,7 @@ class PlayerModel:
         learning_rate: float = 1e-2,
         loss_dynamic_weights: bool = False,
         loss_dynamic_weights_max: float = 10.0,
+        entropy_coef: float = 0.0,
     ):
         """
         Player model for predicting actions given an observation.
@@ -143,15 +170,20 @@ class PlayerModel:
         - `loss_dynamic_weights`: whether to update the loss weights dynamically based on the action frequencies
         - `loss_dynamic_weights_max`: cap the loss weights to a maximum value, if dynamic weights are used.
         Since some actions can be very infrequent, it's easy for its weights to increase too much, creating gradients that are too big.
-        This parameter alleviates this problem.
+        This parameter alleviates this problem
+        - `entropy_coef`: the entropy regularization coefficient for the loss, implemented as a linear interpolation between the cross-entropy and the predicted distribution's entropy.
+        If 0, no entropy regularization is added to the loss.
+        If 1, then only entropy is maximized
         """
         self._network = player_model_network
-        self.scars = scar_store
-        self.loss_dynamic_weights = loss_dynamic_weights
-        self.loss_dynamic_weights_max = torch.tensor(loss_dynamic_weights_max)
+        self._scars = scar_store
+        self._loss_dynamic_weights = loss_dynamic_weights
+        self._loss_dynamic_weights_max = torch.tensor(loss_dynamic_weights_max)
+        # In the agent's policy, we perform entropy regularization but not as a linear interpolation.
+        # That's because in that case the values in this interpolation have vastly different scales (advantage vs entropy), which makes the coefficient awkward to tune.
+        # Here, since we are calculating entropies, we can expect values in similar ranges.
+        self._entropy_coef = entropy_coef
 
-        # Cross entropy loss
-        # TODO: check if even with "none" reduction the weights are applied
         self.loss_function = nn.CrossEntropyLoss(reduction="none")
 
         self.optimizer = torch.optim.SGD(params=self._network.parameters(), lr=learning_rate)
@@ -188,14 +220,15 @@ class PlayerModel:
         self._update_action_frequency(action)
 
         # Update the scar store
-        self.scars.include(obs, action, multiplier)
-        obs, action, multiplier = self.scars.batch
+        self._scars.include(obs, action, multiplier)
+        obs, action, multiplier = self._scars.batch
 
         # Update the network
         self.optimizer.zero_grad()
 
         predicted = self._network(obs)
-        loss = self.loss_function(predicted, action) * multiplier
+        distribution = torch.distributions.Categorical(logits=predicted)
+        loss = (self.loss_function(predicted, action) * (1 - self._entropy_coef) + -distribution.entropy() * self._entropy_coef) * multiplier
         # We need to manually perform the mean accoding to how many effective examples we have.
         # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended
         loss_agg = loss.sum() / multiplier.nonzero().size(dim=0)
@@ -204,7 +237,7 @@ class PlayerModel:
         self.optimizer.step()
 
         # Update the scar store with the newest losses
-        self.scars.update(loss)
+        self._scars.update(loss)
 
         # Check whether learning is dead
         if all(
@@ -246,18 +279,24 @@ class PlayerModel:
         self._action_counts[action] = self._action_counts[action] + 1
         self._action_counts_total += 1
 
-        if self.loss_dynamic_weights:
+        if self._loss_dynamic_weights:
             # Avoid infinities which are ugly, and too large weights as well
-            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self.loss_dynamic_weights_max)
+            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self._loss_dynamic_weights_max)
+        
+        else:
+            self.loss_function.weight = None
 
     def _reset_action_counts(self):
         """Reset the counts of the actions received by the model for updating. This should be done if the opponent changes, or after some time (if the opponent is adapting)."""
         self._action_counts = torch.zeros(self._network.action_dim)
         self._action_counts_total = 0
 
-        if self.loss_dynamic_weights:
-            # Avoid infinities which are ugly
-            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self.loss_dynamic_weights_max)
+        if self._loss_dynamic_weights:
+            # Avoid infinities which are ugly, and too large weights as well
+            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self._loss_dynamic_weights_max)
+        
+        else:
+            self.loss_function.weight = None
 
     @property
     def learnable_layers(self) -> Generator[nn.Module, None, None]:
@@ -290,9 +329,41 @@ class PlayerModel:
     @property
     def number_of_scars(self) -> int:
         """The total number of scars in effect."""
-        return self.scars._multiplier.nonzero().size(0) if self.scars is not None else 0
+        return self._scars._multiplier.nonzero().size(0) if self._scars is not None else 0
 
     @property
     def network(self) -> PlayerModelNetwork:
         """The predictor network of this player model."""
         return self._network
+    
+    @property
+    def scars(self) -> ScarStore:
+        """The scar store of this player model."""
+        return self._scars
+
+    @property
+    def loss_dynamic_weights(self) -> bool:
+        """Whether the loss weights are updated dynamically based on the action frequencies."""
+        return self._loss_dynamic_weights
+
+    @loss_dynamic_weights.setter
+    def loss_dynamic_weights(self, value: bool):
+        self._loss_dynamic_weights = value
+
+    @property
+    def loss_dynamic_weights_max(self) -> float:
+        """The maximum weight attributed when using dynamic class weights for the loss."""
+        return self._loss_dynamic_weights_max.item()
+
+    @loss_dynamic_weights_max.setter
+    def loss_dynamic_weights_max(self, value: float):
+        self._loss_dynamic_weights_max = torch.tensor(value)
+    
+    @property
+    def entropy_coef(self) -> float:
+        """The entropy regularization coefficient for the loss."""
+        return self._entropy_coef
+    
+    @entropy_coef.setter
+    def entropy_coef(self, value: float):
+        self._entropy_coef = value

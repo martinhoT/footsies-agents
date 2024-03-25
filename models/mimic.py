@@ -10,7 +10,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     dynamic_loss_weights: bool = True,
     learning_rate: float = 1e-2,
     scar_size: int = 1000,
-    scar_min_loss: float = 0.1,
+    scar_min_loss: float = 10.0,
 ) -> tuple[MimicAgent, dict[str, list]]:
 
     obs_dim = observation_space_size

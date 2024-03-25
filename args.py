@@ -134,6 +134,8 @@ class EnvArgs:
     """Use the Encourage Advance wrapper for FOOTSIES"""
     footsies_wrapper_phasic: bool = False
     """Use the Phasic Move Progress wrapper for FOOTSIES"""
+    footsies_wrapper_history: Dict[str, int | float | bool | str] | None = None
+    """Use the Simple History wrapper for FOOTSIES, if not `None`. This specifies the arguments that should be passed to the wrapper (`p{1,2}`, `p{1,2}_n` and `p{1,2}_distinct`)"""
     
     torch: bool = False
     """Whether to transform environment observations to torch tensors"""

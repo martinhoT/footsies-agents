@@ -9,16 +9,22 @@ from footsies_gym.moves import FootsiesMove
 from scripts.analysis.analysis import Analyser
 from agents.action import ActionMap
 from main import load_agent
-from analyse_a2c_qlearner import QLearnerAnalyserManager
-from analyse_opponent_model import MimicAnalyserManager
+from scripts.analysis.analyse_a2c_qlearner import QLearnerAnalyserManager
+from scripts.analysis.analyse_opponent_model import MimicAnalyserManager
 from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
-from main import setup_logger
+from main import setup_logger, load_agent, load_agent_parameters, import_agent
 from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher
 from agents.utils import FootsiesPhasicMoveProgress
 from agents.logger import TrainingLoggerWrapper
 import logging
 
+
+CUSTOM = False
+MODEL = "to"
+NAME = "curriculum_ppo"
+LOAD = True
+LOG = False
 
 if __name__ == "__main__":
 
@@ -53,39 +59,48 @@ if __name__ == "__main__":
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
 
-    agent, loggables = to_no_specials_(
-        env.observation_space.shape[0],
-        env.action_space.n,
-        rollback=True,
+    if CUSTOM:
+        agent, loggables = to_(
+            env.observation_space.shape[0],
+            env.action_space.n,
+            rollback=True,
 
-        actor_entropy_coef=0.1,
-        critic_agent_update="expected_sarsa",
-        critic_opponent_update="q_learning",
-        critic_target_update_rate=100000,
-        broadcast_at_frameskip=False,
-        alternative_advantage=True,
-        # critic_table=True,
-    )
+            actor_entropy_coef=0.1,
+            critic_agent_update="expected_sarsa",
+            critic_opponent_update="q_learning",
+            critic_target_update_rate=100000,
+            broadcast_at_frameskip=False,
+            alternative_advantage=True,
+        )
+    
+    else:
+        parameters = load_agent_parameters(NAME)
+        agent, loggables = import_agent(MODEL, env, parameters)
 
-    logged_agent = TrainingLoggerWrapper(
-        agent,
-        10000,
-        log_dir="runs/analysis",
-        episode_reward=True,
-        average_reward=True,
-        win_rate=True,
-        truncation=True,
-        episode_length=True,
-        test_states_number=1,
-        **loggables,
-    )
+    if LOG:
+        logged_agent = TrainingLoggerWrapper(
+            agent,
+            10000,
+            log_dir="runs/analysis",
+            episode_reward=True,
+            average_reward=True,
+            win_rate=True,
+            truncation=True,
+            episode_length=True,
+            test_states_number=1,
+            **loggables,
+        )
 
-    logged_agent.preprocess(env)
+        logged_agent.preprocess(env)
+    
+    else:
+        logged_agent = agent
 
     # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
     # idle_distribution[0, 0] = 1.0
 
-    load_agent(agent, "curriculum_granular_fs")
+    if LOAD:
+        load_agent(agent, NAME)
 
     def spammer():
         from itertools import cycle

@@ -56,6 +56,7 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_info = None
 
         self._test_observations = None
+        self._test_actions = None
 
         # Logging
         self._p1_cumulative_loss = 0
@@ -129,12 +130,12 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def _initialize_test_states(self, test_states: List[torch.Tensor]):
         if self._test_observations is None:
-            test_observations, _ = zip(*test_states)
+            # Only consider observations in which an action was performed (this is not the case, for instance, when the environment terminates)
+            test_observations, test_actions = zip(*filter(lambda st: st[1] is not None, test_states))
             self._test_observations = torch.vstack(test_observations)
+            self._test_actions = torch.tensor(test_actions, dtype=torch.long).view(-1, 1)
 
-    def evaluate_divergence_between_players(
-        self, test_states: List[tuple[Any, Any]]
-    ) -> float:
+    def evaluate_divergence_between_players(self, test_states: List[tuple[Any, Any]]) -> float:
         """
         Kullback-Leibler divergence between player 1 and player 2 (i.e. the excess surprise of using player 2's model when it is actually player 1's).
         
@@ -143,23 +144,33 @@ class FootsiesAgent(FootsiesAgentBase):
         self._initialize_test_states(test_states)
 
         with torch.no_grad():
-            p1_probs = self.p1_model.network.probabilities(self._test_observations).detach()
-            p2_probs = self.p2_model.network.probabilities(self._test_observations).detach()
-            divergence = nn.functional.kl_div(p1_probs.log(), p2_probs.log(), reduction="batchmean", log_target=True)
+            p1_probs = self.p1_model.network.log_probabilities(self._test_observations).detach()
+            p2_probs = self.p2_model.network.log_probabilities(self._test_observations).detach()
+            divergence = nn.functional.kl_div(p2_probs, p1_probs, reduction="batchmean", log_target=True)
 
         return divergence
 
-    def evaluate_decision_entropy(
-        self, test_states: List[torch.Tensor], p1: bool
-    ) -> float:
+    def evaluate_decision_entropy(self, test_states: List[torch.Tensor], p1: bool) -> float:
+        """Evaluate the entropy of the predicted probability distribution at the given test states."""
         self._initialize_test_states(test_states)
 
         return self.decision_entropy(self._test_observations, p1=p1).mean().item()
 
+    def evaluate_prediction_score(self, test_states: List[torch.Tensor], p1: bool):
+        """
+        Evaluate the prediction score of the player model at the given test states.
+        
+        The prediction score is the sum of probabilities of the true actions under the predicted distribution, over the total number of test states.
+        Should be as close to 1 as possible.
+        """
+        self._initialize_test_states(test_states)
+
+        model = self.p1_model if p1 else self.p2_model
+
+        return model.probabilities(self._test_observations).gather(1, self._test_actions).sum().item() / len(test_states)
+
     # NOTE: this only works if the class was defined to be over primitive actions
-    def extract_policy(
-        self, env: Env, use_p1: bool = True
-    ) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_policy(self, env: Env, use_p1: bool = True) -> Callable[[dict], Tuple[bool, bool, bool]]:
         model_to_use = self._p1_model if use_p1 else self._p2_model
         obs_mask = self._p1_model.obs_mask if use_p1 else self._p2_model.obs_mask
 
