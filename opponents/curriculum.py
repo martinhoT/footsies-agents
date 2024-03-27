@@ -117,7 +117,7 @@ class CurriculumOpponent(ABC):
         """The method by which the opponent performs actions."""
 
     @abstractmethod
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         """Return the probability distribution of the action that the agent will perform next (the next `act` call). Both observation and the probability distribution are tensors."""
 
     @property
@@ -137,7 +137,7 @@ class Idle(CurriculumOpponent):
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return (False, False, False)
     
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         return self._probs
 
     @property
@@ -153,7 +153,7 @@ class Backer(CurriculumOpponent):
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return (False, True, False)
 
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         return self._probs
 
     @property
@@ -173,7 +173,7 @@ class NSpammer(CurriculumOpponent):
         
         return next(self._action_cycle)
     
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         if self._peeked_action is None:
             self._peeked_action = next(self._action_cycle)
 
@@ -215,7 +215,7 @@ class BSpammer(CurriculumOpponent):
         
         return next(self._action_cycle)
 
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         if self._peeked_action is None:
             self._peeked_action = next(self._action_cycle)
         
@@ -254,7 +254,7 @@ class NSpecialSpammer(CurriculumOpponent):
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return next(self._action_cycle)
     
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         return self._probs
 
     @property
@@ -277,7 +277,7 @@ class BSpecialSpammer(CurriculumOpponent):
     def act(self, obs: dict) -> tuple[bool, bool, bool]:
         return next(self._action_cycle)
     
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         return self._probs
 
     @property
@@ -321,13 +321,7 @@ class WhiffPunisher(CurriculumOpponent):
         # Don't get too close to the opponent
         return FootsiesMove.BACKWARD
 
-    # NOTE: keep in mind that the opponent has actions inverted, so FORWARD -> BACKWARD and vice versa
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
-        # If there were actions that was previously queued, perform them.
-        # We also clean up the discrete action queue since they should be in sync.
-        if self._primitive_action_queue:
-            return self._primitive_action_queue.popleft()
-
+    def _advance_action(self, obs: dict):
         agent_move = ActionMap.move_from_move_index(obs["move"][0])
 
         simple_action = self._compute_action(
@@ -341,26 +335,22 @@ class WhiffPunisher(CurriculumOpponent):
         # We need to correct the action since it will be performed on the other side of the screen
         self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
 
+    # NOTE: keep in mind that the opponent has actions inverted, so FORWARD -> BACKWARD and vice versa
+    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+        # If there were actions that was previously queued, perform them.
+        # We also clean up the discrete action queue since they should be in sync.
+        if self._primitive_action_queue:
+            return self._primitive_action_queue.popleft()
+
+        self._advance_action(obs)
+
         return self._primitive_action_queue.popleft()
 
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         if self._primitive_action_queue:
             return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
         
-        agent_move_idx = torch.argmax(next_obs[0, 2:17]).item()
-        agent_move = ActionMap.move_from_move_index(agent_move_idx)
-        move_frame = round(next_obs[0, 33].item() * agent_move.value.duration)
-
-        simple_action = self._compute_action(
-            agent_move=agent_move,
-            agent_move_frame=move_frame,
-            agent_position=next_obs[0, 0].item(),
-            our_position=next_obs[0, 1].item(),
-        )
-
-        self._simple_action = ActionMap.simple_from_move(simple_action)
-        # We need to correct the action since it will be performed on the other side of the screen
-        self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
+        self._advance_action(next_obs)
 
         return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
 
@@ -407,12 +397,7 @@ class UnsafePunisher(CurriculumOpponent):
         # Stand idle by default
         return FootsiesMove.STAND
 
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
-        # If there were actions that was previously queued, perform them.
-        # We also clean up the discrete action queue since they should be in sync.
-        if self._primitive_action_queue:
-            return self._primitive_action_queue.popleft()
-        
+    def _advance_action(self, obs: dict):
         agent_move = ActionMap.move_from_move_index(obs["move"][0])
         our_move = ActionMap.move_from_move_index(obs["move"][1])   
 
@@ -422,22 +407,21 @@ class UnsafePunisher(CurriculumOpponent):
         # We need to correct the action since it will be performed on the other side of the screen
         self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
 
+    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+        # If there were actions that was previously queued, perform them.
+        # We also clean up the discrete action queue since they should be in sync.
+        if self._primitive_action_queue:
+            return self._primitive_action_queue.popleft()
+        
+        self._advance_action(obs)
+
         return self._primitive_action_queue.popleft()
 
-    def peek(self, next_obs: torch.Tensor) -> torch.Tensor:
+    def peek(self, next_obs: dict) -> torch.Tensor:
         if self._primitive_action_queue:
             return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
 
-        agent_move_idx = torch.argmax(next_obs[0, 2:17]).item()
-        agent_move = ActionMap.move_from_move_index(agent_move_idx)
-        our_move_idx = torch.argmax(next_obs[0, 17:32]).item()
-        our_move = ActionMap.move_from_move_index(our_move_idx)
-
-        simple_action = self._compute_action(agent_move, our_move)
-
-        self._simple_action = ActionMap.simple_from_move(simple_action)
-        # We need to correct the action since it will be performed on the other side of the screen
-        self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
+        self._advance_action(next_obs)
 
         return nn.functional.one_hot(torch.tensor(self._simple_action), num_classes=ActionMap.n_simple()).float()
 

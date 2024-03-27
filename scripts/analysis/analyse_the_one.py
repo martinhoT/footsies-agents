@@ -22,7 +22,7 @@ import logging
 
 CUSTOM = False
 MODEL = "to"
-NAME = "curriculum_ppo"
+NAME = "curriculum_wrappers"
 LOAD = True
 LOG = False
 
@@ -41,19 +41,19 @@ if __name__ == "__main__":
         sync_mode="synced_non_blocking",
         fast_forward=False,
         dense_reward=False,
-        vs_player=True,
-        # opponent=custom_opponent.act,
+        # vs_player=True,
+        opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
         FootsiesActionCombinationsDiscretized(
             FlattenObservation(
-                # FootsiesPhasicMoveProgress(
+                FootsiesPhasicMoveProgress(
                     FootsiesNormalized(
                         footsies_env,
-                        # normalize_guard=False,
+                        normalize_guard=False,
                     )
-                # )
+                )
             )
         ),
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
@@ -152,6 +152,8 @@ if __name__ == "__main__":
         
         if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
             obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
+            if custom_opponent is not None:
+                next_info["next_opponent_policy"] = custom_opponent.peek(next_info)
             logged_agent.update(next_obs, reward, terminated, truncated, next_info)
 
     def act(obs, info):
