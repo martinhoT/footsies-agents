@@ -237,7 +237,7 @@ class PlayerModel:
         self.optimizer.step()
 
         # Update the scar store with the newest losses
-        self._scars.update(loss)
+        self._scars.update(loss.detach())
 
         # Check whether learning is dead
         if all(

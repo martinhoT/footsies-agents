@@ -75,6 +75,7 @@ if __name__ == "__main__":
     
     else:
         parameters = load_agent_parameters(NAME)
+        parameters["rollback"] = True
         agent, loggables = import_agent(MODEL, env, parameters)
 
     if LOG:

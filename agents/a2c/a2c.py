@@ -396,33 +396,55 @@ class A2CQLearner(A2CLearnerBase):
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
         return self.actor.sample_action(obs, next_opponent_action=next_opponent_action).item()
 
-    # @epoched(timesteps=2048, epochs=10, minibatch_size=64)
-    def _update_actor(self, obs: torch.Tensor, opponent_action: torch.Tensor | int | None, agent_action: torch.Tensor | int, delta: torch.Tensor, *, epoch_data: dict = None):
-        # Save the delta for tracking
-        self.delta = delta.mean().item() # We might get a delta vector
-        
-        # Calculate the probability distribution at obs considering opponent action, and consider we did the given action
+    @epoched(timesteps=256, epochs=5, minibatch_size=32)
+    def _update_actor_ppo(self, obs: torch.Tensor, opponent_action: torch.Tensor | int, agent_action: torch.Tensor | int, delta: torch.Tensor, *, epoch_data: dict = None):
         action_probabilities = self.actor.probabilities(obs, opponent_action)
         action_log_probabilities = torch.log(action_probabilities + 1e-8)
-        if isinstance(agent_action, torch.Tensor):
-            action_log_probability = action_log_probabilities.take_along_dim(agent_action[:, None, None], dim=-1)
-        else:
-            action_log_probability = action_log_probabilities[..., agent_action]
+        action_log_probability = action_log_probabilities.take_along_dim(agent_action[:, None, None], dim=-1)
 
         # Update the actor network
         self.actor_optimizer.zero_grad()
 
         actor_entropy = -torch.sum(action_log_probabilities * action_probabilities, dim=-1)
-        if self._ppo_objective:
-            if epoch_data is not None:
-                old_action_log_probability = epoch_data.setdefault("action_log_probability", action_log_probability.detach())
-            else:
-                old_action_log_probability = action_log_probability.detach()
 
-            ratio = (action_log_probability / old_action_log_probability).squeeze()
-            actor_delta = torch.min(self.cumulative_discount * delta * ratio, self.cumulative_discount * delta * torch.clamp(ratio, 1 - self._ppo_objective_clip_coef, 1 + self._ppo_objective_clip_coef))
+        if epoch_data is not None:
+            old_action_log_probability = epoch_data.setdefault("action_log_probability", action_log_probability.detach())
         else:
-            actor_delta = self.cumulative_discount * delta * action_log_probability
+            old_action_log_probability = action_log_probability.detach()
+
+        ratio = (action_log_probability / old_action_log_probability).squeeze()
+        actor_delta = torch.min(self.cumulative_discount * delta * ratio, self.cumulative_discount * delta * torch.clamp(ratio, 1 - self._ppo_objective_clip_coef, 1 + self._ppo_objective_clip_coef))
+
+        actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy.mean()
+        actor_score.backward()
+
+        if self._actor_gradient_clipping is not None:
+            nn.utils.clip_grad.clip_grad_norm_(self.actor.parameters(), self._actor_gradient_clipping)
+
+        self.actor_optimizer.step()
+
+        if LOGGER.isEnabledFor(logging.DEBUG):
+            LOGGER.debug("Gradient step for the actor performed with score %s", actor_score.item())
+
+    def _update_actor(self, obs: torch.Tensor, opponent_action: int | None, agent_action: int, delta: torch.Tensor):
+        # Save the delta for tracking
+        self.delta = delta.mean().item() # We might get a delta vector
+        
+        # If we are utilizing the PPO clipped objective, which requires epoched computation, we offload it to an epoched method
+        if self._ppo_objective:
+            self._update_actor_ppo(obs, opponent_action, agent_action, delta)
+            return
+        
+        # Calculate the probability distribution at obs considering opponent action, and consider we did the given action
+        action_probabilities = self.actor.probabilities(obs, opponent_action)
+        action_log_probabilities = torch.log(action_probabilities + 1e-8)
+        action_log_probability = action_log_probabilities[..., agent_action]
+
+        # Update the actor network
+        self.actor_optimizer.zero_grad()
+
+        actor_entropy = -torch.sum(action_log_probabilities * action_probabilities, dim=-1)
+        actor_delta = self.cumulative_discount * delta * action_log_probability
         actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy.mean()
         actor_score.backward()
 

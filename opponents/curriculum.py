@@ -77,7 +77,7 @@ class CurriculumManager(OpponentManager):
 
             new_opponent = self._advance()
 
-            LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
+            LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} episodes after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
             opponent_change = True
 
         else:
@@ -270,6 +270,7 @@ class NSpecialSpammer(CurriculumOpponent):
 
 class BSpecialSpammer(CurriculumOpponent):
     def __init__(self):
+        self.reset()
         self._probs = torch.zeros((ActionMap.n_simple(),)).float()
         self._probs[ActionMap.simple_from_move(FootsiesMove.B_SPECIAL)] = 1.0
     

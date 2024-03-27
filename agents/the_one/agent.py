@@ -12,7 +12,7 @@ from agents.the_one.model import FullModel, RepresentationModule, AbstractGameMo
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
 from agents.a2c.a2c import ActorNetwork
-from agents.mimic.mimic import PlayerModel
+from agents.mimic.agent import FootsiesAgent as MimicAgent
 from agents.torch_utils import observation_invert_perspective_flattened
 from data import FootsiesDataset
 
@@ -30,7 +30,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Modules
         a2c: A2CAgent,
         representation: RepresentationModule | None = None,
-        opponent_model: PlayerModel | None = None,
+        opponent_model: MimicAgent | None = None,
         game_model: AbstractGameModel | None = None,
         reaction_time_emulator: ReactionTimeEmulator | None = None,
         # Modifiers
@@ -81,7 +81,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         # To report in the `model` property
         self._full_model = FullModel(
             game_model=self.game_model,
-            opponent_model=None if self.opponent_model is None else self.opponent_model._network,
+            opponent_model=None if self.opponent_model is None else self.opponent_model.p2_model.network,
             actor_critic=self.a2c.model,
         )
 
@@ -108,7 +108,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self._cumulative_loss_game_model_n = 0
         self._cumulative_loss_opponent_model = 0
         self._cumulative_loss_opponent_model_n = 0
-        self._test_observations = []
+        self._test_observations = None
 
     def env_concat(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -126,6 +126,8 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         The final step is computed as `mtx @ obs + bias`
         """
+        raise NotImplementedError("not supported")
+    
         if len(self.game_model.game_model_layers) > 1:
             raise ValueError("the game model must be linear to use this method")
         if len(self.opponent_model.opponent_model_layers) > 1:
@@ -176,13 +178,13 @@ class FootsiesAgent(FootsiesAgentTorch):
     def act(self, obs: torch.Tensor, info: dict) -> int:
         # Update the reaction time emulator and subsitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
-            decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation)
+            decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, self.opponent_model.p2_model.probabilities(self.current_observation))
             obs, _ = self.reaction_time_emulator.register_and_perceive(obs, decision_distribution)
 
         self.current_observation = obs
         self.current_info = info
         if self.opponent_model is not None:
-            predicted_opponent_action = self.opponent_model.predict(obs)
+            predicted_opponent_action = self.opponent_model.p2_model.predict(obs)
         elif self.rollback_as_opponent_model:
             predicted_opponent_action = self.previous_valid_opponent_action
         else:
@@ -208,16 +210,14 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.opponent_model is not None:
             if "next_opponent_policy" in info:
                 warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
-            info["next_opponent_policy"] = self.opponent_model.probabilities(next_obs)
+            info["next_opponent_policy"] = self.opponent_model.p2_model.probabilities(next_obs).T
 
         # Update the different models
         self.a2c.update(next_obs, reward, terminated, truncated, info)
         if self.game_model is not None:
             self._update_game_model(self.current_observation, agent_action, opponent_action, next_obs)
         if self.opponent_model is not None and opponent_action is not None:
-            loss = self.opponent_model.update(self.current_observation, opponent_action)
-            self._cumulative_loss_opponent_model += loss
-            self._cumulative_loss_opponent_model_n += 1
+            self.opponent_model.update_with_simple_actions(self.current_observation, None, opponent_action)
 
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
@@ -358,8 +358,7 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         # Load opponent model (even though this is meant to be discardable)
         if self.opponent_model is not None:
-            opponent_model_path = os.path.join(folder_path, "opponent_model")
-            self.opponent_model.load(opponent_model_path)
+            self.opponent_model.load(folder_path)
 
     def save(self, folder_path: str):
         # Save actor-critic
@@ -372,8 +371,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         
         # Save opponent model (even though this is meant to be discardable)
         if self.opponent_model is not None:
-            opponent_model_path = os.path.join(folder_path, "opponent_model")
-            self.opponent_model.save(opponent_model_path)
+            self.opponent_model.save(folder_path)
 
     def evaluate_average_loss_game_model_and_clear(self) -> float:
         res = (
@@ -385,22 +383,7 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         return res
 
-    def evaluate_average_loss_opponent_model_and_clear(self) -> float:
-        res = (
-            self._cumulative_loss_opponent_model / self._cumulative_loss_opponent_model_n
-        ) if self._cumulative_loss_opponent_model_n != 0 else 0
-
-        self._cumulative_loss_opponent_model = 0
-        self._cumulative_loss_opponent_model_n = 0
-
-        return res
-
     def _initialize_test_states(self, test_states: list[torch.Tensor]):
         if self._test_observations is None:
             test_observations, _ = zip(*test_states)
             self._test_observations = torch.vstack(test_observations)
-
-    def evaluate_average_opponent_model_entropy(self, test_states: list[torch.Tensor]) -> float:
-        self._initialize_test_states(test_states)
-
-        return self.opponent_model.network.distribution(self._test_observations).entropy().mean()

@@ -7,6 +7,7 @@ from agents.a2c.a2c import A2CQLearner, ActorNetwork
 from agents.ql.ql import QFunctionNetwork, QNetwork, QFunctionTable
 from agents.the_one.loggables import get_loggables
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
+from agents.mimic.agent import FootsiesAgent as MimicAgent
 from agents.the_one.reaction_time import ReactionTimeEmulator
 
 
@@ -27,9 +28,9 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     opponent_model_dynamic_loss_weights: bool = True,
     
     # Highly-tunable hyperparameters
-    actor_lr: float = 1e-2,
+    actor_lr: float = 3e-2,
     critic_lr: float = 1e-2,
-    actor_entropy_coef: float = 0.02,
+    actor_entropy_coef: float = 0.04,
     actor_gradient_clipping: float = 0.5,
     critic_discount: float = 0.9,
 
@@ -120,7 +121,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     )
 
     if use_opponent_model:
-        opponent_model = PlayerModel(
+        player_model = PlayerModel(
             player_model_network=PlayerModelNetwork(
                 obs_dim=obs_dim,
                 action_dim=opponent_action_dim,
@@ -132,11 +133,18 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             ),
             scar_store=ScarStore(
                 obs_dim=obs_dim,
-                max_size=1000,
-                min_loss=0.1,
+                max_size=1,
+                min_loss=float("+inf"),
             ),
             learning_rate=1e-2,
             loss_dynamic_weights=opponent_model_dynamic_loss_weights,
+        )
+
+        opponent_model = MimicAgent(
+            action_dim=opponent_action_dim,
+            by_primitive_actions=False,
+            p1_model=None,
+            p2_model=player_model,
         )
 
     else:
