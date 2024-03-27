@@ -7,8 +7,9 @@ $agent_script \
     --self-play.enabled \
     --self-play.max-opponents 10 \
     --self-play.snapshot-interval 2000 \
-    --self-play.switch-interval 500 \
+    --self-play.switch-interval 1000 \
     --self-play.mix-bot 1 \
+    --self-play.add-curriculum-opps \
     --env.wrapper-time-limit 1000 \
     --env.kwargs \
         sync_mode synced_non_blocking

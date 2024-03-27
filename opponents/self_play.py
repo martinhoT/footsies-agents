@@ -131,7 +131,8 @@ class SelfPlayManager(OpponentManager):
         if self.episode % self.switch_interval == 0 or surpassed_opponent:
             self._current_opponent = self._sample_opponent()
             LOGGER.info("Switched to a new opponent at episode %s! (%s)", self.episode, self._current_opponent)
-            league_info = '\n'.join(map(str, [self._ingame_bot] + list(self.opponent_pool)))
+            league_info = "\n".join(map(str, [self._ingame_bot] + list(self.opponent_pool)))
+            league_info += f"\nAgent (Elo: {self.elo})"
             LOGGER.info("League: %s", league_info)
 
             self._current_n_games = 0
@@ -160,7 +161,8 @@ class SelfPlayManager(OpponentManager):
     
     @property
     def exhausted(self) -> bool:
-        return True
+        # It's never exhausted
+        return False
 
     def populate_with_curriculum_opponents(self, *opponents: CurriculumOpponent):
         """Populate the opponent pool with the given custom opponents pre-made for curriculum learning."""

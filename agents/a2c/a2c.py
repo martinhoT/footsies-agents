@@ -89,14 +89,20 @@ class ActorNetwork(nn.Module):
         action_probabilities = self(obs)
         return action_probabilities.take_along_dim(next_opponent_action[:, None, None], dim=1)
 
-    def decision_distribution(self, obs: torch.Tensor, next_opponent_policy: torch.Tensor) -> Categorical:
+    def decision_distribution(self, obs: torch.Tensor, next_opponent_policy: torch.Tensor, detached: bool = False) -> Categorical:
         """Get the decision probabilities and distribution for the given observation and next opponent policy. The next opponent policy should have dimensions `batch_dim X opponent_action_dim`."""
-        probs = next_opponent_policy @ self.probabilities(obs, None)
+        actor_probs = self.probabilities(obs, None)
+        if detached:
+            actor_probs = actor_probs.detach()
+        probs = next_opponent_policy @ actor_probs
+        # Squeeze the inner 1 dimension which is a consequence of 2D @ 3D tensor multiplication.
+        # Example: 1x9 @ {1}x9x7 is equivalent to {1} matrix multiplication of 1x9 @ 9x7 -> 1x7, and so the output is {1}x1x7.
+        probs = probs.squeeze(1)
         distribution = Categorical(probs=probs)
         return distribution
 
     def sample_action(self, obs: torch.Tensor, next_opponent_action: int) -> torch.Tensor:
-        """Randomly sample an action."""
+        """Randomly sample an action. This should be essentially the same as sampling from the `decision_distribution`, if `next_opponent_action` was sampled from `next_opponent_policy`."""
         action_probabilities = self.probabilities(obs, next_opponent_action)
         action_distribution = Categorical(probs=action_probabilities)
         action = action_distribution.sample()

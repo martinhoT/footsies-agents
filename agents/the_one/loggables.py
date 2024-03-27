@@ -24,6 +24,9 @@ def get_loggables(agent: FootsiesAgent):
         custom_evaluators.extend(mimic_loggables["custom_evaluators"])
         custom_evaluators_over_test_states.extend(mimic_loggables["custom_evaluators_over_test_states"])
 
+    if agent.reaction_time_emulator is not None:
+        custom_evaluators.append(("Training/Reaction time", lambda: agent.reaction_time_emulator.previous_reaction_time))
+
     return {
         "network_histograms": network_histograms,
         "custom_evaluators": custom_evaluators,

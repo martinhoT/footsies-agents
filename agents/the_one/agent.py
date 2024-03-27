@@ -62,6 +62,10 @@ class FootsiesAgent(FootsiesAgentTorch):
             raise ValueError("can't have an opponent model when using the rollback strategy as an opponent predictor, can only use one or the other")
         if game_model is not None:
             raise ValueError("using a game model is not supported")
+        if reaction_time_emulator is not None and opponent_model is None:
+            raise ValueError("can't use reaction time without an opponent model, since reaction time depends on how well we model the opponent's behavior")
+
+        LOGGER.info("Agent was setup with opponent prediction strategy: %s", "rollback" if rollback_as_opponent_model else "opponent model" if opponent_model is not None else "random (unless doing curriculum learning)")
 
         # Store required values
         #  Dimensions
@@ -176,10 +180,16 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     # It's in this function that the current observation and representation variables are updated
     def act(self, obs: torch.Tensor, info: dict) -> int:
-        # Update the reaction time emulator and subsitute obs with a perceived observation, which is delayed.
+        # Update the reaction time emulator and substitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
-            decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, self.opponent_model.p2_model.probabilities(self.current_observation))
-            obs, _ = self.reaction_time_emulator.register_and_perceive(obs, decision_distribution)
+            if self.current_observation is None:
+                self.reaction_time_emulator.fill_history(obs)
+                self.current_observation = obs
+
+            else:
+                opponent_distribution = self.opponent_model.p2_model.probabilities(self.current_observation)
+                decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, opponent_distribution, detached=True)
+                obs, _ = self.reaction_time_emulator.register_and_perceive(obs, decision_distribution.entropy().item())
 
         self.current_observation = obs
         self.current_info = info
@@ -199,6 +209,12 @@ class FootsiesAgent(FootsiesAgentTorch):
         return action
 
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
+        # Update the reaction time emulator and substitute next_obs with a perceived observation, which is delayed
+        if self.reaction_time_emulator is not None:
+            opponent_distribution = self.opponent_model.p2_model.probabilities(self.current_observation)
+            decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, opponent_distribution, detached=True)
+            next_obs, _ = self.reaction_time_emulator.register_and_perceive(next_obs, decision_distribution.entropy().item())
+
         # Get the actions that were effectively performed by each player on the previous step
         agent_action, opponent_action = ActionMap.simples_from_transition_ori(self.current_info, info)
         if self.remove_agent_special_moves:
@@ -224,6 +240,10 @@ class FootsiesAgent(FootsiesAgentTorch):
         # that originated the temporal action in the first place. This is important for the rollback-based prediction strategy.
         # This variable is only used for the rollback-based prediction anyway.
         self.previous_valid_opponent_action = opponent_action if opponent_action is not None else self.previous_valid_opponent_action
+
+        # The reaction time emulator needs to know when an episode terminated
+        if terminated or truncated:
+            self.current_observation = None
 
     def _update_game_model(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
         """Calculate the game model loss, backpropagate and optimize"""
@@ -282,7 +302,7 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     # NOTE: extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        actor = self.a2c._actor.clone()
+        actor = self.a2c.learner.actor.clone()
 
         class ExtractedPolicy:
             def __init__(self, actor: ActorNetwork, deterministic: bool = False):
@@ -299,7 +319,7 @@ class FootsiesAgent(FootsiesAgentTorch):
                 previous_observation = getattr(actor, "previous_observation__") if hasattr(actor, "previous_observation__") else None
                 if previous_observation is not None:
                     # Weak, rollback-inspired opponent model: if the opponent did action X, then they will keep doing X
-                    _, opp_action = ActionMap.simples_from_torch_transition(actor.previous_observation__, obs)
+                    _, opp_action = ActionMap.simples_from_transition_torch(actor.previous_observation__, obs)
                 
                 # When in doubt, assume the opponent is standing
                 if opp_action is None:

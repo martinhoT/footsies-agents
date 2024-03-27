@@ -22,7 +22,7 @@ class CurriculumManager(OpponentManager):
     ):
         self._win_rate_threshold = win_rate_threshold
     
-        self._next_opponent_idx = 1
+        self._current_opponent_idx = 0
         self._opponents = sorted([
             Idle(),
             Backer(),
@@ -52,12 +52,12 @@ class CurriculumManager(OpponentManager):
         """Advance to the next opponent. The next opponent to which this method advances is returned. If the returned opponent is `None`, then the curriculum is complete."""
         self._agent_wins.clear()
         self._current_episodes = 0
+        self._current_opponent_idx += 1 # this will increase indefinitely with every _advance call but whatever it shouldn't even happen
 
-        if self._next_opponent_idx >= len(self._opponents):
+        if self.exhausted:
             return None
 
-        new_opponent = self._opponents[self._next_opponent_idx]
-        self._next_opponent_idx += 1
+        new_opponent = self.current_curriculum_opponent
         return new_opponent
     
     def update_at_episode(self, game_result: float):
@@ -95,11 +95,11 @@ class CurriculumManager(OpponentManager):
 
     @property
     def current_opponent(self) -> Callable[[dict], tuple[bool, bool, bool]]:
-        return self._opponents[self._next_opponent_idx - 1].act
+        return self.current_curriculum_opponent.act
 
     @property
     def exhausted(self) -> bool:
-        return self._next_opponent_idx >= len(self._opponents)
+        return self._current_opponent_idx >= len(self._opponents)
     
     @property
     def current_recent_win_rate(self) -> float:
@@ -107,7 +107,7 @@ class CurriculumManager(OpponentManager):
 
     @property
     def current_curriculum_opponent(self) -> "CurriculumOpponent":
-        return self._opponents[self._next_opponent_idx - 1]
+        return self._opponents[self._current_opponent_idx]
 
 
 class CurriculumOpponent(ABC):

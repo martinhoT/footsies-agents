@@ -158,7 +158,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             multiplier=1.0,
             additive=0.0,
         )
-        reaction_time_emulator.confine_to_range(15, 30, action_dim)
+        reaction_time_emulator.confine_to_range(15, 29, action_dim)
 
     else:
         reaction_time_emulator = None

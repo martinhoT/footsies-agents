@@ -1,7 +1,6 @@
 import numpy as np
 from typing import Callable, TypeVar
 from collections import deque
-from torch.distributions import Categorical
 
 
 T = TypeVar("T")
@@ -31,7 +30,7 @@ class ReactionTimeEmulator:
         self._history_size = history_size
 
         self._observations = deque([], maxlen=history_size)
-        self._previous_reaction_time = float("+inf")
+        self._previous_reaction_time = history_size
 
         # Pre-made values that are useful for computation
         inaction_distribution = self.bernoulli_distribution(self._inaction_probability)
@@ -115,23 +114,25 @@ class ReactionTimeEmulator:
         
         return np.sum(opponent_distribution * agent_distribution_matrix, axis=0).squeeze()
 
-    def reaction_time(self, decision_distribution: Categorical, previous_reaction_time: int = None) -> int:
+    def reaction_time(self, decision_entropy: float, previous_reaction_time: int = None) -> int:
         """
         Calculate reaction time in time steps given a decision distribution.
         
         Parameters
         ----------
-        - `decision_distribution`: the probability distribution of the decision, ideally calculated using the `decision_distribution()` method
+        - `decision_distribution`: the entropy of the probability distribution of the decision
         - `previous_reaction_time`: the reaction time at the previous observation, in order to bound the returned reaction time into a reasonable range.
         The returned reaction time will not be bounded if this value is `None`
         """
 
-        decision_entropy = self._inaction_entropy + (1 - self._inaction_probability) * decision_distribution.entropy()
+        decision_entropy = self._inaction_entropy + (1 - self._inaction_probability) * decision_entropy
 
         if previous_reaction_time is None:
-            previous_reaction_time = float("+inf")
+            previous_reaction_time = self._history_size
 
-        return min(previous_reaction_time + 1, np.ceil(self._multiplier * decision_entropy + self._additive))
+        computed_reaction_time = int(np.ceil(self._multiplier * decision_entropy + self._additive))
+        # We need to be reasonable, reaction time should not be larger than the previous one (we can't start seeing things in the past)
+        return min(previous_reaction_time + 1, computed_reaction_time)
     
     def register_observation(self, observation: T):
         """Register an observation of the environment into the observation history. Should be performed at every environment step, before perceiving an observation."""
@@ -144,14 +145,14 @@ class ReactionTimeEmulator:
     def register_and_perceive(
         self,
         observation: T,
-        decision_distribution: Categorical,
+        decision_entropy: float,
     ) -> tuple[T, int]:
         """
         Perform registration and perception of a delayed observation all in a single method, for convenience. This is the primary method that should be used at every environment step.
         
-        Note: the decision entropy is calculated according to the last reaction time computed through this method, which is initially positive infinity (perceives the oldest observation).
+        Note: the decision entropy is calculated according to the last reaction time computed through this method, which is initially the maximum possible (perceives the oldest observation).
         """
-        reaction_time = self.reaction_time(decision_distribution, self._previous_reaction_time)
+        reaction_time = self.reaction_time(decision_entropy, self._previous_reaction_time)
 
         self.register_observation(observation)
         perceived_observation = self.perceive(reaction_time)
@@ -164,3 +165,8 @@ class ReactionTimeEmulator:
         """Fill the observation history with a single observation. Should be done initially, immediately after an environment reset."""
         self._observations.clear()
         self._observations.extend([observation] * self._history_size)
+    
+    @property
+    def previous_reaction_time(self) -> int:
+        """The most recently perceived reaction time (last call to `register_and_perceive`)."""
+        return self._previous_reaction_time
