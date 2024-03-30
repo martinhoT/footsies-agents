@@ -202,6 +202,7 @@ class FootsiesAgent(FootsiesAgentTorch):
             opponent_policy = info.get("next_opponent_policy", None)
             if opponent_policy is not None:
                 predicted_opponent_action = random.choices(range(self.opponent_action_dim), weights=opponent_policy, k=1)[0]
+                print(predicted_opponent_action)
             else:
                 predicted_opponent_action = None
 

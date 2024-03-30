@@ -22,15 +22,16 @@ import logging
 
 CUSTOM = False
 MODEL = "to"
-NAME = "curriculum_undiscounted"
-LOAD = False
+NAME = "f_opp"
+LOAD = True
 LOG = False
+ROLLBACK_IF_POSSIBLE = True
 
 if __name__ == "__main__":
 
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
-    custom_opponent = NSpammer()
+    custom_opponent = WhiffPunisher()
 
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
@@ -39,10 +40,10 @@ if __name__ == "__main__":
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=True,
+        fast_forward=False,
         dense_reward=False,
-        # vs_player=True,
-        opponent=custom_opponent.act,
+        vs_player=True,
+        # opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
@@ -74,7 +75,7 @@ if __name__ == "__main__":
     
     else:
         parameters = load_agent_parameters(NAME)
-        parameters["rollback"] = not parameters.get("use_opponent_model", False)
+        parameters["rollback"] = ROLLBACK_IF_POSSIBLE and not parameters.get("use_opponent_model", False)
         agent, loggables = import_agent(MODEL, env, parameters)
 
     if LOG:
@@ -161,6 +162,9 @@ if __name__ == "__main__":
         if prev_obs is not None:
             _, opponent_action = ActionMap.simples_from_transition_ori(prev_obs, info)
             agent.previous_valid_opponent_action = opponent_action if opponent_action is not None else agent.previous_valid_opponent_action
+
+        if custom_opponent is not None:
+            info["next_opponent_policy"] = custom_opponent.peek(info)
 
         action = logged_agent.act(obs, info)
 
