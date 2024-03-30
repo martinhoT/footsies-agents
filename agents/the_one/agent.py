@@ -248,11 +248,15 @@ class FootsiesAgent(FootsiesAgentTorch):
         # We also reset the opponent model, since the opponent may change/adapt between episodes.
         if terminated or truncated:
             self.current_observation = None
+            self.current_info = None
             if self.opponent_model is not None:
                 self.opponent_model.p2_model._reset_action_counts()
         
-        self.current_observation = next_obs
-        self.current_info = info
+        # Setup observation and info for the next `act` call.
+        # This is important when using the reaction time emulator.
+        else:
+            self.current_observation = next_obs
+            self.current_info = info
 
     def _update_game_model(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
         """Calculate the game model loss, backpropagate and optimize"""
