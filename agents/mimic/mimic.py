@@ -181,7 +181,7 @@ class PlayerModel:
         self._loss_dynamic_weights_max = torch.tensor(loss_dynamic_weights_max)
         # In the agent's policy, we perform entropy regularization but not as a linear interpolation.
         # That's because in that case the values in this interpolation have vastly different scales (advantage vs entropy), which makes the coefficient awkward to tune.
-        # Here, since we are calculating entropies, we can expect values in similar ranges.
+        # Here, since we are calculating entropies, we can expect values in similar ranges, so we perform linear interpolation.
         self._entropy_coef = entropy_coef
 
         self.loss_function = nn.CrossEntropyLoss(reduction="none")

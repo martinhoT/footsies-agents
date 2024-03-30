@@ -19,6 +19,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     remove_special_moves: bool = True,
     perceive_intrinsic_reward: bool = False,
     use_reaction_time: bool = False,
+    maxent: float = 0.0,
+    maxent_gradient_flow: bool = False,
     
     # Opponent modifiers
     rollback: bool = False,
@@ -45,6 +47,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
+    action_masking: bool = True,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -57,6 +60,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         hidden_layer_sizes=[64, 64],
         hidden_layer_activation=nn.LeakyReLU,
         opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
+        footsies_masking=action_masking,
+        p1=True,
     )
 
     if critic_table:
@@ -104,6 +109,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         actor_gradient_clipping=actor_gradient_clipping,
         agent_update_style=getattr(A2CQLearner.UpdateStyle, critic_agent_update.upper()),
         opponent_update_style=getattr(A2CQLearner.UpdateStyle, critic_opponent_update.upper()),
+        maxent=maxent,
+        maxent_gradient_flow=maxent_gradient_flow,
         ppo_objective=ppo,
         alternative_advantage=alternative_advantage,
         accumulate_at_frameskip=accumulate_at_frameskip,
@@ -138,6 +145,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             ),
             learning_rate=1e-2,
             loss_dynamic_weights=opponent_model_dynamic_loss_weights,
+            loss_dynamic_weights_max=10.0,
+            entropy_coef=0.3,
         )
 
         opponent_model = MimicAgent(

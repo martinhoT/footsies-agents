@@ -6,6 +6,7 @@ from agents.torch_utils import create_layered_network, ToMatrix, epoched
 from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
 from enum import Enum
+from agents.action import ActionMap
 
 LOGGER = logging.getLogger("main.a2c")
 
@@ -41,6 +42,8 @@ class ActorNetwork(nn.Module):
         hidden_layer_activation: type[nn.Module] = nn.Identity,
         representation: nn.Module = None,
         opponent_action_dim: int = None,
+        footsies_masking: bool = True,
+        p1: bool = True,
     ):
         super().__init__()
         if opponent_action_dim is None:
@@ -52,6 +55,8 @@ class ActorNetwork(nn.Module):
         self._hidden_layer_activation = hidden_layer_activation
         self._representation = nn.Identity() if representation is None else representation
         self._opponent_action_dim = opponent_action_dim
+        self._footsies_masking = footsies_masking
+        self._p1 = p1
 
         consider_opponent_action = opponent_action_dim is not None
         
@@ -63,14 +68,28 @@ class ActorNetwork(nn.Module):
             self.actor_layers.append(ToMatrix(opponent_action_dim, action_dim))
         self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, obs: torch.Tensor):
-        rep = self._representation(obs)
+        # What actions can be performed during hitstop
+        self._hitstop_mask = torch.zeros((1, opponent_action_dim, action_dim), dtype=torch.bool)
+        for simple in ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP_INT:
+            self._hitstop_mask[..., simple] = True
 
-        logits = self.actor_layers(rep)
-        return self.softmax(logits)
+    def forward(self, obs: torch.Tensor):
+        if self._footsies_masking:
+            in_hitstop = ActionMap.is_in_hitstop_torch(obs, p1=self._p1)
+            action_mask = torch.ones_like(self._hitstop_mask).expand(obs.size(0), -1, -1)
+            action_mask[in_hitstop] = self._hitstop_mask
+ 
+        else:
+            action_mask = None
+        
+        rep = self._representation(obs)
+        return self.from_representation(rep, action_mask)
     
-    def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
+    def from_representation(self, rep: torch.Tensor, action_mask: torch.Tensor | None = None) -> torch.Tensor:
         logits = self.actor_layers(rep)
+        if action_mask is not None:
+            # Invalidate all actions that are not in the mask
+            logits = logits.masked_fill(~action_mask, -torch.inf)
         return self.softmax(logits)
     
     @property
@@ -108,7 +127,7 @@ class ActorNetwork(nn.Module):
         action = action_distribution.sample()
         return action
 
-    def clone(self) -> "ActorNetwork":
+    def clone(self, p1: bool = True) -> "ActorNetwork":
         """Create a clone of this actor network, useful for extracting a policy."""
         if not isinstance(self._representation, nn.Identity):
             raise NotImplementedError("cloning actor networks with a non-identity representation is not supported yet")
@@ -120,6 +139,8 @@ class ActorNetwork(nn.Module):
             hidden_layer_activation=self._hidden_layer_activation,
             representation=self._representation,
             opponent_action_dim=self._opponent_action_dim,
+            footsies_masking=self._footsies_masking,
+            p1=p1,
         )
 
         cloned.load_state_dict(self.state_dict())
@@ -312,6 +333,8 @@ class A2CQLearner(A2CLearnerBase):
         agent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         opponent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         intrinsic_critic: QFunction = None,
+        maxent: float = 0.0,
+        maxent_gradient_flow: bool = False,
         ppo_objective: bool = False,
         ppo_objective_clip_coef: float = 0.2,
         alternative_advantage: bool = True,
@@ -332,6 +355,10 @@ class A2CQLearner(A2CLearnerBase):
         - `agent_update_style`: how to update the critic's Q-values considering the agent's policy
         - `opponent_update_style`: how to update the critic's Q-values considering the opponent's policy
         - `intrinsic_critic`: the critic for the intrinsic reward. If `None`, then no intrinsic reward is considered
+        - `maxent`: the coefficient for the entropy term of the MaxEnt RL objective, which encourages maximization of the policy's expected entropy. Doesn't make much sense to use this along with `actor_entropy_loss_coef`.
+        It's recommended to use the alternative advantage formula in case this is used, since the entropy term will be able to always be considered in the actor update
+        - `maxent_gradient_flow`: whether to let the gradient flow through the entropy term in the actor loss. This is what is commonly seen in implementations, but I can't find the reason why we do this.
+        Doesn't do anything if the alternative advantage formula is used
         - `ppo_objective`: whether to use the clipped surrogate objective of the Proximal Policy Optimization algorithm, which considers the ratio of the new and old action probabilities when optimizing over multiple epochs
         - `ppo_objective_clip_coef`: the coefficient for the clipping of the ratio of the new and old action probabilities. If the ratio is outside of the range `[1 - clip_coef, 1 + clip_coef]`, then it is clipped to that range
         - `alternative_advantage`: whether to use the alternative advantage formula, which considers the reward as-is and is less reliant on the critic converging to the correct values.
@@ -360,6 +387,10 @@ class A2CQLearner(A2CLearnerBase):
             raise NotImplementedError("SARSA updates are not supported for the opponent")
         if broadcast_at_frameskip and ppo_objective:
             raise ValueError("broadcasting when frameskipping is not supported when using the PPO objective, since during epoched updates we need to know exactly which actions were performed by the agent or opponent")
+        if maxent != 0.0 and actor_entropy_loss_coef != 0.0:
+            LOGGER.warning("Using both the MaxEnt RL objective and the actor entropy loss coefficient is not recommended. If an effect similar to the entropy loss is meant to be used, activate the `maxent_gradient_flow` argument")
+        if maxent != 0.0 and maxent_gradient_flow and not alternative_advantage:
+            LOGGER.warning("Using gradient flow for the MaxEnt RL objective without the alternative advantage formula is inconsequential, and is probably not intended")
 
         self._actor = actor
         self._critic = critic
@@ -370,6 +401,8 @@ class A2CQLearner(A2CLearnerBase):
         self._actor_gradient_clipping = actor_gradient_clipping
         self._agent_update_style = agent_update_style
         self._opponent_update_style = opponent_update_style
+        self._maxent = maxent
+        self._maxent_gradient_flow = maxent_gradient_flow
         self._ppo_objective = ppo_objective
         self._ppo_objective_clip_coef = ppo_objective_clip_coef
         self._alternative_advantage = alternative_advantage
@@ -401,6 +434,10 @@ class A2CQLearner(A2CLearnerBase):
     def sample_action(self, obs: torch.Tensor, *, next_opponent_action: int, **kwargs) -> int:
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
         return self.actor.sample_action(obs, next_opponent_action=next_opponent_action).item()
+
+    def maxent_reward(self, policy: torch.Tensor) -> torch.Tensor:
+        """Compute the entropy term of the MaxEnt RL objective according to the agent's policy."""
+        return self._maxent * Categorical(probs=policy).entropy()
 
     @epoched(timesteps=256, epochs=5, minibatch_size=32)
     def _update_actor_ppo(self, obs: torch.Tensor, opponent_action: torch.Tensor | int, agent_action: torch.Tensor | int, delta: torch.Tensor, *, epoch_data: dict = None):
@@ -493,11 +530,11 @@ class A2CQLearner(A2CLearnerBase):
             pi = torch.ones(n_rows, self.action_dim).float() / self.action_dim
 
         # The policy doesn't need to be transposed since the last dimension is the action dimension.
+        # By design, the policy is already transposed (opp_actions X agent_actions).
         # This Einstein summation equation computes the diagonal of a >2D tensor by considering the last two dimensions as matrices.
-        # Also, by design, the policy is already transposed (opp_actions X agent_actions).
         return torch.einsum("...ii->...i", pi @ q_so.transpose(-2, -1))
 
-    def advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, agent_action: int, opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, critic: QFunction = None) -> torch.Tensor:
+    def advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: torch.Tensor, terminated: bool, agent_action: int, opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, critic: QFunction = None) -> torch.Tensor:
         """
         Compute the advantage. May consider intrinsic reward if an intrinsic critic was provided.
         The returned tensor is a leaf tensor.
@@ -673,13 +710,21 @@ class A2CQLearner(A2CLearnerBase):
 
         # Schedule a critic update
         self.frameskipped_critic_updates.append(
-            (obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_agent_policy, next_obs_opponent_policy, intrinsic_reward)
+            [obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_agent_policy, next_obs_opponent_policy, intrinsic_reward]
         )
 
         # If the agent will not be frameskipped, then we can perform the updates now.
         # If the game is finished, then we also perform all scheduled updates.
         if (not agent_will_frameskip) or terminated or truncated:
-            total_reward = sum(update[1] for update in self.frameskipped_critic_updates)
+            # Update the reward according to the MaxEnt RL objective.
+            # We only do so on the first observation since it's the only ones that is actionable.
+            # The last observation is also actionable, but we only receive reward when we reach it.
+            # This is important since the last observation may be terminal, in which case it doesn't even make sense to have reward.
+            obs_maxent_reward = self.maxent_reward(self.actor.probabilities(self.frameskipped_critic_updates[0][0], self.frameskipped_critic_updates[0][5]))
+            # The rewards will become tensors, so that the gradient can flow through them (optionally)
+            self.frameskipped_critic_updates[0][1] += obs_maxent_reward
+
+            total_reward: torch.Tensor = sum(update[1] for update in self.frameskipped_critic_updates)
             total_intrinsic_reward = sum(update[8] for update in self.frameskipped_critic_updates)
 
             if self._accumulate_at_frameskip:
@@ -690,9 +735,15 @@ class A2CQLearner(A2CLearnerBase):
                 next_obs_agent_policy_ = self.frameskipped_critic_updates[-1][6]
                 next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
 
-                self.extrinsic_td_error, self.intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, total_reward, total_intrinsic_reward, terminated)
+                # This will detach the reward from the computational graph, we only care about that for the actor update
+                total_reward_ = total_reward.item()
+                self.extrinsic_td_error, self.intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, total_reward_, total_intrinsic_reward, terminated)
 
             else:
+                # They were None previously. They have None only when an update doesn't occur,
+                # but now that we are going to perform accumulations here we set them to an appropriate start value.
+                self.extrinsic_td_error = 0.0
+                self.intrinsic_td_error = 0.0
                 # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
                 previous_discount = self._critic.discount
                 self._critic.discount = 1.0
@@ -701,6 +752,7 @@ class A2CQLearner(A2CLearnerBase):
                 for frameskipped_update in reversed(self.frameskipped_critic_updates):
                     obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
 
+                    reward_ = reward_.item() if isinstance(reward_, torch.Tensor) else reward_
                     extrinsic_td_error, intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, reward_, intrinsic_reward_, terminated_)
                     self.extrinsic_td_error += extrinsic_td_error
                     self.intrinsic_td_error += intrinsic_td_error
@@ -713,6 +765,9 @@ class A2CQLearner(A2CLearnerBase):
             obs_agent_action_ = self.frameskipped_critic_updates[0][4]
             obs_opponent_action_ = self.frameskipped_critic_updates[0][5]
             next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
+            if not self._maxent_gradient_flow:
+                total_reward = total_reward.detach()
+
             extrinsic_advantage = self.advantage(obs_, next_obs_, total_reward, terminated, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_, critic=self.critic)
             if self.intrinsic_critic is not None:
                 intrinsic_advantage = self.advantage(obs_, next_obs_, total_intrinsic_reward, False, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_, critic=self.intrinsic_critic)
@@ -748,16 +803,16 @@ class A2CQLearner(A2CLearnerBase):
         return self.actor_optimizer.param_groups[0]["lr"]
 
     @actor_learning_rate.setter
-    def actor_learning_rate(self, learning_rate: float):
-        self.actor_optimizer.param_groups[0]["lr"] = learning_rate
+    def actor_learning_rate(self, value: float):
+        self.actor_optimizer.param_groups[0]["lr"] = value
     
     @property
     def critic_learning_rate(self) -> float:
         return self._critic.learning_rate
     
     @critic_learning_rate.setter
-    def critic_learning_rate(self, learning_rate: float):
-        self._critic.learning_rate = learning_rate
+    def critic_learning_rate(self, value: float):
+        self._critic.learning_rate = value
     
     @property
     def broadcast_at_frameskip(self) -> bool:
@@ -766,3 +821,21 @@ class A2CQLearner(A2CLearnerBase):
     @broadcast_at_frameskip.setter
     def broadcast_at_frameskip(self, value: bool):
         self._broadcast_at_frameskip = value
+
+    @property
+    def maxent(self) -> float:
+        """The coefficient for the entropy term of the MaxEnt RL objective, which encourages maximization of the policy's expected entropy."""
+        return self._maxent
+
+    @maxent.setter
+    def maxent(self, value: float):
+        self._maxent = value
+    
+    @property
+    def maxent_gradient_flow(self) -> bool:
+        """Whether to let the gradient flow through the entropy term in the actor loss."""
+        return self._maxent_gradient_flow
+
+    @maxent_gradient_flow.setter
+    def maxent_gradient_flow(self, value: bool):
+        self._maxent_gradient_flow = value

@@ -203,7 +203,7 @@ def train(
             episode_finished_callback(episode)
 
     except KeyboardInterrupt:
-        LOGGER.info("Training manually interrupted")
+        LOGGER.info("Training manually interrupted (KeyboardInterrupt)")
 
     except FootsiesGameClosedError as e:
         LOGGER.warning("Quitting training since game closed: '%s'", e)
@@ -335,7 +335,7 @@ if __name__ == "__main__":
 
     # Set up the main logger
 
-    setup_logger(args.agent.name, file_level=args.misc.log_file_level, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
+    setup_logger(args.agent.name, stdout_level=args.misc.log_stdout_level, file_level=args.misc.log_file_level, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
 
     # Prepare environment
 

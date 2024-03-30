@@ -298,12 +298,12 @@ class MimicAnalyserManager:
 
         # Anything regarding a transition
         if obs is not None:
+            # Determine which actions the players did
             p1_simple, p2_simple = ActionMap.simples_from_transition_ori(
                 analyser.previous_original_observation,
                 analyser.current_original_observation
             )
 
-            # Determine which actions the players did
             if p1_simple is not None:
                 p1_simple_move = ActionMap.simple_as_move(p1_simple)
                 dpg.set_value(self.actual_p1_move, p1_simple_move.name)

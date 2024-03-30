@@ -183,13 +183,14 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Update the reaction time emulator and substitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
             if self.current_observation is None:
-                self.reaction_time_emulator.fill_history(obs)
+                self.reaction_time_emulator.fill_history((obs, info))
                 self.current_observation = obs
 
+            # We reuse the observation from update()!
+            # NOTE: this assumes that act will be called after update, in a sequential fashion.
             else:
-                opponent_distribution = self.opponent_model.p2_model.probabilities(self.current_observation)
-                decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, opponent_distribution, detached=True)
-                obs, _ = self.reaction_time_emulator.register_and_perceive(obs, decision_distribution.entropy().item())
+                obs = self.current_observation
+                info = self.current_info
 
         self.current_observation = obs
         self.current_info = info
@@ -213,7 +214,8 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.reaction_time_emulator is not None:
             opponent_distribution = self.opponent_model.p2_model.probabilities(self.current_observation)
             decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, opponent_distribution, detached=True)
-            next_obs, _ = self.reaction_time_emulator.register_and_perceive(next_obs, decision_distribution.entropy().item())
+            (next_obs, info), reaction_time = self.reaction_time_emulator.register_and_perceive((next_obs, info), decision_distribution.entropy().item())
+            LOGGER.debug("Reacted with decision distribution %s and entropy %s, resulting in a reaction time of %s", decision_distribution.probs, decision_distribution.entropy().item(), reaction_time)
 
         # Get the actions that were effectively performed by each player on the previous step
         agent_action, opponent_action = ActionMap.simples_from_transition_ori(self.current_info, info)
@@ -241,9 +243,15 @@ class FootsiesAgent(FootsiesAgentTorch):
         # This variable is only used for the rollback-based prediction anyway.
         self.previous_valid_opponent_action = opponent_action if opponent_action is not None else self.previous_valid_opponent_action
 
-        # The reaction time emulator needs to know when an episode terminated
+        # The reaction time emulator needs to know when an episode terminated/truncated.
+        # We also reset the opponent model, since the opponent may change/adapt between episodes.
         if terminated or truncated:
             self.current_observation = None
+            if self.opponent_model is not None:
+                self.opponent_model.p2_model._reset_action_counts()
+        
+        self.current_observation = next_obs
+        self.current_info = info
 
     def _update_game_model(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
         """Calculate the game model loss, backpropagate and optimize"""
@@ -302,7 +310,8 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     # NOTE: extracts the policy only, doesn't include any other component
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        actor = self.a2c.learner.actor.clone()
+        # We assume the actor is going to be used as an opponent
+        actor = self.a2c.learner.actor.clone(p1=False)
 
         class ExtractedPolicy:
             def __init__(self, actor: ActorNetwork, deterministic: bool = False):

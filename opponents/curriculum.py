@@ -24,8 +24,8 @@ class CurriculumManager(OpponentManager):
     
         self._current_opponent_idx = 0
         self._opponents = sorted([
-            Idle(),
-            Backer(),
+            # Idle(),
+            # Backer(),
             NSpammer(),
             BSpammer(),
             NSpecialSpammer(),
@@ -236,7 +236,7 @@ class BSpammer(CurriculumOpponent):
         self._action_cycle = cycle([
             (True, False, True),
             *([(False, False, False)] * FootsiesMove.B_ATTACK.value.startup), # Wait for the attack to start before attacking again
-            *([(False, False, True)] * FootsiesMove.B_ATTACK.value.active), # Attack during active frames
+            *([(False, True, True)] * FootsiesMove.B_ATTACK.value.active), # Attack during active frames
             *([(False, False, False)] * FootsiesMove.B_ATTACK.value.recovery), # Wait until the attack finishes before moving forward
             (True, False, False),
             (True, False, False),

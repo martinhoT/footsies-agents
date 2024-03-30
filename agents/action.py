@@ -68,10 +68,16 @@ class ActionMap:
     TEMPORAL_ACTIONS_INT: set[int] = None
     # Moves that signify a player is hit. The opponent is able to cancel into another action in these cases. Note that GUARD_PROXIMITY is not included
     HIT_GUARD_STATES = {FootsiesMove.DAMAGE, FootsiesMove.GUARD_STAND, FootsiesMove.GUARD_CROUCH, FootsiesMove.GUARD_M, FootsiesMove.GUARD_BREAK}
+    HIT_GUARD_STATES_INT: set[int] = None
     # Neutral moves on which players can act, since they are instantaneous (I think guard proximity also counts?)
     NEUTRAL_STATES = {FootsiesMove.STAND, FootsiesMove.BACKWARD, FootsiesMove.FORWARD, FootsiesMove.GUARD_PROXIMITY}
     # Temporal moves that can be canceled into other moves
-    TEMPORAL_ACTIONS_CANCELABLE = {FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK}
+    # NOTE: the method `is_in_hitstop_torch` hardcodes this set and assumes to contain these moves. If it is to be updated, update that method as well
+    TEMPORAL_STATES_CANCELABLE = {FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK}
+    TEMPORAL_STATES_CANCELABLE_INT: set[int] = None
+    # Simple actions that are performable in hitstop
+    PERFORMABLE_SIMPLES_IN_HITSTOP = {FootsiesMove.STAND, FootsiesMove.N_ATTACK}
+    PERFORMABLE_SIMPLES_IN_HITSTOP_INT: set[int] = None
 
     ## Conversions between actions
 
@@ -160,7 +166,7 @@ class ActionMap:
         # The player should have been able to perform an action, otherwise no simple action was effectively performed
         if was_actionable:
             # If the N/B_ATTACK was canceled into N_SPECIAL, we should return the N_ATTACK simple action
-            if previous_player_move in ActionMap.TEMPORAL_ACTIONS_CANCELABLE:
+            if previous_player_move in ActionMap.TEMPORAL_STATES_CANCELABLE:
                 if player_move == FootsiesMove.N_SPECIAL:
                     return ActionMap.simple_from_move(FootsiesMove.N_ATTACK)
                 # However, be careful! If the player is in hitstop, then we can't assume they are performing N_ATTACK here.
@@ -246,7 +252,7 @@ class ActionMap:
         """Whether the player, at the current move state, is in hitstop."""
         return (
             # The player should be performing an action that takes time and is cancelable
-            player_move_state in ActionMap.TEMPORAL_ACTIONS_CANCELABLE
+            player_move_state in ActionMap.TEMPORAL_STATES_CANCELABLE
             # TODO: Does this work with hitting the opponent again while they are guarding?
             # Opponent has just been hit
             and opponent_move_frame == 0 and opponent_move_state in ActionMap.HIT_GUARD_STATES
@@ -262,6 +268,26 @@ class ActionMap:
         player_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
         opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
         return ActionMap.is_in_hitstop(player_move_state, opponent_move_state, opponent_move_frame)
+
+    _TEMPORAL_STATES_CANCELABLE_TORCH: torch.Tensor = None
+    _HIT_GUARD_STATES_TORCH: torch.Tensor = None
+
+    @staticmethod
+    def is_in_hitstop_torch(obs: torch.Tensor, p1: bool = True) -> bool:
+        """Whether the player, at the given PyTorch tensor observation, is in hitstop."""
+        idx = 0 if p1 else 1
+        
+        player_move_index = obs[:, 2 + idx * 15:17 + idx * 15].argmax(dim=1)
+        opponent_move_index = obs[:, 17 - idx * 15:32 - idx * 15].argmax(dim=1)
+
+        agent_in_temporal_action = torch.isin(player_move_index, ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH, assume_unique=True)
+
+        # We won't expect floating point errors here, since zero should be exactly zero
+        opponent_at_start = obs[:, 33 - idx] == 0.0
+
+        opponent_in_hitguard = torch.isin(opponent_move_index, ActionMap._HIT_GUARD_STATES_TORCH, assume_unique=True)
+
+        return agent_in_temporal_action & opponent_at_start & opponent_in_hitguard
 
     @staticmethod
     def is_state_actionable(player_move_state: FootsiesMove, opponent_move_state: FootsiesMove, player_move_frame: int, opponent_move_frame: int) -> bool:
@@ -320,3 +346,17 @@ ActionMap.TEMPORAL_ACTIONS_INT = {
     ActionMap.SIMPLE_ACTIONS.index(simple)
     for simple in ActionMap.TEMPORAL_ACTIONS
 }
+ActionMap.HIT_GUARD_STATES_INT = {
+    FOOTSIES_MOVE_INDEX_TO_MOVE.index(move)
+    for move in ActionMap.HIT_GUARD_STATES
+}
+ActionMap.TEMPORAL_STATES_CANCELABLE_INT = {
+    FOOTSIES_MOVE_INDEX_TO_MOVE.index(move) for move in ActionMap.TEMPORAL_STATES_CANCELABLE
+}
+ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP_INT = {
+    ActionMap.SIMPLE_ACTIONS.index(simple) for simple in ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP
+}
+ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH = torch.tensor(list(ActionMap.TEMPORAL_STATES_CANCELABLE_INT)).long()
+ActionMap._HIT_GUARD_STATES_TORCH = torch.tensor(list(ActionMap.HIT_GUARD_STATES_INT)).long()
+
+assert all(v is not None for v in vars(ActionMap).values())

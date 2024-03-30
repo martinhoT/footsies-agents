@@ -41,7 +41,7 @@ class ReactionTimeEmulator:
         """Get entropy of a probability distribution, measured in nats."""
         # Should the safety value be included in the probability portion of the formula? That makes the sum of probabilities not be 1. Probably not.
         # We measure entropy in nats to match the way entropy is measured in PyTorch by default.
-        return -np.nansum((distribution) * np.log(distribution + safety))
+        return -np.nansum((distribution) * np.log2(distribution + safety))
     
     @staticmethod
     def bernoulli_distribution(probability: float) -> np.ndarray:
@@ -76,7 +76,7 @@ class ReactionTimeEmulator:
 
     def maximum_decision_entropy(self, agent_n_actions: int) -> float:
         """Calculate the maximum possible decision entropy."""
-        return self._inaction_entropy + (1 - self.inaction_probability) * np.log(agent_n_actions)
+        return self._inaction_entropy + (1 - self.inaction_probability) * np.log2(agent_n_actions)
 
     # TODO: consider only options from the opponent that can actually be done (doesn't make sense to use when the opponent can't do anything)
     def decision_distribution(
@@ -148,10 +148,14 @@ class ReactionTimeEmulator:
         decision_entropy: float,
     ) -> tuple[T, int]:
         """
-        Perform registration and perception of a delayed observation all in a single method, for convenience. This is the primary method that should be used at every environment step.
+        Perform registration and perception of a delayed obsrvation all in a single method, for convenience. This is the primary method that should be used at every environment step.
+        The decision entropy should be provided in nats.
         
         Note: the decision entropy is calculated according to the last reaction time computed through this method, which is initially the maximum possible (perceives the oldest observation).
         """
+        # Transform the decision entropy to bits
+        decision_entropy = decision_entropy / np.log(2)
+
         reaction_time = self.reaction_time(decision_entropy, self._previous_reaction_time)
 
         self.register_observation(observation)

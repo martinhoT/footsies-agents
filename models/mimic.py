@@ -8,9 +8,13 @@ from agents.mimic.agent import FootsiesAgent as MimicAgent
 
 def model_init(observation_space_size: int, action_space_size: int, *,
     dynamic_loss_weights: bool = True,
+    dynamic_loss_weights_max: float = 10.0,
+    entropy_coef: float = 0.3,
     learning_rate: float = 1e-2,
     scar_size: int = 1000,
     scar_min_loss: float = 10.0,
+    p1_model: bool = True,
+    p2_model: bool = True,
 ) -> tuple[MimicAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -33,6 +37,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         ),
         learning_rate=learning_rate,
         loss_dynamic_weights=dynamic_loss_weights,
+        loss_dynamic_weights_max=dynamic_loss_weights_max,
+        entropy_coef=entropy_coef,
     )
 
     p2_model = deepcopy(p1_model)

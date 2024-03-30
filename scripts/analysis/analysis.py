@@ -354,7 +354,7 @@ class Analyser:
     truncated: bool = editable_dpg_value("truncated")
     text_output: str = editable_dpg_value("text_output")
 
-    def start(self, state_change_apply_immediately: bool = False):
+    def start(self, state_change_apply_immediately: bool = False, debug: bool = False):
         dpg.create_context()
         dpg.create_viewport(title="FOOTSIES data analyser", width=600, height=300)
 
@@ -478,6 +478,9 @@ class Analyser:
                 dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, (50, 50, 50))
 
         dpg.bind_theme(global_theme)
+
+        if debug:
+            dpg.show_debug()
 
         dpg.setup_dearpygui()
         dpg.show_viewport()

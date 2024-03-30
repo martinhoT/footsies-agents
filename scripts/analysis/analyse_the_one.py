@@ -14,7 +14,7 @@ from scripts.analysis.analyse_opponent_model import MimicAnalyserManager
 from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger, load_agent, load_agent_parameters, import_agent
-from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher
+from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher, NSpammer
 from agents.utils import FootsiesPhasicMoveProgress
 from agents.logger import TrainingLoggerWrapper
 import logging
@@ -22,15 +22,15 @@ import logging
 
 CUSTOM = False
 MODEL = "to"
-NAME = "curriculum_wrappers"
-LOAD = True
+NAME = "curriculum_undiscounted"
+LOAD = False
 LOG = False
 
 if __name__ == "__main__":
 
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
-    custom_opponent = WhiffPunisher()
+    custom_opponent = NSpammer()
 
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
@@ -39,7 +39,7 @@ if __name__ == "__main__":
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=False,
+        fast_forward=True,
         dense_reward=False,
         # vs_player=True,
         opponent=custom_opponent.act,
@@ -48,12 +48,12 @@ if __name__ == "__main__":
     env = TransformObservation(
         FootsiesActionCombinationsDiscretized(
             FlattenObservation(
-                FootsiesPhasicMoveProgress(
+                # FootsiesPhasicMoveProgress(
                     FootsiesNormalized(
                         footsies_env,
-                        normalize_guard=False,
+                        # normalize_guard=False,
                     )
-                )
+                # )
             )
         ),
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
@@ -63,19 +63,18 @@ if __name__ == "__main__":
         agent, loggables = to_(
             env.observation_space.shape[0],
             env.action_space.n,
-            rollback=True,
 
-            actor_entropy_coef=0.1,
+            actor_entropy_coef=0.0,
             critic_agent_update="expected_sarsa",
-            critic_opponent_update="q_learning",
-            critic_target_update_rate=100000,
-            broadcast_at_frameskip=False,
-            alternative_advantage=True,
+            critic_opponent_update="expected_sarsa",
+            maxent=0.01,
+            maxent_gradient_flow=True,
+            use_opponent_model=True,
         )
     
     else:
         parameters = load_agent_parameters(NAME)
-        parameters["rollback"] = True
+        parameters["rollback"] = not parameters.get("use_opponent_model", False)
         agent, loggables = import_agent(MODEL, env, parameters)
 
     if LOG:
@@ -127,7 +126,7 @@ if __name__ == "__main__":
     if agent.opponent_model is not None:
         mimic_manager = MimicAnalyserManager(
             p1_model=None,
-            p2_model=agent.opponent_model,
+            p2_model=agent.opponent_model.p2_model,
             p1_mirror_p2=False,
         )
     

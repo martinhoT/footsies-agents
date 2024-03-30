@@ -5,7 +5,7 @@ from intrinsic.base import IntrinsicRewardScheme
 from intrinsic.counts import CountBasedScheme
 from intrinsic.icm import ICMScheme
 from intrinsic.rnd import RNDScheme
-from typing import Literal, Dict
+from typing import Literal, Dict, Annotated
 from torch import nn
 
 
@@ -79,8 +79,10 @@ class MiscArgs:
     """Value at which the logging time step will start, useful for appending to existing Tensorboard logs"""
     log_episode_start: int = 0
     """Value at which the logging episode will start, useful for appending to existing Tensorboard logs"""
-    log_file_level_: Literal["critical", "error", "warning", "info", "debug"] = "debug"
+    log_file_level_: Annotated[Literal["critical", "error", "warning", "info", "debug"], tyro.conf.arg(name="log_file_level")] = "debug"
     """The log level of the logs created in the log file. Recommended to be either `debug` or `info`"""
+    log_stdout_level_: Annotated[Literal["critical", "error", "warning", "info", "debug"], tyro.conf.arg(name="log_stdout_level")] = "info"
+    """The log level of the logs printed to the standard output. Recommended to be `info`"""
 
     hogwild: bool = False
     """Whether to use the Hogwild! asynchronous training algorithm. Only available for FOOTSIES agents based on PyTorch (for sharing of model parameters)"""
@@ -93,6 +95,11 @@ class MiscArgs:
     def log_file_level(self) -> int:
         """The log level of the logs created in the log file"""
         return getattr(logging, self.log_file_level_.upper())
+
+    @property
+    def log_stdout_level(self) -> int:
+        """The log level of the logs printed to the standard output"""
+        return getattr(logging, self.log_stdout_level_.upper())
 
 
 @dataclass

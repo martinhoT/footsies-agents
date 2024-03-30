@@ -16,6 +16,9 @@ from agents.action import ActionMap
 from io import BufferedIOBase
 
 
+UNFLATTENED_OBSERVATION_SPACE = FootsiesNormalized(FootsiesEnv()).observation_space
+
+
 @dataclass
 class FootsiesTransition:
     obs:            np.ndarray
@@ -24,6 +27,12 @@ class FootsiesTransition:
     p1_action:      np.ndarray
     p2_action:      np.ndarray
     terminated:     bool
+    info:           dict = field(init=False, default_factory=dict)
+    next_info:      dict = field(init=False, default_factory=dict)
+
+    def __post_init__(self):
+        self.info = get_dict_obs_from_vector_obs(self.obs, unflattenend_observation_space=UNFLATTENED_OBSERVATION_SPACE)
+        self.next_info = get_dict_obs_from_vector_obs(self.next_obs, unflattenend_observation_space=UNFLATTENED_OBSERVATION_SPACE)
 
 
 # repr is False to avoid printing the entire episode, which is especially important when debugging
