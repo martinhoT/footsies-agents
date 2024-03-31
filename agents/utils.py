@@ -133,7 +133,7 @@ def find_footsies_ports(start: int = 11000, step: int = 1, end: int = None) -> t
     return tuple(ports)
 
 
-class AppendSimpleHistoryWrapper(ObservationWrapper):
+class AppendSimpleHistoryWrapper(Wrapper):
     """Observation wrapper for appending the action history of one of the players. Must be put after `FootsiesNormalized`."""
     def __init__(self, env, p1: bool, n: int, distinct: bool):
         super().__init__(env)
@@ -181,6 +181,22 @@ class AppendSimpleHistoryWrapper(ObservationWrapper):
         obs[f"p{1 if self.p1 else 2}_history"] = list(self.history)
 
         return obs
+
+    def reset(self) -> dict:
+        self.history.clear()
+        self.history.extend([0] * self.history.maxlen)
+        self.prev_obs = None
+
+        obs = self.observation(obs)
+
+        return self.env.reset()
+
+    def step(self, action) -> dict:
+        next_obs, reward, terminated, truncated, info = self.env.step(action)
+
+        next_obs = self.observation(next_obs)
+
+        return next_obs, reward, terminated, truncated, info
     
 
 class FootsiesEncourageAdvance(Wrapper):

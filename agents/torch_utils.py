@@ -366,12 +366,16 @@ class ActionHistoryAugmentation:
         # Fill history with no-ops
         self.history = deque([0] * n, maxlen=n)
     
-    def __call__(self, obs: torch.Tensor, action: int) -> torch.Tensor:
-        if not self.distinct or (self.history[-1] != action):
+    def __call__(self, obs: torch.Tensor, action: int | None) -> torch.Tensor:
+        if action is not None and (not self.distinct or (self.history[-1] != action)):
             self.history.append(action)
         
-        action_oh = nn.functional.one_hot(torch.tensor(self.history), num_classes=self.action_dim).flatten().float()
+        action_oh = nn.functional.one_hot(torch.tensor(self.history), num_classes=self.action_dim).reshape(1, -1).float()
         return torch.hstack((obs, action_oh))
+
+    def reset(self):
+        self.history.clear()
+        self.history.extend([0] * self.history.maxlen)
 
 
 class TimeSinceLastCommitAugmentation:
@@ -379,10 +383,13 @@ class TimeSinceLastCommitAugmentation:
         self.steps = steps
         self.t = 0.0
     
-    def __call__(self, obs: torch.Tensor, action: int) -> torch.Tensor:
+    def __call__(self, obs: torch.Tensor, action: int | None) -> torch.Tensor:
         if action is not None:
             commital = ActionMap.is_simple_action_commital(action)
             self.t = 0.0 if commital else (self.t + 1) % self.steps
         
         t_tensor = torch.tensor([[self.t / self.steps]]).float()
         return torch.hstack((obs, t_tensor))
+
+    def reset(self):
+        self.t = 0.0

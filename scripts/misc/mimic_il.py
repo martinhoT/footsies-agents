@@ -6,8 +6,19 @@ from agents.action import ActionMap
 from tqdm import tqdm
 from models import mimic_
 from torch.utils.tensorboard import SummaryWriter
+from agents.torch_utils import ActionHistoryAugmentation, TimeSinceLastCommitAugmentation
 
 summary_writer = SummaryWriter("runs/mimic_il")
+
+append_action_augment_p1 = ActionHistoryAugmentation(5, 9, True)
+append_action_augment_p2 = ActionHistoryAugmentation(5, 9, True)
+time_augment_p1 = TimeSinceLastCommitAugmentation(120)
+time_augment_p2 = TimeSinceLastCommitAugmentation(120)
+
+append_action_augment_p1.enabled = True
+append_action_augment_p2.enabled = True
+time_augment_p1.enabled = True
+time_augment_p2.enabled = True
 
 dataset = FootsiesDataset.load("footsies-dataset")
 dataset = FootsiesTorchDataset(dataset)
@@ -15,14 +26,18 @@ dataset = FootsiesTorchDataset(dataset)
 dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
 mimic, _ = mimic_(
-    observation_space_size=36,
+    observation_space_size=36
+        + append_action_augment_p1.enabled * append_action_augment_p1.action_dim * append_action_augment_p1.history.maxlen
+        + append_action_augment_p2.enabled * append_action_augment_p2.action_dim * append_action_augment_p2.history.maxlen
+        + time_augment_p1.enabled * 1
+        + time_augment_p2.enabled * 1,
     action_space_size=9,
     dynamic_loss_weights=True,
     dynamic_loss_weights_max=10.0,
     entropy_coef=0.3,
     learning_rate=1e-2,
     scar_size=1,
-    scar_min_loss=10.0,
+    scar_min_loss=10000.0,
     p1_model=True,
     p2_model=True,
 )
@@ -34,7 +49,13 @@ test_states = [(torch.as_tensor(t[0]).float().unsqueeze(0), t[3]) for t in datas
 step = 0
 for epoch in range(10):
     for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader):
+        
         p1_action, p2_action = ActionMap.simples_from_transition_torch(obs, next_obs)
+        
+        obs = append_action_augment_p1(obs, p1_action)
+        obs = append_action_augment_p2(obs, p2_action)
+        obs = time_augment_p1(obs, p1_action)
+        obs = time_augment_p2(obs, p2_action)
         
         if p1_action is not None:
             p1_loss = mimic.p1_model.update(obs, p1_action)
@@ -47,6 +68,12 @@ for epoch in range(10):
             summary_writer.add_scalar("Learning/Scar size of P2's model", mimic.p2_model.number_of_scars, step)
             
         step += 1
+
+        if terminated:
+            append_action_augment_p1.reset()
+            append_action_augment_p2.reset()
+            time_augment_p1.reset()
+            time_augment_p2.reset()
 
     print("Epoch", epoch, "done")
 
