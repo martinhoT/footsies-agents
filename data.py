@@ -263,7 +263,7 @@ class FootsiesDataset:
         
         obs, _ = env.reset()
 
-        # Load the initial observation that is in the dataset. This is because the bot (player 1) could act the instant reset() was called, but that action wasn't saved
+        # Load the initial observation that is in the dataset. This is because the bot could act the instant reset() was called, but that action wasn't saved
         battle_state = footsies_env.save_battle_state()
         initial_obs = get_dict_obs_from_vector_obs(e.observations[0, :], unflattenend_observation_space=footsies_normalized.observation_space)
         battle_state.p1State.position[0] = initial_obs["position"][0].item()
@@ -280,7 +280,7 @@ class FootsiesDataset:
             t = ((p1_action & 1) != 0), ((p1_action & 2) != 0), ((p1_action & 4) != 0)
             obs, _, _, _, _ = env.step(t)
             if not np.isclose(recorded_obs, obs).all():
-                raise RuntimeError("the recorded dataset can't correctly reproduce the episode")
+                raise RuntimeError(f"the recorded dataset can't correctly reproduce the episode (the recorded observation {recorded_obs} doesn't match the actual observation {obs})")
 
         env.close()
 
