@@ -279,7 +279,7 @@ class PlayerModel:
         # We train over an entire episode's worth of data at once.
         self._accumulated_args = []
 
-    def update(self, obs: torch.Tensor, action: torch.Tensor | int, terminated_or_truncated: bool, multiplier: torch.Tensor | float = 1.0) -> float:
+    def update(self, obs: torch.Tensor, action: torch.Tensor | None | int, terminated_or_truncated: bool, multiplier: torch.Tensor | float = 1.0) -> float:
         """
         Update the model to predict the action given the provided observation. Can optionally set a multiplier for the given example to give it more importance.
         If `terminated_or_truncated`, any hidden state related to an episode is reset.
@@ -293,7 +293,9 @@ class PlayerModel:
             # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
             self._network.update_hidden_state(obs)
 
-            self._accumulated_args.append((obs, action, multiplier))
+            if action is not None:
+                self._accumulated_args.append((obs, action, multiplier))
+            
             if not terminated_or_truncated:
                 return None
 
@@ -305,11 +307,13 @@ class PlayerModel:
             self._accumulated_args.clear()
         
         else:
-            # Update the action frequencies
-            self._update_action_frequency(action)
+            if action is not None:
+                # Update the action frequencies
+                self._update_action_frequency(action)
 
-            # Update the scar store
-            self._scars.include(obs, action, multiplier)
+                # Update the scar store
+                self._scars.include(obs, action, multiplier)
+            
             obs, action, multiplier = self._scars.batch
 
         # Update the network

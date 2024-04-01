@@ -235,7 +235,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.a2c.update(next_obs, reward, terminated, truncated, info)
         if self.game_model is not None:
             self._update_game_model(self.current_observation, agent_action, opponent_action, next_obs)
-        if self.opponent_model is not None and opponent_action is not None:
+        if self.opponent_model is not None:
             self.opponent_model.update_with_simple_actions(self.current_observation, None, opponent_action, terminated or truncated)
 
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.

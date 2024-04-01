@@ -77,13 +77,13 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def update_with_simple_actions(self, obs: torch.Tensor, p1_simple: int | None, p2_simple: int | None, terminated_or_truncated: bool):
         """Perform an update with the given simple actions, useful to avoid recomputing them."""
-        if self._learn_p1 and p1_simple is not None:
+        if self._learn_p1:
             loss = self._p1_model.update(obs, p1_simple, terminated_or_truncated, 1.0)
             if loss is not None:
                 self._p1_cumulative_loss += loss
                 self._p1_cumulative_loss_n += 1
         
-        if self._learn_p2 and p2_simple is not None:
+        if self._learn_p2:
             loss = self._p2_model.update(obs, p2_simple, terminated_or_truncated, 1.0)
             if loss is not None:
                 self._p2_cumulative_loss += loss
