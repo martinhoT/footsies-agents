@@ -236,7 +236,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.game_model is not None:
             self._update_game_model(self.current_observation, agent_action, opponent_action, next_obs)
         if self.opponent_model is not None and opponent_action is not None:
-            self.opponent_model.update_with_simple_actions(self.current_observation, None, opponent_action)
+            self.opponent_model.update_with_simple_actions(self.current_observation, None, opponent_action, terminated or truncated)
 
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
@@ -249,8 +249,6 @@ class FootsiesAgent(FootsiesAgentTorch):
         if terminated or truncated:
             self.current_observation = None
             self.current_info = None
-            if self.opponent_model is not None:
-                self.opponent_model.p2_model._reset_action_counts()
         
         # Setup observation and info for the next `act` call.
         # This is important when using the reaction time emulator.

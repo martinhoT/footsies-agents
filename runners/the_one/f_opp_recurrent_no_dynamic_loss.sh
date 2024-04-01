@@ -1,0 +1,2 @@
+#!/bin/sh
+./runners/footsies.sh to --agent.name f_opp_recurrent_no_dynamic_loss --agent.kwargs use_opponent_model True --agent.kwargs opponent_model_recurrent True --agent.kwargs opponent_model_dynamic_loss_weights False "$@"

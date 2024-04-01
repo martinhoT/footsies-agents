@@ -16,19 +16,21 @@ def main(
     entropy_coef: float = 0.3,
     scar_size: int = 1,
     scar_min_loss: float = 10000.0,
+    recurrent: bool = False,
     # wrappers
-    history_p1: bool = True,
-    history_p2: bool = True,
-    time_p1: bool = True,
-    time_p2: bool = True,
+    history_p1: bool = False,
+    history_p2: bool = False,
+    time_p1: bool = False,
+    time_p2: bool = False,
     history_p1_size: int = 5,
     history_p2_size: int = 5,
     history_p1_distinct: bool = True,
     history_p2_distinct: bool = True,
     # run settings
-    run_name: str = "mimic_il",
+    run_name: str | None = None,
 ):
-    summary_writer = SummaryWriter("runs/" + run_name)
+    if run_name is not None:
+        summary_writer = SummaryWriter("runs/" + run_name)
 
     append_action_augment_p1 = ActionHistoryAugmentation(history_p1_size, 9, history_p1_distinct)
     append_action_augment_p2 = ActionHistoryAugmentation(history_p2_size, 9, history_p2_distinct)
@@ -43,6 +45,7 @@ def main(
     dataset = FootsiesDataset.load("footsies-dataset")
     dataset = FootsiesTorchDataset(dataset)
 
+    # We assume we are training sequentially, so no shuffling
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
     mimic, _ = mimic_(
@@ -60,6 +63,7 @@ def main(
         scar_min_loss=scar_min_loss,
         p1_model=True,
         p2_model=True,
+        recurrent=recurrent,
     )
 
     # 5% of the dataset
@@ -69,7 +73,7 @@ def main(
     step = 0
     p1_action_prev = 0
     p2_action_prev = 0
-    for epoch in range(10):
+    for epoch in range(100):
         for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader):
             
             p1_action, p2_action = ActionMap.simples_from_transition_torch(obs, next_obs)
@@ -84,14 +88,16 @@ def main(
                 obs = time_augment_p2(obs, p2_action_prev)
             
             if p1_action is not None:
-                p1_loss = mimic.p1_model.update(obs, p1_action)
-                summary_writer.add_scalar("Learning/Loss of P1's model", p1_loss, step)
-                summary_writer.add_scalar("Learning/Scar size of P1's model", mimic.p1_model.number_of_scars, step)
+                p1_loss = mimic.p1_model.update(obs, p1_action, terminated)
+                if p1_loss is not None and run_name is not None:
+                    summary_writer.add_scalar("Learning/Loss of P1's model", p1_loss, step)
+                    summary_writer.add_scalar("Learning/Scar size of P1's model", mimic.p1_model.number_of_scars, step)
             
             if p2_action is not None:
-                p2_loss = mimic.p2_model.update(obs, p2_action)
-                summary_writer.add_scalar("Learning/Loss of P2's model", p2_loss, step)
-                summary_writer.add_scalar("Learning/Scar size of P2's model", mimic.p2_model.number_of_scars, step)
+                p2_loss = mimic.p2_model.update(obs, p2_action, terminated)
+                if p2_loss is not None and run_name is not None:
+                    summary_writer.add_scalar("Learning/Loss of P2's model", p2_loss, step)
+                    summary_writer.add_scalar("Learning/Scar size of P2's model", mimic.p2_model.number_of_scars, step)
                 
             step += 1
 

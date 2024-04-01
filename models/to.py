@@ -28,6 +28,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_opponent_update: str = "expected_sarsa",
     consider_explicit_opponent_policy: bool = True,
     opponent_model_dynamic_loss_weights: bool = True,
+    opponent_model_recurrent: bool = False,
     
     # Highly-tunable hyperparameters
     actor_lr: float = 3e-2,
@@ -137,6 +138,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
                 input_clip_leaky_coef=0.02,
                 hidden_layer_sizes=[64, 64],
                 hidden_layer_activation=nn.LeakyReLU,
+                recurrent=opponent_model_recurrent,
             ),
             scar_store=ScarStore(
                 obs_dim=obs_dim,

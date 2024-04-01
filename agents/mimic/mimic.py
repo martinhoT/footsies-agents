@@ -24,6 +24,7 @@ class PlayerModelNetwork(nn.Module):
         input_clip_leaky_coef: float = 0,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: type[nn.Module] = nn.LeakyReLU,
+        recurrent: nn.RNNBase | bool = False,
     ):
         super().__init__()
 
@@ -33,8 +34,30 @@ class PlayerModelNetwork(nn.Module):
         self._action_dim = action_dim
         self._use_sigmoid_output = use_sigmoid_output
 
+        if recurrent:
+            if isinstance(recurrent, nn.RNNBase):
+                self._recurrent = recurrent
+            
+            else:
+                self._recurrent = nn.RNN(
+                    input_size=obs_dim,
+                    hidden_size=64,
+                    num_layers=1,
+                    nonlinearity="tanh",
+                    bias=True,
+                    batch_first=False,
+                    dropout=0,
+                    bidirectional=False,
+                )
+            
+            layers_input_size = self._recurrent.hidden_size
+            
+        else:
+            self._recurrent = None
+            layers_input_size = obs_dim
+
         self.layers = create_layered_network(
-            obs_dim, action_dim, hidden_layer_sizes, hidden_layer_activation
+            layers_input_size, action_dim, hidden_layer_sizes, hidden_layer_activation
         )
 
         self.debug_stores = []
@@ -46,27 +69,66 @@ class PlayerModelNetwork(nn.Module):
         self.softmax = nn.Softmax(dim=1)
         self.log_softmax = nn.LogSoftmax(dim=1)
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.layers(obs)
+        # Hidden state if using recurrency
+        self._hidden = None
 
-    def probabilities(self, obs: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor | None]:
+        if isinstance(hidden, str):
+            if hidden == "auto":
+                hidden = self.hidden
+            else:
+                raise ValueError("invalid value for 'hidden', if a string it should be one of {'auto'}")
+        
+        if self._recurrent is not None:
+            rec, hidden_state = self._recurrent(obs, hidden)
+            output = self.layers(rec)
+
+        else:
+            output = self.layers(obs)
+            hidden_state = None
+
+        return output, hidden_state
+
+    def probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.Tensor:
         """The action probabilities at the given observation."""
-        logits = self(obs)
+        logits, _ = self(obs, hidden)
         return self.softmax(logits)
 
-    def log_probabilities(self, obs: torch.Tensor) -> torch.Tensor:
-        """The action log-probabilities at the given observation"""
-        logits = self(obs)
+    def log_probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.Tensor:
+        """The action log-probabilities at the given observation."""
+        logits, _ = self(obs, hidden)
         return self.log_softmax(logits)
 
-    def distribution(self, obs: torch.Tensor) -> torch.distributions.Categorical:
+    def distribution(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.distributions.Categorical:
         """The action distribution at the given observation."""
-        return torch.distributions.Categorical(probs=self.probabilities(obs))
+        return torch.distributions.Categorical(probs=self.probabilities(obs, hidden))
 
     @property
     def action_dim(self) -> int:
         """The number of actions the network is predicting, i.e. the output dimension."""
         return self._action_dim
+
+    @property
+    def hidden(self) -> torch.Tensor | None:
+        """The hidden state of the network, used if recurrency is being used. If `None`, then the hidden state hasn't been initialized (should signify the beginning of an episode)."""
+        return self._hidden
+
+    @property
+    def is_recurrent(self) -> bool:
+        """Whether the network is recurrent."""
+        return self._recurrent is not None
+
+    def update_hidden_state(self, obs: torch.Tensor):
+        """Update the internal hidden state, useful if using recurrency."""
+        _, hidden = self(obs, self._hidden)
+        if hidden is not None:
+            # If in the future we need to use the hidden state to compute something, we don't want to backpropagate through this hidden state,
+            # or else we would be backpropagating again through the same computational graph and it would get messy.
+            self._hidden = hidden.detach()
+
+    def reset_hidden_state(self):
+        """Reset any hidden state."""
+        self._hidden = None
 
 
 class ScarStore:
@@ -175,6 +237,9 @@ class PlayerModel:
         If 0, no entropy regularization is added to the loss.
         If 1, then only entropy is maximized
         """
+        if player_model_network.is_recurrent and scar_store.max_size > 1:
+            raise ValueError("the scar system should not be used with recurrent networks, as the hidden state is not properly managed")
+
         self._network = player_model_network
         self._scars = scar_store
         self._loss_dynamic_weights = loss_dynamic_weights
@@ -210,23 +275,47 @@ class PlayerModel:
         self._action_counts = torch.zeros(self._network.action_dim)
         self._action_counts_total = 0
 
-    def update(self, obs: torch.Tensor, action: torch.Tensor | int, multiplier: torch.Tensor | float = 1.0) -> float:
+        # If the network is recurrent, then we need to keep track of data within an episode before training.
+        # We train over an entire episode's worth of data at once.
+        self._accumulated_args = []
+
+    def update(self, obs: torch.Tensor, action: torch.Tensor | int, terminated_or_truncated: bool, multiplier: torch.Tensor | float = 1.0) -> float:
         """
         Update the model to predict the action given the provided observation. Can optionally set a multiplier for the given example to give it more importance.
+        If `terminated_or_truncated`, any hidden state related to an episode is reset.
+
+        It's assumed that the observations in `obs` are in sequence, not shuffled in time!
 
         Returns the loss.
         """
-        # Update the action frequencies
-        self._update_action_frequency(action)
+        # If the neural network is recurrent, then we accumulate the arguments over an entire episode until termination
+        if self._network.is_recurrent:
+            # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
+            self._network.update_hidden_state(obs)
 
-        # Update the scar store
-        self._scars.include(obs, action, multiplier)
-        obs, action, multiplier = self._scars.batch
+            self._accumulated_args.append((obs, action, multiplier))
+            if not terminated_or_truncated:
+                return None
+
+            obs, action, multiplier = zip(*self._accumulated_args)
+            obs = torch.vstack(obs).float()
+            action = torch.tensor(action).long()
+            multiplier = torch.tensor(multiplier).float()
+
+            self._accumulated_args.clear()
+        
+        else:
+            # Update the action frequencies
+            self._update_action_frequency(action)
+
+            # Update the scar store
+            self._scars.include(obs, action, multiplier)
+            obs, action, multiplier = self._scars.batch
 
         # Update the network
         self.optimizer.zero_grad()
 
-        predicted = self._network(obs)
+        predicted, _ = self._network(obs)
         distribution = torch.distributions.Categorical(logits=predicted)
         loss = (self.loss_function(predicted, action) * (1 - self._entropy_coef) + -distribution.entropy() * self._entropy_coef) * multiplier
         # We need to manually perform the mean accoding to how many effective examples we have.
@@ -237,7 +326,8 @@ class PlayerModel:
         self.optimizer.step()
 
         # Update the scar store with the newest losses
-        self._scars.update(loss.detach())
+        if not self._network.is_recurrent:
+            self._scars.update(loss.detach())
 
         # Check whether learning is dead
         if all(
@@ -245,6 +335,11 @@ class PlayerModel:
             for layer in self.learnable_layers
         ):
             LOGGER.warning("Learning is dead, gradients are 0! (loss: %s)", loss_agg.item())
+
+        # Reset the player network's hidden state if the episode terminated or truncated
+        if terminated_or_truncated:
+            self._network.reset_hidden_state()
+            self._reset_action_counts()
 
         self._most_recent_loss = loss_agg.item()
         return self._most_recent_loss

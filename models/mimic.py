@@ -15,6 +15,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     scar_min_loss: float = 10.0,
     p1_model: bool = True,
     p2_model: bool = True,
+    recurrent: bool = False,
 ) -> tuple[MimicAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -29,6 +30,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             input_clip_leaky_coef=0.02,
             hidden_layer_sizes=[64, 64],
             hidden_layer_activation=nn.LeakyReLU,
+            recurrent=recurrent,
         ),
         scar_store=ScarStore(
             obs_dim=obs_dim,
