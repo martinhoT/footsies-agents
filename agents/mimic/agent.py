@@ -120,7 +120,7 @@ class FootsiesAgent(FootsiesAgentBase):
         res = (
             (self._p1_cumulative_loss / self._p1_cumulative_loss_n)
             if self._p1_cumulative_loss_n != 0
-            else 0
+            else None
         )
 
         self._p1_cumulative_loss = 0
@@ -131,7 +131,7 @@ class FootsiesAgent(FootsiesAgentBase):
         res = (
             (self._p2_cumulative_loss / self._p2_cumulative_loss_n)
             if self._p2_cumulative_loss_n != 0
-            else 0
+            else None
         )
 
         self._p2_cumulative_loss = 0

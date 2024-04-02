@@ -76,7 +76,7 @@ class ActorNetwork(nn.Module):
     def forward(self, obs: torch.Tensor):
         if self._footsies_masking:
             in_hitstop = ActionMap.is_in_hitstop_torch(obs, p1=self._p1)
-            action_mask = torch.ones_like(self._hitstop_mask).expand(obs.size(0), -1, -1)
+            action_mask = torch.ones_like(self._hitstop_mask).repeat(obs.size(0), 1, 1)
             action_mask[in_hitstop] = self._hitstop_mask
  
         else:
@@ -787,15 +787,15 @@ class A2CQLearner(A2CLearnerBase):
             self._last_valid_opponent_action = None
         
     @property
-    def actor(self):
+    def actor(self) -> ActorNetwork:
         return self._actor
     
     @property
-    def critic(self):
+    def critic(self) -> QFunction:
         return self._critic
 
     @property
-    def intrinsic_critic(self):
+    def intrinsic_critic(self) -> QFunction | None:
         return self._intrinsic_critic
 
     @property

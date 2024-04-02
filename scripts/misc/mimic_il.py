@@ -16,7 +16,7 @@ def main(
     entropy_coef: float = 0.3,
     scar_size: int = 1,
     scar_min_loss: float = 10000.0,
-    recurrent: bool = False,
+    recurrent: bool = True,
     # wrappers
     history_p1: bool = False,
     history_p2: bool = False,
@@ -75,7 +75,8 @@ def main(
     p2_action_prev = 0
     for epoch in range(100):
         for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader):
-            
+            obs = obs.float()
+
             p1_action, p2_action = ActionMap.simples_from_transition_torch(obs, next_obs)
 
             if append_action_augment_p1.enabled:
@@ -87,17 +88,15 @@ def main(
             if time_augment_p2.enabled:
                 obs = time_augment_p2(obs, p2_action_prev)
             
-            if p1_action is not None:
-                p1_loss = mimic.p1_model.update(obs, p1_action, terminated)
-                if p1_loss is not None and run_name is not None:
-                    summary_writer.add_scalar("Learning/Loss of P1's model", p1_loss, step)
-                    summary_writer.add_scalar("Learning/Scar size of P1's model", mimic.p1_model.number_of_scars, step)
+            p1_loss = mimic.p1_model.update(obs, p1_action, terminated)
+            if p1_loss is not None and run_name is not None:
+                summary_writer.add_scalar("Learning/Loss of P1's model", p1_loss, step)
+                summary_writer.add_scalar("Learning/Scar size of P1's model", mimic.p1_model.number_of_scars, step)
             
-            if p2_action is not None:
-                p2_loss = mimic.p2_model.update(obs, p2_action, terminated)
-                if p2_loss is not None and run_name is not None:
-                    summary_writer.add_scalar("Learning/Loss of P2's model", p2_loss, step)
-                    summary_writer.add_scalar("Learning/Scar size of P2's model", mimic.p2_model.number_of_scars, step)
+            p2_loss = mimic.p2_model.update(obs, p2_action, terminated)
+            if p2_loss is not None and run_name is not None:
+                summary_writer.add_scalar("Learning/Loss of P2's model", p2_loss, step)
+                summary_writer.add_scalar("Learning/Scar size of P2's model", mimic.p2_model.number_of_scars, step)
                 
             step += 1
 

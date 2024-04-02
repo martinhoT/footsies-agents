@@ -293,16 +293,14 @@ class MimicAnalyserManager:
                     self.p2_gradient_plot.setup("Player 2 learning gradients", 525)
         
     def predict_next_move(self, analyser: Analyser):
-        obs = analyser.previous_observation
         next_obs = analyser.current_observation
 
         # Anything regarding a transition
-        if obs is not None:
+        if analyser.most_recent_transition is not None:
+            obs, next_obs, _, terminated, truncated, info, next_info = analyser.most_recent_transition
+
             # Determine which actions the players did
-            p1_simple, p2_simple = ActionMap.simples_from_transition_ori(
-                analyser.previous_original_observation,
-                analyser.current_original_observation
-            )
+            p1_simple, p2_simple = ActionMap.simples_from_transition_ori(info, next_info)
 
             if p1_simple is not None:
                 p1_simple_move = ActionMap.simple_as_move(p1_simple)
@@ -318,7 +316,7 @@ class MimicAnalyserManager:
 
             # Update P1 model
             if self.learn_p1 and p1_simple is not None:
-                self.p1_model.update(obs, p1_simple)
+                self.p1_model.update(obs, p1_simple, terminated or truncated)
 
                 self.p1_gradient_plot.update(self.p1_model.network.parameters())
                 self.p1_loss_plot.update(self.p1_model.most_recent_loss, self.p1_model.scars.min_loss)
@@ -326,7 +324,7 @@ class MimicAnalyserManager:
             
             # Update P2 model
             if self.learn_p2 and p2_simple is not None:
-                self.p2_model.update(obs, p2_simple)
+                self.p2_model.update(obs, p2_simple, terminated or truncated)
                 
                 self.p2_gradient_plot.update(self.p2_model.network.parameters())
                 self.p2_loss_plot.update(self.p2_model.most_recent_loss, self.p2_model.scars.min_loss)

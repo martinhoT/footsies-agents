@@ -185,20 +185,24 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                         )
                         # NOTE: don't be deluded by the plotted gradients, these are effectively the gradients of the *last* update, no aggregate.
                         #       As such, a lot of information is lost/not presented.
-                        if layer.grad is not None:
-                            self.summary_writer.add_histogram(
-                                layer_name + " [grad]", layer.grad, self.current_step
-                            )
+                        # if layer.grad is not None:
+                        #     self.summary_writer.add_histogram(
+                        #         layer_name + " [grad]", layer.grad, self.current_step
+                        #     )
                     except ValueError as e:
                         raise RuntimeError(f"Oops, exception happened when adding network histogram: '%s', here are the parameters: %s", e, layer) from e
 
             for tag, evaluator in self.custom_evaluators:
-                self.summary_writer.add_scalar(tag, evaluator(), self.current_step)
+                scalar = evaluator()
+                if scalar is not None:
+                    self.summary_writer.add_scalar(tag, scalar, self.current_step)
 
             for tag, evaluator in self.custom_evaluators_over_test_states:
-                self.summary_writer.add_scalar(
-                    tag, evaluator(self.test_states), self.current_step
-                )
+                scalar = evaluator(self.test_states)
+                if scalar is not None:
+                    self.summary_writer.add_scalar(
+                        tag, scalar, self.current_step
+                    )
 
     def preprocess(self, env: Env):
         self.agent.preprocess(env)

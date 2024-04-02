@@ -101,7 +101,8 @@ class PlayerModelNetwork(nn.Module):
 
     def distribution(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.distributions.Categorical:
         """The action distribution at the given observation."""
-        return torch.distributions.Categorical(probs=self.probabilities(obs, hidden))
+        logits, _ = self(obs, hidden)
+        return torch.distributions.Categorical(logits=logits)
 
     @property
     def action_dim(self) -> int:
@@ -124,6 +125,7 @@ class PlayerModelNetwork(nn.Module):
         if hidden is not None:
             # If in the future we need to use the hidden state to compute something, we don't want to backpropagate through this hidden state,
             # or else we would be backpropagating again through the same computational graph and it would get messy.
+            # This hidden state is not meant for updating the network, only for inference.
             self._hidden = hidden.detach()
 
     def reset_hidden_state(self):
@@ -290,10 +292,13 @@ class PlayerModel:
         """
         # If the neural network is recurrent, then we accumulate the arguments over an entire episode until termination
         if self._network.is_recurrent:
-            # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
-            self._network.update_hidden_state(obs)
-
             if action is not None:
+                # Update the action frequencies
+                self._update_action_frequency(action)
+
+                # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
+                # self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
+
                 self._accumulated_args.append((obs, action, multiplier))
             
             if not terminated_or_truncated:
@@ -319,11 +324,11 @@ class PlayerModel:
         # Update the network
         self.optimizer.zero_grad()
 
-        predicted, _ = self._network(obs)
+        predicted, _ = self._network(obs, None)
         distribution = torch.distributions.Categorical(logits=predicted)
         loss = (self.loss_function(predicted, action) * (1 - self._entropy_coef) + -distribution.entropy() * self._entropy_coef) * multiplier
         # We need to manually perform the mean accoding to how many effective examples we have.
-        # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended
+        # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended.
         loss_agg = loss.sum() / multiplier.nonzero().size(dim=0)
         loss_agg.backward()
 
@@ -378,24 +383,21 @@ class PlayerModel:
         self._action_counts[action] = self._action_counts[action] + 1
         self._action_counts_total += 1
 
-        if self._loss_dynamic_weights:
-            # Avoid infinities which are ugly, and too large weights as well
-            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self._loss_dynamic_weights_max)
-        
-        else:
-            self.loss_function.weight = None
+        self._update_loss_function_weights()
 
     def _reset_action_counts(self):
         """Reset the counts of the actions received by the model for updating. This should be done if the opponent changes, or after some time (if the opponent is adapting)."""
         self._action_counts = torch.zeros(self._network.action_dim)
         self._action_counts_total = 0
 
+        self._update_loss_function_weights()
+
+    def _update_loss_function_weights(self):
+        """Update the weights of the loss function given to each class (action). No-op if dynamic loss weights are disabled."""
         if self._loss_dynamic_weights:
-            # Avoid infinities which are ugly, and too large weights as well
-            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self._loss_dynamic_weights_max)
-        
-        else:
-            self.loss_function.weight = None
+            # Avoid infinities which are ugly, and too large weights as well.
+            # The action dimensionality is added so that we get weights of 1 for a uniform frequency distribution.
+            self.loss_function.weight = torch.min(1 / (self.action_frequencies + self.network.action_dim + 1e-8), self._loss_dynamic_weights_max)
 
     @property
     def learnable_layers(self) -> Generator[nn.Module, None, None]:

@@ -18,11 +18,12 @@ from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher, NSpammer
 from agents.utils import FootsiesPhasicMoveProgress
 from agents.logger import TrainingLoggerWrapper
 import logging
+import warnings
 
 
 CUSTOM = False
 MODEL = "to"
-NAME = "f_opp"
+NAME = "f_opp_recurrent"
 LOAD = True
 LOG = False
 ROLLBACK_IF_POSSIBLE = True
@@ -99,6 +100,9 @@ if __name__ == "__main__":
 
     # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
     # idle_distribution[0, 0] = 1.0
+
+    if agent.opponent_model.p2_model.network.is_recurrent:
+        warnings.warn("Since the agent is recurrent, it needs to have 'online learning' enabled in order to have the recurrent state updated. Additionally, loading and saving states is discouraged for the same reason.")
 
     if LOAD:
         load_agent(agent, NAME)
