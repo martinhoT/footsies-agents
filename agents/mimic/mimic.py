@@ -321,36 +321,41 @@ class PlayerModel:
             
             obs, action, multiplier = self._scars.batch
 
+        num_examples = multiplier.nonzero().size(0)
+
         # Update the network
-        self.optimizer.zero_grad()
+        self._most_recent_loss = None
+        if num_examples > 0:
+            self.optimizer.zero_grad()
 
-        predicted, _ = self._network(obs, None)
-        distribution = torch.distributions.Categorical(logits=predicted)
-        loss = (self.loss_function(predicted, action) * (1 - self._entropy_coef) + -distribution.entropy() * self._entropy_coef) * multiplier
-        # We need to manually perform the mean accoding to how many effective examples we have.
-        # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended.
-        loss_agg = loss.sum() / multiplier.nonzero().size(dim=0)
-        loss_agg.backward()
+            predicted, _ = self._network(obs, None)
+            distribution = torch.distributions.Categorical(logits=predicted)
+            loss = (self.loss_function(predicted, action) * (1 - self._entropy_coef) + -distribution.entropy() * self._entropy_coef) * multiplier
+            # We need to manually perform the mean accoding to how many effective examples we have.
+            # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended.
+            loss_agg = loss.sum() / num_examples
+            loss_agg.backward()
 
-        self.optimizer.step()
+            self.optimizer.step()
 
-        # Update the scar store with the newest losses
-        if not self._network.is_recurrent:
-            self._scars.update(loss.detach())
+            # Update the scar store with the newest losses
+            if not self._network.is_recurrent:
+                self._scars.update(loss.detach())
 
-        # Check whether learning is dead
-        if all(
-            not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
-            for layer in self.learnable_layers
-        ):
-            LOGGER.warning("Learning is dead, gradients are 0! (loss: %s)", loss_agg.item())
+            # Check whether learning is dead
+            if all(
+                not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
+                for layer in self.learnable_layers
+            ):
+                LOGGER.warning("Learning is dead, gradients are 0! (loss: %s)", loss_agg.item())
+            
+            self._most_recent_loss = loss_agg.item()
 
         # Reset the player network's hidden state if the episode terminated or truncated
         if terminated_or_truncated:
             self._network.reset_hidden_state()
             self._reset_action_counts()
 
-        self._most_recent_loss = loss_agg.item()
         return self._most_recent_loss
 
     def predict(
@@ -396,8 +401,7 @@ class PlayerModel:
         """Update the weights of the loss function given to each class (action). No-op if dynamic loss weights are disabled."""
         if self._loss_dynamic_weights:
             # Avoid infinities which are ugly, and too large weights as well.
-            # The action dimensionality is added so that we get weights of 1 for a uniform frequency distribution.
-            self.loss_function.weight = torch.min(1 / (self.action_frequencies + self.network.action_dim + 1e-8), self._loss_dynamic_weights_max)
+            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self._loss_dynamic_weights_max)
 
     @property
     def learnable_layers(self) -> Generator[nn.Module, None, None]:
