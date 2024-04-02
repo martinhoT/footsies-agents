@@ -24,8 +24,8 @@ class CurriculumManager(OpponentManager):
     
         self._current_opponent_idx = 0
         self._opponents = sorted([
-            # Idle(),
-            # Backer(),
+            Idle(),
+            Backer(),
             NSpammer(),
             BSpammer(),
             NSpecialSpammer(),

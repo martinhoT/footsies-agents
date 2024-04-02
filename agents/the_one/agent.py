@@ -202,7 +202,6 @@ class FootsiesAgent(FootsiesAgentTorch):
             opponent_policy = info.get("next_opponent_policy", None)
             if opponent_policy is not None:
                 predicted_opponent_action = random.choices(range(self.opponent_action_dim), weights=opponent_policy, k=1)[0]
-                print(predicted_opponent_action)
             else:
                 predicted_opponent_action = None
 
@@ -229,7 +228,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.opponent_model is not None:
             if "next_opponent_policy" in info:
                 warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
-            info["next_opponent_policy"] = self.opponent_model.p2_model.probabilities(next_obs).T
+            info["next_opponent_policy"] = self.opponent_model.p2_model.probabilities(next_obs).squeeze()
 
         # Update the different models
         self.a2c.update(next_obs, reward, terminated, truncated, info)

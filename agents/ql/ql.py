@@ -98,6 +98,9 @@ class QFunction(ABC):
         If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a uniform random policy in the next observation.
         Can also be a string: "greedy" for a greedy policy, or "uniform" for a uniform random policy.
         """
+        if next_opponent_policy.dim() > 2:
+            raise ValueError("expected next_opponent_policy to be a column vector, but found a >2D tensor instead")
+
         if terminated:
             nxt_value = 0.0
         

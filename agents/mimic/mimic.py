@@ -297,7 +297,7 @@ class PlayerModel:
                 self._update_action_frequency(action)
 
                 # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
-                # self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
+                self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
 
                 self._accumulated_args.append((obs, action, multiplier))
             
