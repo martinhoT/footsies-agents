@@ -14,5 +14,5 @@ python3 main.py $agent \
         dense_reward False \
     --env.kwargs \
         render_mode human \
-    --misc.log-frequency 1000 \
+    --misc.log-frequency 10000 \
     "$@"

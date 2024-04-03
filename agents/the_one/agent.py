@@ -8,11 +8,12 @@ from agents.action import ActionMap
 from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Callable, Tuple
-from agents.the_one.model import FullModel, RepresentationModule, AbstractGameModel
+from agents.the_one.model import FullModel, RepresentationModule
 from agents.the_one.reaction_time import ReactionTimeEmulator
 from agents.a2c.agent import FootsiesAgent as A2CAgent
 from agents.a2c.a2c import ActorNetwork
 from agents.mimic.agent import FootsiesAgent as MimicAgent
+from agents.game_model.agent import FootsiesAgent as GameModelAgent
 from agents.torch_utils import observation_invert_perspective_flattened
 from data import FootsiesDataset
 
@@ -31,7 +32,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         a2c: A2CAgent,
         representation: RepresentationModule | None = None,
         opponent_model: MimicAgent | None = None,
-        game_model: AbstractGameModel | None = None,
+        game_model: GameModelAgent | None = None,
         reaction_time_emulator: ReactionTimeEmulator | None = None,
         # Modifiers
         remove_special_moves: bool = False,
@@ -60,10 +61,10 @@ class FootsiesAgent(FootsiesAgentTorch):
         # Validate arguments
         if rollback_as_opponent_model and opponent_model is not None:
             raise ValueError("can't have an opponent model when using the rollback strategy as an opponent predictor, can only use one or the other")
-        if game_model is not None:
-            raise ValueError("using a game model is not supported")
         if reaction_time_emulator is not None and opponent_model is None:
             raise ValueError("can't use reaction time without an opponent model, since reaction time depends on how well we model the opponent's behavior")
+        if reaction_time_emulator is not None and game_model is None:
+            raise ValueError("can't use reaction time without a game model, since prediction of the actual current observation depends on the game model")
 
         LOGGER.info("Agent was setup with opponent prediction strategy: %s", "rollback" if rollback_as_opponent_model else "opponent model" if opponent_model is not None else "random (unless doing curriculum learning)")
 
@@ -75,7 +76,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         #  Modules
         self.representation = representation
         self.a2c = a2c
-        self.game_model = game_model
+        self.env_model = game_model
         self.opponent_model = opponent_model
         self.reaction_time_emulator = reaction_time_emulator
         #  Modifiers
@@ -84,17 +85,17 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         # To report in the `model` property
         self._full_model = FullModel(
-            game_model=self.game_model,
+            game_model=self.env_model,
             opponent_model=None if self.opponent_model is None else self.opponent_model.p2_model.network,
             actor_critic=self.a2c.model,
         )
 
         # Optimizers. The actor-critic module already takes care of its own optimizers.
-        if self.game_model is not None:
-            self.game_model_optimizer = torch.optim.SGD(self.game_model.parameters(), lr=game_model_learning_rate)
+        if self.env_model is not None:
+            self.game_model_optimizer = torch.optim.SGD(self.env_model.parameters(), lr=game_model_learning_rate)
 
-        # The variables regarding the currently perceived observation and information.
-        # If using reaction time, these may be delayed in time.
+        # The variables regarding the current observation and information.
+        # These variables are independent of perception, i.e. reaction time.
         self.current_observation = None
         self.current_info = None
         self.current_representation = None
@@ -132,7 +133,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         """
         raise NotImplementedError("not supported")
     
-        if len(self.game_model.game_model_layers) > 1:
+        if len(self.env_model.game_model_layers) > 1:
             raise ValueError("the game model must be linear to use this method")
         if len(self.opponent_model.opponent_model_layers) > 1:
             raise ValueError("the opponent model must be linear to use this method")
@@ -154,7 +155,7 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         # Game model, opponent model and agent policy parameters.
         # Make the bias vectors column vectors to make sure operations are done correctly.
-        game_model_parameters = dict(self.game_model.game_model_layers[0].named_parameters())
+        game_model_parameters = dict(self.env_model.game_model_layers[0].named_parameters())
         W_g = game_model_parameters["weight"].data
         b_g = game_model_parameters["bias"].data.unsqueeze(1)
         
@@ -180,20 +181,24 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     # It's in this function that the current observation and representation variables are updated
     def act(self, obs: torch.Tensor, info: dict) -> int:
+        self.current_observation = obs
+        self.current_info = info
+
         # Update the reaction time emulator and substitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
             if self.current_observation is None:
                 self.reaction_time_emulator.fill_history((obs, info))
                 self.current_observation = obs
-
-            # We reuse the observation from update()!
-            # NOTE: this assumes that act will be called after update, in a sequential fashion.
+            
             else:
+                opponent_distribution = self.opponent_model.p2_model.probabilities(self.current_observation)
+                decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, opponent_distribution, detached=True)
+                (next_obs, info), reaction_time = self.reaction_time_emulator.register_and_perceive((next_obs, info), decision_distribution.entropy().item())
+                LOGGER.debug("Reacted with decision distribution %s and entropy %s, resulting in a reaction time of %s", decision_distribution.probs, decision_distribution.entropy().item(), reaction_time)
+
                 obs = self.current_observation
                 info = self.current_info
 
-        self.current_observation = obs
-        self.current_info = info
         if self.opponent_model is not None:
             predicted_opponent_action = self.opponent_model.p2_model.predict(obs)
         elif self.rollback_as_opponent_model:
@@ -209,18 +214,14 @@ class FootsiesAgent(FootsiesAgentTorch):
         self._recently_predicted_opponent_action = predicted_opponent_action
         return action
 
+    # NOTE: reaction time is not used here, it's only used for acting not for learning.
+    #       We aren't considering delayed information for the updates, since neural network updates are slow and thus
+    #       it's unlikely that these privileged updates are going to make a difference. In turn, the code is simpler.
     def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
-        # Update the reaction time emulator and substitute next_obs with a perceived observation, which is delayed
-        if self.reaction_time_emulator is not None:
-            opponent_distribution = self.opponent_model.p2_model.probabilities(self.current_observation)
-            decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation, opponent_distribution, detached=True)
-            (next_obs, info), reaction_time = self.reaction_time_emulator.register_and_perceive((next_obs, info), decision_distribution.entropy().item())
-            LOGGER.debug("Reacted with decision distribution %s and entropy %s, resulting in a reaction time of %s", decision_distribution.probs, decision_distribution.entropy().item(), reaction_time)
-
         # Get the actions that were effectively performed by each player on the previous step
         agent_action, opponent_action = ActionMap.simples_from_transition_ori(self.current_info, info)
         if self.remove_agent_special_moves:
-            # Convert the detected special move input (how did it even happen??) to a simple action
+            # Convert the detected special move input to a simple action
             if agent_action == 8 or agent_action == 7:
                 LOGGER.warning("We detected the agent performing a special move, even though they can't perform special moves! Will convert to the respective attack action.\nCurrent observation: %s\nNext observation: %s", self.current_observation, next_obs)
                 agent_action -= 2
@@ -232,47 +233,46 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         # Update the different models
         self.a2c.update(next_obs, reward, terminated, truncated, info)
-        if self.game_model is not None:
-            self._update_game_model(self.current_observation, agent_action, opponent_action, next_obs)
+        if self.env_model is not None:
+            self.env_model.update_with_simple_actions(self.current_observation, agent_action, opponent_action, next_obs)
         if self.opponent_model is not None:
             self.opponent_model.update_with_simple_actions(self.current_observation, None, opponent_action, terminated or truncated)
 
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
-        # that originated the temporal action in the first place. This is important for the rollback-based prediction strategy.
-        # This variable is only used for the rollback-based prediction anyway.
+        # that originated the temporal action in the first place.
         self.previous_valid_opponent_action = opponent_action if opponent_action is not None else self.previous_valid_opponent_action
 
         # The reaction time emulator needs to know when an episode terminated/truncated.
-        # We also reset the opponent model, since the opponent may change/adapt between episodes.
         if terminated or truncated:
             self.current_observation = None
             self.current_info = None
+    
+    def multi_step_prediction(self, obs: torch.Tensor, n: int) -> torch.Tensor:
+        """Predict the observation `n` time steps into the future, using the agent's policy, opponent model and game model."""
+        o = self.env_model.game_model.preprocess_observation(obs)
+        # We trust that the opponent model, internally, contains the hidden state of the last perceived observation only
+        opponent_model_hidden_state = "auto"
+        for _ in range(n):
+            p1_actionable = ActionMap.is_state_actionable_torch(o, True)
+            p2_actionable = ActionMap.is_state_actionable_torch(o, False)
+
+            # At frameskipping we assume the action to be no-op to match what the game model was trained on
+            # TODO: support "last" action assumption, like in the critic
+            if p1_actionable:
+                p1_action = self.a2c.learner.actor.probabilities(o, p2_action)
+            else:
+                p1_action = torch.tensor(0)
+
+            if p2_actionable:
+                p2_action, opponent_model_hidden_state = self.opponent_model.p2_model.network.probabilities(o, opponent_model_hidden_state)
+            else:
+                p2_action = torch.tensor(0)
+            
+            o = self.env_model.game_model.network(o, p1_action, p2_action)
         
-        # Setup observation and info for the next `act` call.
-        # This is important when using the reaction time emulator.
-        else:
-            self.current_observation = next_obs
-            self.current_info = info
-
-    def _update_game_model(self, obs: torch.Tensor, agent_action: int, opponent_action: int, next_obs: torch.Tensor):
-        """Calculate the game model loss, backpropagate and optimize"""
-        if self.game_model is None:
-            raise ValueError("agent wasn't instantiated with a game model, can't learn it")
-        
-        self.game_model_optimizer.zero_grad()
-
-        with torch.no_grad():
-            next_representation_target = self.representation(next_obs)
-
-        next_representation_predicted = self.game_model(obs, agent_action, opponent_action)
-        game_model_loss = torch.nn.functional.mse_loss(next_representation_predicted, next_representation_target)
-        game_model_loss.backward()
-
-        self.game_model_optimizer.step()
-
-        self._cumulative_loss_game_model += game_model_loss.item()
-        self._cumulative_loss_game_model_n += 1
+        final_obs = self.env_model.game_model.postprocess_prediction(o)
+        return final_obs
 
     def initialize(
         self,
@@ -383,9 +383,9 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.a2c.load(folder_path)
 
         # Load game model
-        if self.game_model is not None:
+        if self.env_model is not None:
             game_model_path = os.path.join(folder_path, "game_model")
-            self.game_model.load_state_dict(torch.load(game_model_path))
+            self.env_model.load_state_dict(torch.load(game_model_path))
 
         # Load opponent model (even though this is meant to be discardable)
         if self.opponent_model is not None:
@@ -396,23 +396,13 @@ class FootsiesAgent(FootsiesAgentTorch):
         self.a2c.save(folder_path)
 
         # Save game model
-        if self.game_model is not None:
+        if self.env_model is not None:
             game_model_path = os.path.join(folder_path, "game_model")
-            torch.save(self.game_model.state_dict(), game_model_path)
+            torch.save(self.env_model.state_dict(), game_model_path)
         
         # Save opponent model (even though this is meant to be discardable)
         if self.opponent_model is not None:
             self.opponent_model.save(folder_path)
-
-    def evaluate_average_loss_game_model_and_clear(self) -> float:
-        res = (
-            self._cumulative_loss_game_model / self._cumulative_loss_game_model_n
-        ) if self._cumulative_loss_game_model_n != 0 else 0
-
-        self._cumulative_loss_game_model = 0
-        self._cumulative_loss_game_model_n = 0
-
-        return res
 
     def _initialize_test_states(self, test_states: list[torch.Tensor]):
         if self._test_observations is None:

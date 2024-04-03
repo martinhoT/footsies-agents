@@ -220,6 +220,8 @@ def create_env(args: EnvArgs) -> Env:
         )
 
         if args.footsies_wrapper_norm:
+            if not args.footsies_wrapper_norm_guard:
+                raise NotImplementedError("non-normalized guard observation variable is not supported until ActionMap (and potentially other regions of code) are slice-independent when evaluating observation regions")
             env = FootsiesNormalized(env, normalize_guard=args.footsies_wrapper_norm_guard)
 
         if args.footsies_wrapper_history:

@@ -89,20 +89,20 @@ class PlayerModelNetwork(nn.Module):
 
         return output, hidden_state
 
-    def probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.Tensor:
+    def probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor]:
         """The action probabilities at the given observation."""
-        logits, _ = self(obs, hidden)
-        return self.softmax(logits)
+        logits, hidden = self(obs, hidden)
+        return self.softmax(logits), hidden
 
-    def log_probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.Tensor:
+    def log_probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor]:
         """The action log-probabilities at the given observation."""
-        logits, _ = self(obs, hidden)
-        return self.log_softmax(logits)
+        logits, hidden = self(obs, hidden)
+        return self.log_softmax(logits), hidden
 
-    def distribution(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.distributions.Categorical:
+    def distribution(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.distributions.Categorical, torch.Tensor]:
         """The action distribution at the given observation."""
-        logits, _ = self(obs, hidden)
-        return torch.distributions.Categorical(logits=logits)
+        logits, hidden = self(obs, hidden)
+        return torch.distributions.Categorical(logits=logits), hidden
 
     @property
     def action_dim(self) -> int:
@@ -297,7 +297,7 @@ class PlayerModel:
                 self._update_action_frequency(action)
 
                 # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
-                self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
+                # self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
 
                 self._accumulated_args.append((obs, action, multiplier))
             
@@ -374,8 +374,9 @@ class PlayerModel:
                 return distribution.sample()
 
     def probabilities(self, obs: torch.Tensor) -> torch.Tensor:
-        """Get the predicted action probabilities at the given observation. The probabilities are detached from any computation graph."""
-        return self._network.probabilities(obs).detach()
+        """Get the predicted action probabilities at the given observation. The probabilities are detached from the computation graph."""
+        probs, _ = self._network.probabilities(obs).detach()
+        return probs
 
     def load(self, path: str):
         self._network.load_state_dict(torch.load(path))

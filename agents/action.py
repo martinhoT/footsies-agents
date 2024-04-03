@@ -209,7 +209,15 @@ class ActionMap:
     
     @staticmethod
     def simples_from_transition_torch(obs: torch.Tensor, next_obs: torch.Tensor) -> tuple[int, int]:
-        """Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as PyTorch tensors. If an action was ineffectual, return `None`. This is a convenience method that should be used for obtaining simple actions from gameplay."""
+        """
+        Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as PyTorch tensors.
+        If an action was ineffectual, return `None`.
+        This is a convenience method that should be used for obtaining simple actions from gameplay.
+        No batch support.
+        """
+        if obs.size(0) > 1 or next_obs.size(0) > 1:
+            raise ValueError("batched observations are not supported for this method")
+
         p1_move_progress = obs[0, 32].item()
         p2_move_progress = obs[0, 33].item()
         p1_move_index = torch.argmax(obs[0, 2:17]).item()
@@ -273,12 +281,12 @@ class ActionMap:
     _HIT_GUARD_STATES_TORCH: torch.Tensor = None
 
     @staticmethod
-    def is_in_hitstop_torch(obs: torch.Tensor, p1: bool = True) -> bool:
-        """Whether the player, at the given PyTorch tensor observation, is in hitstop."""
+    def is_in_hitstop_torch(obs: torch.Tensor, p1: bool = True) -> torch.Tensor:
+        """Whether the player, at the given PyTorch tensor observation, is in hitstop. Supports a batch of observations."""
         idx = 0 if p1 else 1
         
-        player_move_index = obs[:, 2 + idx * 15:17 + idx * 15].argmax(dim=1)
-        opponent_move_index = obs[:, 17 - idx * 15:32 - idx * 15].argmax(dim=1)
+        player_move_index = obs[:, 2 + idx * 15:17 + idx * 15].argmax(dim=-1)
+        opponent_move_index = obs[:, 17 - idx * 15:32 - idx * 15].argmax(dim=-1)
 
         agent_in_temporal_action = torch.isin(player_move_index, ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH, assume_unique=True)
 
@@ -304,7 +312,7 @@ class ActionMap:
     
     @staticmethod
     def is_state_actionable_ori(obs: dict, p1: bool = True) -> bool:
-        """Whether the player, at the current move state, is able to perform an action, from the given original observation (assumes player 1's perspective)."""
+        """Whether the player, at the current move state, is able to perform an action, from the given original observation."""
         idx = 0 if p1 else 1
         player_move_frame = obs["move_frame"][idx]
         opponent_move_frame = obs["move_frame"][1 - idx]
@@ -313,6 +321,26 @@ class ActionMap:
         player_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
         opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
         return ActionMap.is_state_actionable(player_move_state, opponent_move_state, player_move_frame, opponent_move_frame)
+
+    @staticmethod
+    def is_state_actionable_torch(obs: torch.Tensor, p1: bool = True) -> torch.Tensor:
+        """Whether the player, at the current move state, is able to perform an action, from the given PyTorch observation. No batch support."""
+        if obs.size(0) > 1:
+            raise ValueError("batched observations are not supported for this method")
+
+        idx = 0 if p1 else 1
+        player_move_progress = obs[0, 32 + idx]
+        opponent_move_progress = obs[0, 33 - idx]
+        player_move_index = obs[0, 2 + idx * 15:17 + idx * 15].argmax(dim=-1)
+        opponent_move_index = obs[0, 17 - idx * 15:32 - idx * 15].argmax(dim=-1)
+        player_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
+        opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
+        
+        player_move_frame = (player_move_progress * player_move_state.value.duration).round().item()
+        opponent_move_frame = (opponent_move_progress * opponent_move_state.value.duration).round().item()
+
+        return ActionMap.is_state_actionable(player_move_state, opponent_move_state, player_move_frame, opponent_move_frame)
+        
 
     @staticmethod
     def is_simple_action_commital(simple: int) -> bool:

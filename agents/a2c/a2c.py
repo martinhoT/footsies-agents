@@ -7,6 +7,7 @@ from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
 from enum import Enum
 from agents.action import ActionMap
+from typing import Literal
 
 LOGGER = logging.getLogger("main.a2c")
 
@@ -339,7 +340,7 @@ class A2CQLearner(A2CLearnerBase):
         ppo_objective_clip_coef: float = 0.2,
         alternative_advantage: bool = True,
         accumulate_at_frameskip: bool = False,
-        broadcast_at_frameskip: bool = False,
+        critic_assumed_action_at_frameskip: Literal["last", "none", "any"] = "last",
     ):
         """
         Implementation of a custom actor-critic algorithm with a Q-value table/network for the critic
@@ -362,30 +363,33 @@ class A2CQLearner(A2CLearnerBase):
         - `ppo_objective`: whether to use the clipped surrogate objective of the Proximal Policy Optimization algorithm, which considers the ratio of the new and old action probabilities when optimizing over multiple epochs
         - `ppo_objective_clip_coef`: the coefficient for the clipping of the ratio of the new and old action probabilities. If the ratio is outside of the range `[1 - clip_coef, 1 + clip_coef]`, then it is clipped to that range
         - `alternative_advantage`: whether to use the alternative advantage formula, which considers the reward as-is and is less reliant on the critic converging to the correct values.
-        - `accumulate_at_frameskip`: whether to accumulate the updates when frameskipping. This way, the agent effectively.
+        - `accumulate_at_frameskip`: whether to accumulate the updates when frameskipping.
         The environment will lose some theoretical properties, such as the Markov property and stationarity.
         It should, however, greatly facilitate credit assignment.
         This should allow the actor to learn sooner
-        - `broadcast_at_frameskip`: when frameskipping (i.e. the agent's or opponent's action is `None`), we can do one of two things:
-            - Either consider the agent/opponent to be doing any action (update on all actions), corresponding to `True`
-            - Or consider the agent/opponent to still be doing the originating action before frameskipping (update on a single action), corresponding to `False`
+        - `critic_assumed_action_at_frameskip`: when frameskipping (i.e. the agent's or opponent's action is `None`), we can do one of three things:
+            - Consider the agent/opponent to be doing any action (update on all actions), corresponding to `"any"`
+            - Consider the agent/opponent to still be doing the originating action before frameskipping (update on a single action), corresponding to `"last"`
+            - Consider the agent/opponent to do the no-op action (0), corresponding to `"none"`
         
-        If using a Q-value table, it's recommended to use `broadcast_at_frameskip` with `True`, since it's more correct.
+        If using a Q-value table, it's recommended to use `broadcast_at_frameskip` with `"any"`, since it's more correct.
         However, if using a function approximator such as a neural network, it's likely that the broadcasts will leak into the state in which the original action
         was performed (since states are mostly similar), which will cause the Q-values to be uniform at that state.
-        In such cases, it's recommended to use `broadcast_at_frameskip` with `False`.
+        In such cases, it's recommended to use `broadcast_at_frameskip` with either `"last"` or `"none"`.
         """
         if not isinstance(agent_update_style, self.UpdateStyle):
             raise ValueError(f"'agent_update_style' must be an instance of {self.UpdateStyle}, not {type(agent_update_style)}")
         if not isinstance(opponent_update_style, self.UpdateStyle):
             raise ValueError(f"'opponent_update_style' must be an instance of {self.UpdateStyle}, not {type(opponent_update_style)}")
+        if critic_assumed_action_at_frameskip not in ("any", "last", "none"):
+            raise ValueError("'critic_assumed_action_at_frameskip' must be either 'any', 'last' or 'none'")
         if agent_update_style == self.UpdateStyle.UNIFORM:
             LOGGER.warning("Considering the agent to be following a uniform random policy doesn't make much sense, and is not recommended")
         if agent_update_style == self.UpdateStyle.SARSA:
             raise NotImplementedError("SARSA updates are not supported for the agent")
         if opponent_update_style == self.UpdateStyle.SARSA:
             raise NotImplementedError("SARSA updates are not supported for the opponent")
-        if broadcast_at_frameskip and ppo_objective:
+        if critic_assumed_action_at_frameskip == "any" and ppo_objective:
             raise ValueError("broadcasting when frameskipping is not supported when using the PPO objective, since during epoched updates we need to know exactly which actions were performed by the agent or opponent")
         if maxent != 0.0 and actor_entropy_loss_coef != 0.0:
             LOGGER.warning("Using both the MaxEnt RL objective and the actor entropy loss coefficient is not recommended. If an effect similar to the entropy loss is meant to be used, activate the `maxent_gradient_flow` argument")
@@ -407,7 +411,7 @@ class A2CQLearner(A2CLearnerBase):
         self._ppo_objective_clip_coef = ppo_objective_clip_coef
         self._alternative_advantage = alternative_advantage
         self._accumulate_at_frameskip = accumulate_at_frameskip
-        self._broadcast_at_frameskip = broadcast_at_frameskip
+        self._critic_assumed_action_at_frameskip = critic_assumed_action_at_frameskip
 
         self.action_dim = self._critic.action_dim
         self.opponent_action_dim = self._critic.opponent_action_dim
@@ -604,11 +608,14 @@ class A2CQLearner(A2CLearnerBase):
         # If the agent will be frameskipped...
         if agent_will_frameskip:
             # ... then we consider they will be doing any of their actions (uniform random policy).
-            if self._broadcast_at_frameskip:
+            if self._critic_assumed_action_at_frameskip == "any":
                 next_obs_agent_policy = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
             # ... then we consider they will keep doing the action before frameskipping.
-            else:
+            elif self._critic_assumed_action_at_frameskip == "last":
                 next_obs_agent_policy = nn.functional.one_hot(torch.tensor(agent_action), num_classes=self.action_dim).float().unsqueeze(1).expand(-1, self.opponent_action_dim)
+            # ... unless we consider them to be doing nothing.
+            else:
+                next_obs_agent_policy = nn.functional.one_hot(torch.tensor(0), num_classes=self.action_dim).float().unsqueeze(1).expand(-1, self.opponent_action_dim)
         
         # If the agent could act, then it makes sense for it to have a policy.
         # We have to construct it manually since it is not provided as an argument.
@@ -635,11 +642,14 @@ class A2CQLearner(A2CLearnerBase):
         # If the opponent will be frameskipped...
         if opponent_will_frameskip:
             # ... then we consider they will be doing any of their actions (uniform random policy).
-            if self._broadcast_at_frameskip:
+            if self._critic_assumed_action_at_frameskip == "any":
                 next_obs_opponent_policy = torch.ones(self.opponent_action_dim, 1).float() / (self.opponent_action_dim)
             # ... then we consider they will keep doing the action before frameskipping.
-            else:
+            elif self._critic_assumed_action_at_frameskip == "last":
                 next_obs_opponent_policy = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
+            # ... unless we consider them to be doing nothing.
+            else:
+                next_obs_opponent_policy = nn.functional.one_hot(torch.tensor(0), num_classes=self.opponent_action_dim).float().unsqueeze(1)
 
         else:
             # Keep the opponent's next policy, which should have been provided as an argument
@@ -699,11 +709,17 @@ class A2CQLearner(A2CLearnerBase):
         elif self._last_valid_opponent_action is None:
             raise RuntimeError("the opponent is being frameskipped, but we don't remember them having ever performed an action")
 
-        if not self.broadcast_at_frameskip:
-            obs_agent_action = self._last_valid_agent_action
+        if obs_agent_action is None:
+            if self._critic_assumed_action_at_frameskip == "last":
+                obs_agent_action = self._last_valid_agent_action
+            elif self._critic_assumed_action_at_frameskip == "none":
+                obs_agent_action = 0
 
-        if not self.broadcast_at_frameskip:
-            obs_opponent_action = self._last_valid_opponent_action
+        if obs_opponent_action is None:
+            if self._critic_assumed_action_at_frameskip == "last":
+                obs_opponent_action = self._last_valid_opponent_action
+            elif self._critic_assumed_action_at_frameskip == "none":
+                obs_opponent_action = 0
 
         next_obs_agent_policy = self._effective_next_agent_policy(obs_agent_action, agent_will_frameskip, next_obs)
         next_obs_opponent_policy = self._effective_next_opponent_policy(obs_opponent_action, opponent_will_frameskip, next_obs_opponent_policy)
@@ -816,11 +832,11 @@ class A2CQLearner(A2CLearnerBase):
     
     @property
     def broadcast_at_frameskip(self) -> bool:
-        return self._broadcast_at_frameskip
+        return self._critic_assumed_action_at_frameskip
     
     @broadcast_at_frameskip.setter
     def broadcast_at_frameskip(self, value: bool):
-        self._broadcast_at_frameskip = value
+        self._critic_assumed_action_at_frameskip = value
 
     @property
     def maxent(self) -> float:

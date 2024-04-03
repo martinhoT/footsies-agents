@@ -4,7 +4,7 @@ from torch import nn
 from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
 from gymnasium import Env
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Literal
 from agents.game_model.game import GameModel
 
 
@@ -21,6 +21,8 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self._current_observation = None
         self._current_info = None
+        self._last_valid_p1_action = 0
+        self._last_valid_p2_action = 0
 
         self.cumulative_loss = 0
         self.cumulative_loss_n = 0
@@ -34,8 +36,20 @@ class FootsiesAgent(FootsiesAgentBase):
         self._current_info = info
         return 0
 
-    def update_with_simple_actions(self, obs: torch.Tensor, p1_action: int, p2_action: int, next_obs: torch.Tensor):
+    def update_with_simple_actions(self, obs: torch.Tensor, p1_action: int | None, p2_action: int | None, next_obs: torch.Tensor):
         """Perform an update with the given simple actions, useful to avoid recomputing them."""
+        if p1_action is None:
+            # p1_action = self._last_valid_p1_action
+            p1_action = 0
+        else:
+            self._last_valid_p1_action = p1_action
+
+        if p2_action is None:
+            # p2_action = self._last_valid_p2_action
+            p2_action = 0
+        else:
+            self._last_valid_p2_action = p2_action
+
         guard_loss, move_loss, move_progress_loss, position_loss = self._game_model.update(obs, p1_action, p2_action, next_obs)
 
         self.cumulative_loss_guard += guard_loss
@@ -98,11 +112,11 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def load(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")
-        self.game_model.load_state_dict(torch.load(model_path))
+        self.game_model.network.load_state_dict(torch.load(model_path))
 
     def save(self, folder_path: str):
         model_path = os.path.join(folder_path, "model_weights.pth")
-        torch.save(self.game_model.state_dict(), model_path)        
+        torch.save(self.game_model.network.state_dict(), model_path)        
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         return lambda s: None

@@ -148,7 +148,7 @@ class ReactionTimeEmulator:
         decision_entropy: float,
     ) -> tuple[T, int]:
         """
-        Perform registration and perception of a delayed obsrvation all in a single method, for convenience. This is the primary method that should be used at every environment step.
+        Perform registration of the current observation and perception of a delayed observation all in a single method, for convenience. This is the primary method that should be used at every environment step.
         The decision entropy should be provided in nats.
         
         Note: the decision entropy is calculated according to the last reaction time computed through this method, which is initially the maximum possible (perceives the oldest observation).

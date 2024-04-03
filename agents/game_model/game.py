@@ -11,8 +11,8 @@ class GameModelNetwork(nn.Module):
     def __init__(
         self,
         obs_dim: int,
-        agent_action_dim: int,
-        opponent_action_dim: int,
+        p1_action_dim: int,
+        p2_action_dim: int,
         hidden_layer_sizes: list[int] = None,
         hidden_layer_activation: type[nn.Module] = nn.LeakyReLU,
         residual: bool = False,
@@ -26,8 +26,8 @@ class GameModelNetwork(nn.Module):
         Parameters
         ----------
         - `obs_dim`: the dimension of the observation space
-        - `agent_action_dim`: the dimension of the agent's action space    
-        - `opponent_action_dim`: the dimension of the opponent's action space
+        - `p1_action_dim`: the dimension of the agent's action space    
+        - `p2_action_dim`: the dimension of the opponent's action space
         - `hidden_layer_sizes`: list of hidden layer sizes
         - `hidden_layer_activation`: activation function for the hidden layers
         - `residual`: whether to use a residual-style architecture in the SSBM paper "At Human Speed: Deep Reinforcement Learning with Action Delay"
@@ -37,9 +37,11 @@ class GameModelNetwork(nn.Module):
         """
         super().__init__()
         
-        input_dim = obs_dim + agent_action_dim + opponent_action_dim
+        input_dim = obs_dim + p1_action_dim + p2_action_dim
         
         self._residual = residual
+        self._p1_action_dim = p1_action_dim
+        self._p2_action_dim = p2_action_dim
 
         if residual:
             self._delta_network = residual_delta if residual_delta is not None else create_layered_network(
@@ -58,14 +60,19 @@ class GameModelNetwork(nn.Module):
             )
 
     def forward(self, obs: torch.Tensor, p1_action: torch.Tensor, p2_action: torch.Tensor) -> torch.Tensor:
+        if p1_action.size(1) == 1:
+            p1_action = F.one_hot(p1_action, num_classes=self._p1_action_dim).float()
+        if p2_action.size(1) == 1:
+            p2_action = F.one_hot(p2_action, num_classes=self._p2_action_dim).float()
+        
         if self._residual:
             x = torch.hstack((obs, p1_action, p2_action))
             
-            F = self._forget_network(x)
-            D = self._delta_network(x)
-            N = self._new_network(x)
+            f = self._forget_network(x)
+            d = self._delta_network(x)
+            n = self._new_network(x)
 
-            res = F * (obs + D) + (1 - F) * N
+            res = f * (obs + d) + (1 - f) * n
 
         else:
             res = self._layers(x)
@@ -82,8 +89,6 @@ class GameModel:
     def __init__(
         self,
         game_model_network: GameModelNetwork,
-        by_observation_differences: bool = False,
-        mini_batch_size: int = 1,
         learning_rate: float = 1e-2,
         discrete_conversion: bool = False,
         discrete_guard: bool = False,
@@ -100,8 +105,6 @@ class GameModel:
 
         Parameters
         ----------
-        - `by_observation_differences`: the linear variables `guard`, `move_progress` and `position` in the prediction target will be the differences between the next and current observations
-        - `move_transition_scale`: importance given to transitions between moves, which are important to model. This scale is applied to the loss of the respective example in which a transition occurred
         - `discrete_conversion`: whether to convert the discrete components of the observation (i.e. the moves) to logits before feeding them to the network
         - `discrete_guard`: whether the guard variable is discrete, and should be treated as such
         - `epoch_timesteps`: the number of total timesteps (i.e. update calls) to accumulate before updating
@@ -115,10 +118,6 @@ class GameModel:
         self._epoch_timesteps = epoch_timesteps
         self._epoch_epochs = epoch_epochs
         self._epoch_minibatch_size = epoch_minibatch_size
-
-        self.by_observation_differences = by_observation_differences
-        self.mini_batch_size = mini_batch_size
-        self.learning_rate = learning_rate
 
         self.optimizer = torch.optim.SGD(params=self._network.parameters(), lr=learning_rate)
 
@@ -158,22 +157,34 @@ class GameModel:
                 obs[:, self._move_p2_slice] = probs_to_logits(obs[:, self._move_p2_slice])
             obs[:, self._move_p1_slice] = probs_to_logits(obs[:, self._move_p1_slice])
             obs[:, self._move_p2_slice] = probs_to_logits(obs[:, self._move_p2_slice])
+        
         return obs
 
-    def predict(self, obs: torch.Tensor, p1_action: torch.Tensor | int, p2_action: torch.Tensor | int) -> torch.Tensor:
-        """Predict the next observation given the current observation and each player's action. The result is detached from the computational graph."""
-        p1_action = torch.as_tensor(p1_action)
-        p2_action = torch.as_tensor(p2_action)
-
+    def predict(self, obs: torch.Tensor, p1_action: torch.Tensor | int, p2_action: torch.Tensor | int, raw: bool = False) -> torch.Tensor:
+        """Predict the next observation given the current observation and each player's action (either as a probability distribution or as the action ID). The result is detached from the computational graph."""
+        obs = self.preprocess_observation(obs)
+        
         next_obs = self._network(obs, p1_action, p2_action).detach()
         
-        if self._discrete_guard:
-            next_obs[:, self._guard_p1_slice] = logits_to_probs(next_obs[:, self._guard_p1_slice])
-            next_obs[:, self._guard_p2_slice] = logits_to_probs(next_obs[:, self._guard_p2_slice])
-        next_obs[:, self._move_p1_slice] = logits_to_probs(next_obs[:, self._move_p1_slice])
-        next_obs[:, self._move_p2_slice] = logits_to_probs(next_obs[:, self._move_p2_slice])
+        next_obs = self.postprocess_prediction(next_obs)
 
         return next_obs
+
+    def preprocess_observation(self, obs: torch.Tensor) -> torch.Tensor:
+        """Preprocess an observation before passing it to the network."""
+        return self._convert_discrete_components(obs)
+
+    def postprocess_prediction(self, prediction: torch.Tensor) -> torch.Tensor:
+        """Postprocess a network prediction to fit the expected observation structure."""
+        prediction = prediction.clone()
+        
+        if self._discrete_guard:
+            prediction[:, self._guard_p1_slice] = logits_to_probs(prediction[:, self._guard_p1_slice])
+            prediction[:, self._guard_p2_slice] = logits_to_probs(prediction[:, self._guard_p2_slice])
+        prediction[:, self._move_p1_slice] = logits_to_probs(prediction[:, self._move_p1_slice])
+        prediction[:, self._move_p2_slice] = logits_to_probs(prediction[:, self._move_p2_slice])
+
+        return prediction
 
     # @epoched
     def update(self, obs: torch.Tensor, p1_action: torch.Tensor | int, p2_action: torch.Tensor | int, next_obs: torch.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
