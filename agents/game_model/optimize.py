@@ -36,4 +36,4 @@ def define_model(observation_space_size: int, action_space_size: int, trial: opt
 
 
 def objective(agent: FootsiesAgent):
-    return agent.evaluate_average_loss()
+    return agent.evaluate_average_loss_and_clear()

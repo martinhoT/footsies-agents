@@ -273,8 +273,23 @@ def hidden_layer_parameters_from_specifications(
     return hidden_layer_sizes, hidden_layer_activation
 
 
-def epoched(timesteps: int, epochs: int, minibatch_size: int):
-    """Makes a function call 'epoched'. This accumulate different values of its arguments into batches, and so all positional arguments be tensors."""
+def epoched(timesteps: int | None = None, epochs: int | None = None, minibatch_size: int | None = None):
+    """
+    Makes a function call 'epoched'.
+    This will accumulate different values of its arguments into batches, and so all positional arguments be tensors.
+    
+    The underlying method should also accept a keyword argument `epoch_data`, which will be a dictionary that can optionally be used by the method and will be persisted for a single epoch.
+
+    If the base class has the `epoch_timesteps`, `epoch_epochs` or `epoch_minibatch_size` attributes, then the respective attribute can be omitted (set to `None`) when setting the decorator.
+    In that case, the value of that attribute will be used instead.
+    This allows these values to be changed in runtime.
+
+    Parameters
+    ----------
+    - `timesteps`: the number of timesteps (i.e. function calls) to accumulate before training
+    - `epochs`: the number of epochs to train on the accumulated data
+    - `minibatch_size`: the size of the accumulated data partitions
+    """
     class ArgumentDataset(Dataset):
         def __init__(self, args: list[list]):
             # Convert all arguments to tensors.
@@ -300,12 +315,16 @@ def epoched(timesteps: int, epochs: int, minibatch_size: int):
 
             updates.append(args)
 
-            if len(updates) >= timesteps:
+            timesteps_ = self.epoch_timesteps if timesteps is None else timesteps
+            epochs_ = self.epoch_epochs if epochs is None else epochs
+            minibatch_size_ = self.epoch_minibatch_size if minibatch_size is None else minibatch_size
+
+            if len(updates) >= timesteps_:
                 dataset = ArgumentDataset(updates)
-                dataloader = DataLoader(dataset, batch_size=minibatch_size, shuffle=True)
+                dataloader = DataLoader(dataset, batch_size=minibatch_size_, shuffle=True)
 
                 epoch_data = {}
-                for _ in range(epochs):
+                for _ in range(epochs_):
                     for minibatch in dataloader:
                         learning_method(self, *minibatch, epoch_data=epoch_data)
                 

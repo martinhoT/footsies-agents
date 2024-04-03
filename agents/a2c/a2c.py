@@ -440,7 +440,7 @@ class A2CQLearner(A2CLearnerBase):
         return self._maxent * Categorical(probs=policy).entropy()
 
     @epoched(timesteps=256, epochs=5, minibatch_size=32)
-    def _update_actor_ppo(self, obs: torch.Tensor, opponent_action: torch.Tensor | int, agent_action: torch.Tensor | int, delta: torch.Tensor, *, epoch_data: dict = None):
+    def _update_actor_ppo(self, obs: torch.Tensor, opponent_action: torch.Tensor | int, agent_action: torch.Tensor | int, delta: torch.Tensor, *, epoch_data: dict | None = None):
         action_probabilities = self.actor.probabilities(obs, opponent_action)
         action_log_probabilities = torch.log(action_probabilities + 1e-8)
         action_log_probability = action_log_probabilities.take_along_dim(agent_action[:, None, None], dim=-1)
