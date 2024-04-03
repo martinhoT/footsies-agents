@@ -110,6 +110,7 @@ class Analyser:
 
         self.saved_battle_states: list[AnalyserState] = []
         self.episode_counter = -1
+        self.wins_counter = 0
 
         # Allow advance() to be performed continuously on a separate thread
         self.advancing = False
@@ -266,6 +267,10 @@ class Analyser:
         original_observation = self.footsies_env.most_recent_observation
         self.update_state(obs, original_observation, info, reward, terminated, truncated)
         
+        if terminated and reward > 0:
+            self.wins_counter += 1
+            self.win_rate = self.wins_counter / (self.episode_counter + 1)
+
         self.custom_state_update_callback(self)
         self._custom_battle_state_cached = None
 
@@ -350,6 +355,7 @@ class Analyser:
     use_custom_action: bool = editable_dpg_value("use_custom_action")
     reward: float = editable_dpg_value("reward")
     frame: int = editable_dpg_value("frame")
+    win_rate: float = editable_dpg_value("win_rate")
     terminated: bool = editable_dpg_value("terminated")
     truncated: bool = editable_dpg_value("truncated")
     text_output: str = editable_dpg_value("text_output")
@@ -451,6 +457,7 @@ class Analyser:
 
             dpg.add_input_float(label="Reward", tag="reward", enabled=False)
             dpg.add_input_int(label="Frame", tag="frame", enabled=False)
+            dpg.add_slider_float(label="Win rate", min_value=0, max_value=1, tag="win_rate", enabled=False)
             with dpg.group(horizontal=True):
                 dpg.add_checkbox(label="Terminated", tag="terminated", default_value=False, enabled=False)
                 dpg.add_checkbox(label="Truncated", tag="truncated", default_value=False, enabled=False)

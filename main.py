@@ -244,7 +244,7 @@ def create_env(args: EnvArgs) -> Env:
             env = FootsiesPhasicMoveProgress(env)
 
         if args.footsies_wrapper_fs:
-            raise NotImplementedError("don't use the environment's frameskipping wrapper as it's deprecated")
+            raise NotImplementedError("don't use the environment's frame skipping wrapper as it's deprecated")
             env = FootsiesFrameSkipped(env)
 
     else:
@@ -290,7 +290,7 @@ def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: 
     # The advantage of `warnings` is that they are only issued once.
     logging.captureWarnings(True)
 
-    logger = logging.getLogger("main")
+    logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
     for handler in list(logger.handlers):

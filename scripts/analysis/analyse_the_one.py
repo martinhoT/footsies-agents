@@ -41,9 +41,9 @@ if __name__ == "__main__":
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=False,
+        fast_forward=True,
         dense_reward=False,
-        vs_player=True,
+        # vs_player=True,
         # opponent=custom_opponent.act,
     )
 
@@ -133,6 +133,7 @@ if __name__ == "__main__":
             p1_model=None,
             p2_model=agent.opponent_model.p2_model,
             p1_mirror_p2=False,
+            include_online_learning=False,
         )
     
     else:

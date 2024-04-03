@@ -1,8 +1,9 @@
-from typing import Iterable
 import torch
 import dearpygui.dearpygui as dpg
 import numpy as np
+import math
 from torch import nn
+from typing import Iterable
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
 from footsies_gym.envs.footsies import FootsiesEnv
@@ -101,9 +102,11 @@ class GradientHistogramPlot:
 class LossPlot:
     def __init__(
         self,
-        threshold: float,
+        threshold: float | None,
         max_view_steps: int = 50,
     ):
+        threshold = self._fix_threshold(threshold)
+
         self.threshold = threshold
         self.max_view_steps = max_view_steps
 
@@ -136,12 +139,14 @@ class LossPlot:
 
             dpg.bind_colormap(plot, dpg.mvPlotColormap_Default)
     
-    def update(self, new_loss: float, new_threshold: float = None):
+    def update(self, new_loss: float, new_threshold: float | None = None):
+        new_threshold = self._fix_threshold(new_threshold)
+        
         self.y_max = max(self.y_max, new_loss, new_threshold)
         self.y_min = min(self.y_min, new_loss, new_threshold)
         
         self.y_current_loss[self.current_step] = new_loss
-        self.y_threshold[self.current_step] = new_threshold if new_threshold is not None else self.y_threshold[self.current_step - 1]
+        self.y_threshold[self.current_step] = new_threshold
         
         self.current_step = (self.current_step + 1) % self.max_view_steps
 
@@ -149,13 +154,24 @@ class LossPlot:
         dpg.set_value(self.threshold_plot, [list(self.x), list(self.y_threshold)])
         dpg.set_axis_limits(self.y_axis, self.y_min, self.y_max)
 
+    def _fix_threshold(self, threshold: float | None) -> float:
+        """Avoid the threshold being infinity or `None`."""
+        if threshold is None or math.isinf(threshold):
+            if hasattr(self, "y_threshold"):
+                return self.y_threshold[self.current_step - 1]
+            
+            return 0.0
+                
+        return threshold
+
 
 class MimicAnalyserManager:
     def __init__(
         self,
         p1_model: PlayerModel | None,
         p2_model: PlayerModel | None,
-        p1_mirror_p2: bool = False
+        p1_mirror_p2: bool = False,
+        include_online_learning: bool = False,
     ):
         if p1_model is None and p2_model is None:
             raise ValueError("at least one model should be used, or else the analyser is useless")
@@ -163,9 +179,10 @@ class MimicAnalyserManager:
         self.p1_model = p1_model
         self.p2_model = p2_model
         self._p1_mirror_p2 = p1_mirror_p2
+        self._include_online_learning = include_online_learning
 
-        self._learn_p1 = p1_model is not None
-        self._learn_p2 = p2_model is not None
+        self._learn_p1 = False
+        self._learn_p2 = False
 
         self.p1_plot = OpponentDistributionPlot()
         self.p2_plot = OpponentDistributionPlot()
@@ -174,6 +191,7 @@ class MimicAnalyserManager:
         self.p1_gradient_plot = GradientHistogramPlot(101, -1, 1) if self.p1_model is not None else None
         self.p2_gradient_plot = GradientHistogramPlot(101, -1, 1) if self.p2_model is not None else None
 
+        # Don't allow the minimum loss for scar detection to be too large for plotting
         self.p1_loss_plot = LossPlot(self.p1_model.scars.min_loss, 50) if self.p1_model is not None else None
         self.p2_loss_plot = LossPlot(self.p2_model.scars.min_loss, 50) if self.p2_model is not None else None
 
@@ -220,10 +238,11 @@ class MimicAnalyserManager:
 
     def include_mimic_dpg_elements(self, analyser: Analyser):
         with dpg.group(horizontal=True):
-            if self.p1_model is not None:
-                dpg.add_checkbox(label="Enable P1 online learning", default_value=self.learn_p1, callback=self.toggle_learn_p1)
-            if self.p2_model is not None:
-                dpg.add_checkbox(label="Enable P2 online learning", default_value=self.learn_p2, callback=self.toggle_learn_p2)
+            if self._include_online_learning:
+                if self.p1_model is not None:
+                    dpg.add_checkbox(label="Enable P1 online learning", default_value=self.learn_p1, callback=self.toggle_learn_p1)
+                if self.p2_model is not None:
+                    dpg.add_checkbox(label="Enable P2 online learning", default_value=self.learn_p2, callback=self.toggle_learn_p2)
             dpg.add_checkbox(label="P1 mirror P2", default_value=self._p1_mirror_p2, callback=self.toggle_p1_mirror_p2)
             self.p1_frameskip = dpg.add_checkbox(label="P1 frameskip", default_value=False, enabled=False)
             self.p2_frameskip = dpg.add_checkbox(label="P2 frameskip", default_value=False, enabled=False)
@@ -318,16 +337,20 @@ class MimicAnalyserManager:
             if self.learn_p1 and p1_simple is not None:
                 self.p1_model.update(obs, p1_simple, terminated or truncated)
 
+            if self.p1_model is not None:
                 self.p1_gradient_plot.update(self.p1_model.network.parameters())
-                self.p1_loss_plot.update(self.p1_model.most_recent_loss, self.p1_model.scars.min_loss)
+                if self.p1_model.most_recent_loss is not None:
+                    self.p1_loss_plot.update(self.p1_model.most_recent_loss, self.p1_model.scars.min_loss)
                 dpg.set_value(self.p1_scar_size, self.p1_model.number_of_scars)
             
             # Update P2 model
             if self.learn_p2 and p2_simple is not None:
                 self.p2_model.update(obs, p2_simple, terminated or truncated)
-                
+            
+            if self.p2_model is not None:
                 self.p2_gradient_plot.update(self.p2_model.network.parameters())
-                self.p2_loss_plot.update(self.p2_model.most_recent_loss, self.p2_model.scars.min_loss)
+                if self.p2_model.most_recent_loss is not None:
+                    self.p2_loss_plot.update(self.p2_model.most_recent_loss, self.p2_model.scars.min_loss)
                 dpg.set_value(self.p2_scar_size, self.p2_model.number_of_scars)
         
         # `next_obs` will always be populated, so we can update the plots according to it

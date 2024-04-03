@@ -33,7 +33,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     # Highly-tunable hyperparameters
     actor_lr: float = 3e-2,
     critic_lr: float = 1e-2,
-    actor_entropy_coef: float = 0.1,
+    actor_entropy_coef: float = 0.04,
     actor_gradient_clipping: float = 0.5,
     critic_discount: float = 0.9,
 
