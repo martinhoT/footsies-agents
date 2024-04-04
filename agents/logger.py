@@ -1,12 +1,25 @@
 from gymnasium import Env
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
+from agents.action import ActionMap
 from agents.base import FootsiesAgentBase
 from typing import List, Callable, Any, Tuple
 from collections import deque
 import logging
+from dataclasses import dataclass
+
 
 LOGGER = logging.getLogger("main.tensorboard")
+
+@dataclass(slots=True, frozen=True)
+class TestState:
+    observation:            "any"
+    p1_action_discrete:     int
+    p1_action_simple:       int
+    p2_action_discrete:     int
+    p2_action_simple:       int
+    terminated:             bool
+    truncated:              bool
 
 
 class TrainingLoggerWrapper(FootsiesAgentBase):
@@ -93,7 +106,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         )
 
         # In case there are custom evaluators over test states
-        self.test_states = []
+        self.test_states: list[TestState] = []
         self.test_states_number = test_states_number
 
         self.summary_writer = SummaryWriter(log_dir=log_dir)
@@ -208,17 +221,46 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.agent.preprocess(env)
 
         if len(self.custom_evaluators_over_test_states) > 0:
-            state, _ = env.reset()
+            obs, info = env.reset()
+            terminated, truncated = False, False
 
             for _ in range(self.test_states_number):
                 action = env.action_space.sample()
-                self.test_states.append((state, action))
-                state, _, terminated, truncated, _ = env.step(action)
+                next_obs, _, next_terminated, next_truncated, next_info = env.step(action)
+
+                p1_action_simple, p2_action_simple = ActionMap.simples_from_transition_ori(info, next_info)
+
+                # In order to create a test state, we need to evaluate transitions, hence why we perform this weird roundabout environment iteration
+                test_state = TestState(
+                    observation=obs,
+                    p1_action_discrete=ActionMap.primitive_to_discrete(next_info["p1_action"]),
+                    p1_action_simple=p1_action_simple,
+                    p2_action_discrete=ActionMap.primitive_to_discrete(next_info["p2_action"]),
+                    p2_action_simple=p2_action_simple,
+                    terminated=terminated,
+                    truncated=truncated,
+                )
+                self.test_states.append(test_state)
+
+                obs = next_obs
+                terminated = next_terminated
+                truncated = next_truncated
+                info = next_info
 
                 if terminated or truncated:
-                    env.reset()
+                    final_test_state = TestState(
+                        observation=next_obs,
+                        p1_action_discrete=None,
+                        p1_action_simple=None,
+                        p2_action_discrete=None,
+                        p2_action_simple=None,
+                        terminated=next_terminated,
+                        truncated=next_truncated,
+                    )
+                    self.test_states.append(final_test_state)
 
-            self.test_states.append((state, None))
+                    obs, info = env.reset()
+                    terminated, truncated = False, False
 
     def load(self, folder_path: str):
         self.agent.load(folder_path)

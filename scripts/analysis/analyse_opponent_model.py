@@ -359,14 +359,14 @@ class MimicAnalyserManager:
         p1_distribution_predicted = None
         if self.p1_mirror_p2:
             next_obs_inverted = observation_invert_perspective_flattened(next_obs)
-            p1_distribution_predicted = self.p2_model.probabilities(next_obs_inverted).squeeze()
+            p1_distribution_predicted = self.p2_model.network.probabilities(next_obs_inverted)[0].squeeze()
         elif self.p1_model is not None:
-            p1_distribution_predicted = self.p1_model.probabilities(next_obs).squeeze()
+            p1_distribution_predicted = self.p1_model.network.probabilities(next_obs)[0].squeeze()
         
         # Get probability distribution of P2 model. This is of the currently-displayed observation
         p2_distribution_predicted = None
         if self.p2_model is not None:
-            p2_distribution_predicted = self.p2_model.probabilities(next_obs).squeeze()
+            p2_distribution_predicted = self.p2_model.network.probabilities(next_obs)[0].squeeze()
 
         p1_action_frequencies = self.p1_model.action_frequencies if self.p1_model is not None else None
         p2_action_frequencies = self.p2_model.action_frequencies if self.p2_model is not None else None
@@ -384,7 +384,7 @@ class MimicAnalyserManager:
         except StopIteration:
             # We need to craft the observation to be as if P1 is the one experiencing it (since P2 model was trained inverted)
             obs_inverted = observation_invert_perspective_flattened(obs)
-            probs = self.p2_model.probabilities(obs_inverted).squeeze()
+            probs = self.p2_model.network.probabilities(obs_inverted)[0].squeeze()
             distribution = torch.distributions.Categorical(probs=probs)
             action = distribution.sample().item()
             self.p2_predicted_action_iterator = iter(ActionMap.simple_to_discrete(action))

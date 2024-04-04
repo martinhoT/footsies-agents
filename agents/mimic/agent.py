@@ -8,6 +8,7 @@ from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
 from gymnasium import Env
 from typing import Any, Callable, List, Tuple
+from agents.logger import TestState
 from agents.mimic.mimic import PlayerModel
 
 LOGGER = logging.getLogger("main.mimic.agent")
@@ -56,7 +57,11 @@ class FootsiesAgent(FootsiesAgentBase):
         self.current_info = None
 
         self._test_observations = None
-        self._test_actions = None
+        self._test_p1_actions = None
+        self._test_p2_actions = None
+        self._test_observations_partitioned = None
+        self._test_p1_actions_partitioned = None
+        self._test_p2_actions_partitioned = None
 
         # Logging
         self._p1_cumulative_loss = 0
@@ -138,14 +143,35 @@ class FootsiesAgent(FootsiesAgentBase):
         self._p2_cumulative_loss_n = 0
         return res
 
-    def _initialize_test_states(self, test_states: List[torch.Tensor]):
+    def _initialize_test_states(self, test_states: List[TestState]):
         if self._test_observations is None:
             # Only consider observations in which an action was performed (this is not the case, for instance, when the environment terminates)
-            test_observations, test_actions = zip(*filter(lambda st: st[1] is not None, test_states))
+            test_observations, test_p1_actions, test_p2_actions = zip((s.observation, s.p1_action_simple, s.p2_action_simple) for s in test_states if not (s.terminated or s.truncated))
             self._test_observations = torch.vstack(test_observations)
-            self._test_actions = torch.tensor(test_actions, dtype=torch.long).view(-1, 1)
+            self._test_p1_actions = torch.tensor(test_p1_actions, dtype=torch.long).view(-1, 1)
+            self._test_p2_actions = torch.tensor(test_p2_actions, dtype=torch.long).view(-1, 1)
+            
+            # We assume the test state were obtained sequentially.
+            # NOTE: episode length doesn't count the terminal state, which is not kept.
+            episode_lengths = []
+            length = 0
+            for test_state in test_states:
+                if (test_state.terminated or test_state.truncated) and length > 0:
+                    episode_lengths.append(length)
+                    length = 0
+    
+                else:
+                    length += 1
+            
+            # In case the last episode didn't complete fully, and so wasn't added inside the loop
+            if length > 0:
+                episode_lengths.append(length)
+            
+            self._test_observations_partitioned = torch.split(self._test_observations, episode_lengths)
+            self._test_p1_actions_partitioned = torch.split(self._test_p1_actions, episode_lengths)
+            self._test_p2_actions_partitioned = torch.split(self._test_p2_actions, episode_lengths)
 
-    def evaluate_divergence_between_players(self, test_states: List[tuple[Any, Any]]) -> float:
+    def evaluate_divergence_between_players(self, test_states: List[TestState]) -> float:
         """
         Kullback-Leibler divergence between player 1 and player 2 (i.e. the excess surprise of using player 2's model when it is actually player 1's).
         
@@ -154,19 +180,19 @@ class FootsiesAgent(FootsiesAgentBase):
         self._initialize_test_states(test_states)
 
         with torch.no_grad():
-            p1_probs = self.p1_model.network.log_probabilities(self._test_observations).detach()
-            p2_probs = self.p2_model.network.log_probabilities(self._test_observations).detach()
+            p1_probs = self.p1_model.network.log_probabilities(self._test_observations)[0].detach()
+            p2_probs = self.p2_model.network.log_probabilities(self._test_observations)[0].detach()
             divergence = nn.functional.kl_div(p2_probs, p1_probs, reduction="batchmean", log_target=True)
 
         return divergence
 
-    def evaluate_decision_entropy(self, test_states: List[torch.Tensor], p1: bool) -> float:
+    def evaluate_decision_entropy(self, test_states: List[TestState], p1: bool) -> float:
         """Evaluate the entropy of the predicted probability distribution at the given test states."""
         self._initialize_test_states(test_states)
 
         return self.decision_entropy(self._test_observations, p1=p1).mean().item()
 
-    def evaluate_prediction_score(self, test_states: List[torch.Tensor], p1: bool):
+    def evaluate_prediction_score(self, test_states: List[TestState], p1: bool):
         """
         Evaluate the prediction score of the player model at the given test states.
         
@@ -177,7 +203,16 @@ class FootsiesAgent(FootsiesAgentBase):
 
         model = self.p1_model if p1 else self.p2_model
 
-        return model.probabilities(self._test_observations).gather(1, self._test_actions).sum().item() / len(test_states)
+        total_score = 0
+        for (observations, p1_actions, p2_actions) in zip(self._test_observations_partitioned, self._test_p1_actions_partitioned, self._test_p2_actions_partitioned):
+            probs, _ = model.network.probabilities(observations, None)
+            p1_score = probs.gather(1, p1_actions).sum().item()
+            p2_score = probs.gather(1, p2_actions).sum().item()
+
+            total_score += p1_score + p2_score
+
+        # We are making 2 predictions at each observation, so the denominator is multiplied by 2.
+        return total_score / (2 * len(test_states))
 
     # NOTE: this only works if the class was defined to be over primitive actions
     def extract_policy(self, env: Env, use_p1: bool = True) -> Callable[[dict], Tuple[bool, bool, bool]]:

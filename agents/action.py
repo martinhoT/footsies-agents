@@ -38,7 +38,7 @@ class ActionMap:
     SIMPLE_AS_MOVE_TO_DISCRETE_MAP: dict[FootsiesMove, Iterable[int]] = None
     SIMPLE_TO_PRIMITIVE_MAP: dict[int, Iterable[tuple[bool, bool, bool]]] = None
     SIMPLE_TO_DISCRETE_MAP: dict[int, Iterable[int]] = None
-
+    
     # TODO: is this DAMAGE -> STAND conversion valid? Will it not disturb training of STAND? evaluate that
     # This mapping maps a FOOTSIES move to an action move that may have caused it. For DAMAGE, we assume the player did nothing
     SIMPLE_AS_MOVE_FROM_MOVE_MAP: dict[FootsiesMove, FootsiesMove] = {
@@ -78,6 +78,9 @@ class ActionMap:
     # Simple actions that are performable in hitstop
     PERFORMABLE_SIMPLES_IN_HITSTOP = {FootsiesMove.STAND, FootsiesMove.N_ATTACK}
     PERFORMABLE_SIMPLES_IN_HITSTOP_INT: set[int] = None
+    # Simple actions that are technically special moves (i.e. require a sequence of primitive actions to perform)
+    SIMPLE_SPECIAL_MOVES = {FootsiesMove.DASH_FORWARD, FootsiesMove.DASH_BACKWARD, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL}
+    SIMPLE_SPECIAL_MOVES_INT: set[int] = None
 
     ## Conversions between actions
 
@@ -253,6 +256,11 @@ class ActionMap:
         """Number of simple actions."""
         return len(ActionMap.SIMPLE_ACTIONS)
 
+    @staticmethod
+    def is_simple_action_special_move(simple: int) -> bool:
+        """Whether the given simple action is a special move."""
+        return simple in ActionMap.SIMPLE_SPECIAL_MOVES_INT
+
     ## Utility methods
 
     @staticmethod
@@ -383,6 +391,9 @@ ActionMap.TEMPORAL_STATES_CANCELABLE_INT = {
 }
 ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP_INT = {
     ActionMap.SIMPLE_ACTIONS.index(simple) for simple in ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP
+}
+ActionMap.SIMPLE_SPECIAL_MOVES_INT = {
+    ActionMap.SIMPLE_ACTIONS.index(simple) for simple in ActionMap.SIMPLE_SPECIAL_MOVES
 }
 ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH = torch.tensor(list(ActionMap.TEMPORAL_STATES_CANCELABLE_INT)).long()
 ActionMap._HIT_GUARD_STATES_TORCH = torch.tensor(list(ActionMap.HIT_GUARD_STATES_INT)).long()

@@ -9,6 +9,8 @@ from agents.the_one.loggables import get_loggables
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
 from agents.mimic.agent import FootsiesAgent as MimicAgent
 from agents.the_one.reaction_time import ReactionTimeEmulator
+from agents.game_model.agent import FootsiesAgent as GameModelAgent
+from agents.game_model.game_model import GameModel, GameModelNetwork
 
 
 CONSIDER_OPPONENT_ACTION = True
@@ -19,6 +21,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     remove_special_moves: bool = True,
     perceive_intrinsic_reward: bool = False,
     use_reaction_time: bool = False,
+    use_game_model: bool = False,
     maxent: float = 0.0,
     maxent_gradient_flow: bool = False,
     
@@ -41,6 +44,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     broadcast_at_frameskip: bool = False,
     accumulate_at_frameskip: bool = True,
     alternative_advantage: bool = True,
+    reaction_time_constant: bool = False,
 
     # Probably should be kept as-is
     critic_tanh: bool = False,
@@ -115,7 +119,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         ppo_objective=ppo,
         alternative_advantage=alternative_advantage,
         accumulate_at_frameskip=accumulate_at_frameskip,
-        broadcast_at_frameskip=broadcast_at_frameskip,
+        critic_assumed_action_at_frameskip="last",
         intrinsic_critic=intrinsic_critic,
     )
 
@@ -171,8 +175,31 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         )
         reaction_time_emulator.confine_to_range(15, 29, action_dim)
 
+        if reaction_time_constant:
+            reaction_time_emulator.constant = True
+
     else:
         reaction_time_emulator = None
+
+    # Since reaction time depends on the game model, we also create a game model in that case
+    if use_game_model or use_reaction_time:
+        game_model = GameModel(
+            game_model_network=GameModelNetwork(
+                obs_dim=obs_dim,
+                p1_action_dim=action_dim,
+                p2_action_dim=opponent_action_dim,
+                hidden_layer_sizes=[64, 64],
+                hidden_layer_activation=nn.LeakyReLU,
+                residual=True,
+            ),
+            learning_rate=1e-2,
+            discrete_conversion=False,
+            discrete_guard=False,
+            epoch_timesteps=1,
+            epoch_epochs=1,
+            epoch_minibatch_size=1,
+        )
+        game_model_agent = GameModelAgent(game_model)
 
     agent = TheOneAgent(
         obs_dim=obs_dim,
@@ -180,13 +207,12 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
         a2c=a2c,
         opponent_model=opponent_model,
+        game_model=game_model_agent,
         reaction_time_emulator=reaction_time_emulator,
         remove_special_moves=remove_special_moves,
         rollback_as_opponent_model=rollback,
         # Not used
         representation=None,
-        game_model=None,
-        game_model_learning_rate=1e-4,
     )
 
     loggables = get_loggables(agent)

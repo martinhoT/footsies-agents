@@ -60,9 +60,9 @@ class GameModelNetwork(nn.Module):
             )
 
     def forward(self, obs: torch.Tensor, p1_action: torch.Tensor, p2_action: torch.Tensor) -> torch.Tensor:
-        if p1_action.size(1) == 1:
+        if p1_action.dim() < 2:
             p1_action = F.one_hot(p1_action, num_classes=self._p1_action_dim).float()
-        if p2_action.size(1) == 1:
+        if p2_action.dim() < 2:
             p2_action = F.one_hot(p2_action, num_classes=self._p2_action_dim).float()
         
         if self._residual:
@@ -186,7 +186,6 @@ class GameModel:
 
         return prediction
 
-    # @epoched
     def update(self, obs: torch.Tensor, p1_action: torch.Tensor | int, p2_action: torch.Tensor | int, next_obs: torch.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
         """
         Update the game model with the given transition.
@@ -203,6 +202,10 @@ class GameModel:
         next_obs = self._convert_discrete_components(next_obs)
 
         # Obtain prediction
+        if isinstance(p1_action, int):
+            p1_action = torch.tensor([p1_action])
+        if isinstance(p2_action, int):
+            p2_action = torch.tensor([p2_action])
         predicted = self._network(obs, p1_action, p2_action)
         
         # Prepare the targets

@@ -5,7 +5,7 @@ from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
 from gymnasium import Env
 from typing import Callable, Tuple, Literal
-from agents.game_model.game import GameModel
+from agents.game_model.game_model import GameModel
 
 
 # NOTE: trained by example
@@ -13,8 +13,6 @@ from agents.game_model.game import GameModel
 class FootsiesAgent(FootsiesAgentBase):
     def __init__(
         self,
-        observation_space_size: int,
-        action_space_size: int,
         game_model: GameModel,
     ):
         self._game_model = game_model
@@ -23,6 +21,8 @@ class FootsiesAgent(FootsiesAgentBase):
         self._current_info = None
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0
+
+        self._p1_current_special = None
 
         self.cumulative_loss = 0
         self.cumulative_loss_n = 0
@@ -38,6 +38,12 @@ class FootsiesAgent(FootsiesAgentBase):
 
     def update_with_simple_actions(self, obs: torch.Tensor, p1_action: int | None, p2_action: int | None, next_obs: torch.Tensor):
         """Perform an update with the given simple actions, useful to avoid recomputing them."""
+        # Skip updates in hitstop (i.e. don't predict the time "freeze")
+        p1_in_hitstop = ActionMap.is_in_hitstop_torch(obs, True)
+        p2_in_hitstop = ActionMap.is_in_hitstop_torch(obs, False)
+        if (p1_in_hitstop or p2_in_hitstop) and obs.isclose(next_obs).all():
+            return
+        
         if p1_action is None:
             # p1_action = self._last_valid_p1_action
             p1_action = 0
@@ -49,6 +55,14 @@ class FootsiesAgent(FootsiesAgentBase):
             p2_action = 0
         else:
             self._last_valid_p2_action = p2_action
+
+        # Perform a move progress correction, by considering the agent to be performing a special move even as it's attempting it's motion (primitive input sequence).
+        # We therefore consider the move to be finished, and visible, at the last primitive action.
+        if ActionMap.is_simple_action_special_move(p1_action):
+            p1_simple = ActionMap.simple_as_move(p1_action)
+            p1_primitive_sequence_length = len(ActionMap.simple_to_primitive(p1_action))
+            obs = obs.clone()
+            obs[:, 32] = obs[:, 32] * p1_simple.value.duration / (p1_simple.value.duration + p1_primitive_sequence_length - 1)
 
         guard_loss, move_loss, move_progress_loss, position_loss = self._game_model.update(obs, p1_action, p2_action, next_obs)
 

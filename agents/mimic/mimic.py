@@ -6,6 +6,7 @@ from collections.abc import Generator
 from collections import deque
 from dataclasses import dataclass
 from math import log
+from contextlib import contextmanager
 
 LOGGER = logging.getLogger("main.mimic")
 
@@ -72,7 +73,7 @@ class PlayerModelNetwork(nn.Module):
         # Hidden state if using recurrency
         self._hidden = None
 
-    def forward(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor | None]:
+    def _resolve_recurrency(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor | None]:
         if isinstance(hidden, str):
             if hidden == "auto":
                 hidden = self.hidden
@@ -80,13 +81,16 @@ class PlayerModelNetwork(nn.Module):
                 raise ValueError("invalid value for 'hidden', if a string it should be one of {'auto'}")
         
         if self._recurrent is not None:
-            rec, hidden_state = self._recurrent(obs, hidden)
-            output = self.layers(rec)
+            x, hidden_state = self._recurrent(obs, hidden)
 
         else:
-            output = self.layers(obs)
-            hidden_state = None
+            x, hidden_state = obs, None
+        
+        return x, hidden_state
 
+    def forward(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor | None]:
+        x, hidden_state = self._resolve_recurrency(obs, hidden)
+        output = self.layers(x)
         return output, hidden_state
 
     def probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor]:
@@ -104,6 +108,11 @@ class PlayerModelNetwork(nn.Module):
         logits, hidden = self(obs, hidden)
         return torch.distributions.Categorical(logits=logits), hidden
 
+    def compute_hidden_state(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.Tensor:
+        """Compute only the hidden state, in case one might want to avoid computing probabilities."""
+        _, hidden_state = self._resolve_recurrency(obs, hidden)
+        return hidden_state
+
     @property
     def action_dim(self) -> int:
         """The number of actions the network is predicting, i.e. the output dimension."""
@@ -111,8 +120,17 @@ class PlayerModelNetwork(nn.Module):
 
     @property
     def hidden(self) -> torch.Tensor | None:
-        """The hidden state of the network, used if recurrency is being used. If `None`, then the hidden state hasn't been initialized (should signify the beginning of an episode)."""
+        """
+        The hidden state of the network, used if recurrency is being used. If `None`, then the hidden state hasn't been initialized (should signify the beginning of an episode).
+        
+        The internal hidden state can be manually set, but it's discouraged.
+        The internal hidden state is already managed by the training loop, to match what the opponent model is being trained on.
+        """
         return self._hidden
+
+    @hidden.setter
+    def hidden(self, value: torch.Tensor | None):
+        self._hidden = value
 
     @property
     def is_recurrent(self) -> bool:
@@ -121,7 +139,7 @@ class PlayerModelNetwork(nn.Module):
 
     def update_hidden_state(self, obs: torch.Tensor):
         """Update the internal hidden state, useful if using recurrency."""
-        _, hidden = self(obs, self._hidden)
+        _, hidden = self.compute_hidden_state(obs, self._hidden)
         if hidden is not None:
             # If in the future we need to use the hidden state to compute something, we don't want to backpropagate through this hidden state,
             # or else we would be backpropagating again through the same computational graph and it would get messy.
@@ -297,7 +315,7 @@ class PlayerModel:
                 self._update_action_frequency(action)
 
                 # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
-                # self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
+                self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
 
                 self._accumulated_args.append((obs, action, multiplier))
             
@@ -357,26 +375,6 @@ class PlayerModel:
             self._reset_action_counts()
 
         return self._most_recent_loss
-
-    def predict(
-        self,
-        obs: torch.Tensor,
-        deterministic: bool = False,
-    ) -> torch.Tensor:
-        """Sample an action from the predicted action distribution at the given observation. If deterministic, the action with the highest probability is chosen."""
-        with torch.no_grad():
-            probs = self.probabilities(obs)
-
-            if deterministic:
-                return torch.argmax(probs, axis=-1)
-            else:
-                distribution = torch.distributions.Categorical(probs=probs)
-                return distribution.sample()
-
-    def probabilities(self, obs: torch.Tensor) -> torch.Tensor:
-        """Get the predicted action probabilities at the given observation. The probabilities are detached from the computation graph."""
-        probs, _ = self._network.probabilities(obs).detach()
-        return probs
 
     def load(self, path: str):
         self._network.load_state_dict(torch.load(path))

@@ -1,6 +1,7 @@
 import numpy as np
 from typing import Callable, TypeVar
 from collections import deque
+from itertools import islice
 
 
 T = TypeVar("T")
@@ -30,7 +31,8 @@ class ReactionTimeEmulator:
         self._history_size = history_size
 
         self._observations = deque([], maxlen=history_size)
-        self._previous_reaction_time = history_size
+        self._previous_reaction_time = None
+        self._constant = False
 
         # Pre-made values that are useful for computation
         inaction_distribution = self.bernoulli_distribution(self._inaction_probability)
@@ -78,43 +80,7 @@ class ReactionTimeEmulator:
         """Calculate the maximum possible decision entropy."""
         return self._inaction_entropy + (1 - self.inaction_probability) * np.log2(agent_n_actions)
 
-    # TODO: consider only options from the opponent that can actually be done (doesn't make sense to use when the opponent can't do anything)
-    def decision_distribution(
-        self,
-        perceived_observation: T,
-        agent_distribution_source: Callable[[T], np.ndarray],
-        opponent_distribution_source: Callable[[T], np.ndarray],
-        environment_model: Callable[[T, int, int], T],
-    ) -> np.ndarray:
-        """
-        Calculate the probability distribution of the decision as a function of the agent and opponent action distributions on the previous state.
-        It's assumed that the opponent actions can be imposed directly on the observation.
-        
-        Parameters
-        ----------
-        - `observation`: the observation on which the decision distribution is computed
-        - `agent_distribution_source`: function that, given an observation, provides the agent's action probability distribution
-        - `opponent_distribution_source`: function that, given an observation, provides the opponent's action probability distribution
-        - `environment_model`: a model of the environment, that provides the next observation given the current observation, agent action and opponent action.
-        It is assumed that the action `0` signifies inaction (doing nothing)
-        """
-        
-        raise DeprecationWarning("This method is deprecated and should not be used.")
-
-        opponent_distribution = opponent_distribution_source(perceived_observation).reshape((-1, 1))
-        
-        agent_distribution_matrix = np.array([
-            # Get an agent action probability distribution for every possible near future
-            agent_distribution_source(
-                # Calculate the next observation assuming the agent did nothing, to see what will happen in the near future
-                environment_model(perceived_observation, 0, opponent_action)
-            )
-            for opponent_action in range(len(opponent_distribution))
-        ])
-        
-        return np.sum(opponent_distribution * agent_distribution_matrix, axis=0).squeeze()
-
-    def reaction_time(self, decision_entropy: float, previous_reaction_time: int = None) -> int:
+    def reaction_time(self, decision_entropy: float, previous_reaction_time: int | None = None) -> int:
         """
         Calculate reaction time in time steps given a decision distribution.
         
@@ -128,7 +94,7 @@ class ReactionTimeEmulator:
         decision_entropy = self._inaction_entropy + (1 - self._inaction_probability) * decision_entropy
 
         if previous_reaction_time is None:
-            previous_reaction_time = self._history_size
+            previous_reaction_time = self._history_size - 1
 
         computed_reaction_time = int(np.ceil(self._multiplier * decision_entropy + self._additive))
         # We need to be reasonable, reaction time should not be larger than the previous one (we can't start seeing things in the past)
@@ -138,38 +104,62 @@ class ReactionTimeEmulator:
         """Register an observation of the environment into the observation history. Should be performed at every environment step, before perceiving an observation."""
         self._observations.append(observation)
 
-    def perceive(self, reaction_time: int) -> T:
-        """Get an observation according to the provided reaction time. For a reaction time of 0, return the observation at the current instant."""
-        return self._observations[-(reaction_time + 1)]
+    def perceive(self, reaction_time: int, previous_reaction_time: int | None = None) -> tuple[T, list[T]]:
+        """Get an observation according to the provided reaction time, and all the observations that were skipped according to the previous reaction time. For a reaction time of 0, return the observation at the current instant."""
+        if previous_reaction_time is None:
+            previous_reaction_time = self._history_size - 1
+
+        perceived_observation = self._observations[-1 - reaction_time]
+        skipped_observations = list(islice(self._observations, (self._observations.maxlen - 1) - previous_reaction_time, (self._observations.maxlen - 1) - reaction_time))
+
+        return perceived_observation, skipped_observations
     
     def register_and_perceive(
         self,
         observation: T,
         decision_entropy: float,
-    ) -> tuple[T, int]:
+    ) -> tuple[T, int, list[T]]:
         """
         Perform registration of the current observation and perception of a delayed observation all in a single method, for convenience. This is the primary method that should be used at every environment step.
         The decision entropy should be provided in nats.
         
         Note: the decision entropy is calculated according to the last reaction time computed through this method, which is initially the maximum possible (perceives the oldest observation).
+
+        Returns
+        -------
+        - `perceived_observation`: the observation that was perceived, `reaction_time` time steps late
+        - `reaction_time`: the computed reaction time
+        - `skipped_observations`: list of all observations that were skipped to get to `perceived_observation`
         """
         # Transform the decision entropy to bits
         decision_entropy = decision_entropy / np.log(2)
 
-        reaction_time = self.reaction_time(decision_entropy, self._previous_reaction_time)
+        if self._constant:
+            reaction_time = self._additive
+        else:
+            reaction_time = self.reaction_time(decision_entropy, self._previous_reaction_time)
 
         self.register_observation(observation)
-        perceived_observation = self.perceive(reaction_time)
+        perceived_observation, skipped_observations = self.perceive(reaction_time, self._previous_reaction_time)
 
         self._previous_reaction_time = reaction_time
 
-        return perceived_observation, reaction_time
+        return perceived_observation, reaction_time, skipped_observations
 
     def fill_history(self, observation: T):
         """Fill the observation history with a single observation. Should be done initially, immediately after an environment reset."""
         self._observations.clear()
         self._observations.extend([observation] * self._history_size)
     
+    @property
+    def constant(self) -> bool:
+        """Whether reaction time is a constant and thus not dependent on the decision distribution's entropy."""
+        return self._constant
+
+    @constant.setter
+    def constant(self, value: bool):
+        self._constant = value
+
     @property
     def previous_reaction_time(self) -> int:
         """The most recently perceived reaction time (last call to `register_and_perceive`)."""
