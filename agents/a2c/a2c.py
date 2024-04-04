@@ -109,6 +109,11 @@ class ActorNetwork(nn.Module):
         action_probabilities = self(obs)
         return action_probabilities.take_along_dim(next_opponent_action[:, None, None], dim=1)
 
+    def distribution_size(self, obs: torch.Tensor) -> int:
+        """The effective size of the probability distribution when the agent acts at the given observation."""
+        in_hitstop = ActionMap.is_in_hitstop_torch(obs, p1=self._p1)
+        return 2 if in_hitstop else self._action_dim
+
     def decision_distribution(self, obs: torch.Tensor, next_opponent_policy: torch.Tensor, detached: bool = False) -> Categorical:
         """Get the decision probabilities and distribution for the given observation and next opponent policy. The next opponent policy should have dimensions `batch_dim X opponent_action_dim`."""
         actor_probs = self.probabilities(obs, None)
@@ -491,6 +496,9 @@ class A2CQLearner(A2CLearnerBase):
         self.actor_optimizer.zero_grad()
 
         actor_entropy = -torch.sum(action_log_probabilities * action_probabilities, dim=-1)
+        # Perform a correction depending on whether action masking was used
+        action_distribution_size = self.actor.distribution_size(obs)
+        actor_entropy = actor_entropy / torch.log(torch.tensor(action_distribution_size))
         actor_delta = self.cumulative_discount * delta * action_log_probability
         actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy.mean()
         actor_score.backward()
