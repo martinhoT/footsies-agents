@@ -244,7 +244,7 @@ class GameModel:
         loss.backward()
         self.optimizer.step()
 
-        return guard_loss.mean().item(), move_loss.mean().item(), move_loss.mean().item(), move_progress_loss.mean().item(), position_loss.mean().item()
+        return guard_loss.mean().item(), move_loss.mean().item(), move_progress_loss.mean().item(), position_loss.mean().item()
 
     @property
     def network(self) -> GameModelNetwork:

@@ -13,8 +13,6 @@ from agents.game_model.agent import FootsiesAgent as GameModelAgent
 from agents.game_model.game_model import GameModel, GameModelNetwork
 
 
-CONSIDER_OPPONENT_ACTION = True
-
 def model_init(observation_space_size: int, action_space_size: int, *,
     # Important modifiers
     ppo: bool = False,
@@ -64,7 +62,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         action_dim=action_dim,
         hidden_layer_sizes=[64, 64],
         hidden_layer_activation=nn.LeakyReLU,
-        opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
+        opponent_action_dim=opponent_action_dim,
         footsies_masking=action_masking,
         p1=True,
     )
@@ -72,7 +70,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     if critic_table:
         critic = QFunctionTable(
             action_dim=action_dim,
-            opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
+            opponent_action_dim=opponent_action_dim,
             discount=critic_discount,
             learning_rate=critic_lr,
             table_as_matrix=False,
@@ -88,7 +86,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             # Will setup Tanh with appropriate range
             is_footsies=critic_tanh,
             use_dense_reward=False,
-            opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
+            opponent_action_dim=opponent_action_dim
         )
 
         target_network = deepcopy(critic_network)
@@ -125,7 +123,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
 
     a2c = A2CAgent(
         learner=learner,
-        opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
+        opponent_action_dim=opponent_action_dim,
         footsies=True,
         use_opponents_perspective=False,
         consider_explicit_opponent_policy=consider_explicit_opponent_policy,
@@ -204,7 +202,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     agent = TheOneAgent(
         obs_dim=obs_dim,
         action_dim=action_dim,
-        opponent_action_dim=opponent_action_dim if CONSIDER_OPPONENT_ACTION else None,
+        opponent_action_dim=opponent_action_dim,
         a2c=a2c,
         opponent_model=opponent_model,
         game_model=game_model_agent,

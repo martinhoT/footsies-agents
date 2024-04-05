@@ -14,8 +14,15 @@ class FootsiesAgent(FootsiesAgentBase):
     def __init__(
         self,
         game_model: GameModel,
+        assume_action_on_frameskip: Literal["last", "any", "none"] = "last",
+        p1_simple_action_correction: bool = True,
     ):
+        if assume_action_on_frameskip not in ("last", "any", "none"):
+            raise ValueError("'assume_action_on_frameskip' must be either 'last', 'any' or 'none'")
+
         self._game_model = game_model
+        self._assume_action_on_frameskip = assume_action_on_frameskip
+        self._p1_simple_action_correction = p1_simple_action_correction
 
         self._current_observation = None
         self._current_info = None
@@ -45,20 +52,24 @@ class FootsiesAgent(FootsiesAgentBase):
             return
         
         if p1_action is None:
-            # p1_action = self._last_valid_p1_action
-            p1_action = 0
+            if self._assume_action_on_frameskip == "last":
+                p1_action = self._last_valid_p1_action
+            elif self._assume_action_on_frameskip == "none":
+                p1_action = 0
+            else:
+                p1_action = None
         else:
             self._last_valid_p1_action = p1_action
 
         if p2_action is None:
-            # p2_action = self._last_valid_p2_action
+            p2_action = self._last_valid_p2_action
             p2_action = 0
         else:
             self._last_valid_p2_action = p2_action
 
-        # Perform a move progress correction, by considering the agent to be performing a special move even as it's attempting it's motion (primitive input sequence).
+        # Perform a move progress correction, by considering the agent to be performing a special move even as it's attempting its motion (primitive input sequence).
         # We therefore consider the move to be finished, and visible, at the last primitive action.
-        if ActionMap.is_simple_action_special_move(p1_action):
+        if self._p1_simple_action_correction and ActionMap.is_simple_action_special_move(p1_action):
             p1_simple = ActionMap.simple_as_move(p1_action)
             p1_primitive_sequence_length = len(ActionMap.simple_to_primitive(p1_action))
             obs = obs.clone()
