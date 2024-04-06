@@ -53,9 +53,6 @@ class FootsiesAgent(FootsiesAgentBase):
 
         self.n_moves = action_dim if by_primitive_actions else ActionMap.n_simple()
 
-        self.current_observation = None
-        self.current_info = None
-
         self._test_observations = None
         self._test_p1_actions = None
         self._test_p2_actions = None
@@ -70,9 +67,6 @@ class FootsiesAgent(FootsiesAgentBase):
         self._p2_cumulative_loss_n = 0
 
     def act(self, obs: torch.Tensor, info: dict, p1: bool = True, deterministic: bool = False, predict: bool = False) -> "any":
-        self.current_observation = obs
-        self.current_info = info
-
         if predict:
             model = self._p1_model if p1 else self._p2_model
             prediction = model.predict(obs, deterministic=deterministic).item()
@@ -94,10 +88,10 @@ class FootsiesAgent(FootsiesAgentBase):
                 self._p2_cumulative_loss += loss
                 self._p2_cumulative_loss_n += 1
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
-        p1_simple, p2_simple = ActionMap.simples_from_transition_ori(self.current_info, info)
+    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
+        p1_simple, p2_simple = ActionMap.simples_from_transition_ori(info, next_info)
 
-        self.update_with_simple_actions(self.current_observation, p1_simple, p2_simple, terminated or truncated)
+        self.update_with_simple_actions(obs, p1_simple, p2_simple, terminated or truncated)
 
     def decision_entropy(self, obs: torch.Tensor, p1: bool) -> torch.Tensor:
         """The decision entropy of the player model at the given observation."""

@@ -24,16 +24,14 @@ class FootsiesAgent(FootsiesAgentBase):
         else:
             self.q_table = q_table
 
-        self.current_obs = None
         self.current_action = None
 
     def act(self, obs, info: dict) -> "any":
-        self.current_obs = obs
         self.current_action = self.q_table.sample_action(obs)
         return self.current_action
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
-        self.q_table.update(self.current_obs, self.current_action, reward, next_obs, terminated)
+    def update(self, obs, next_obs, reward: float, terminated: bool, truncated: bool, info, next_info: dict):
+        self.q_table.update(obs, reward, next_obs, terminated, self.current_action)
 
     def load(self, folder_path: str):
         path = os.path.join(folder_path, "q")

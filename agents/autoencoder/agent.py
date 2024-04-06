@@ -97,7 +97,7 @@ class FootsiesAgent(FootsiesAgentBase):
             self._update_batch(obs)
         return 0
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
+    def update(self, obs, next_obs, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
         self._update_batch(next_obs)
 
         if len(self.state_batch_as_list) >= self.optimize_frequency:

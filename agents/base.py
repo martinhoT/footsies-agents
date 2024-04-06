@@ -11,14 +11,14 @@ from agents.utils import wrap_policy
 class FootsiesAgentBase(ABC):
     @abstractmethod
     def act(self, obs, info: dict) -> Any:
-        """Get the chosen action for the currently observed environment state"""
+        """Get the chosen action for the currently observed environment state."""
 
     @abstractmethod
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
-        """After acting in the environment, process the perceived observation and reward"""
+    def update(self, obs, next_obs, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
+        """Update the agent from an environment transtition."""
 
     def preprocess(self, env: Env):
-        """Do some preprocessing on the environment before training on it"""
+        """Do some preprocessing on the environment before training on it."""
 
     @abstractmethod
     def load(self, folder_path: str):
@@ -26,7 +26,7 @@ class FootsiesAgentBase(ABC):
 
     @abstractmethod
     def save(self, folder_path: str):
-        """Save the agent to disk (overwriting an already saved agent at that path)"""
+        """Save the agent to disk (overwriting an already saved agent at that path)."""
 
     @abstractmethod
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
@@ -54,11 +54,11 @@ class FootsiesAgentTorch(FootsiesAgentBase):
     @property
     @abstractmethod
     def model(self) -> nn.Module:
-        """The PyTorch model used by the agent"""
+        """The PyTorch model used by the agent."""
     
     @property
     def shareable_model(self) -> nn.Module:
-        """The PyTorch module that can be shared with other agents during Hogwild! parallel training. Returns the `model` property by default"""
+        """The PyTorch module that can be shared with other agents during Hogwild! parallel training. Returns the `model` property by default."""
         return self.model
 
     def load(self, folder_path: str):

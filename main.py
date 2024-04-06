@@ -159,7 +159,7 @@ def train(
             result = 0.5 # by default, the game is a draw
             while not (terminated or truncated):
                 action = agent.act(obs, info)
-                next_obs, reward, terminated, truncated, info = env.step(action)
+                next_obs, reward, terminated, truncated, next_info = env.step(action)
                 
                 if penalize_truncation is not None and truncated:
                     reward = penalize_truncation
@@ -178,8 +178,9 @@ def train(
                     # Note that this info dict will be kept for the next iteration, which means the agent's `act` method also has access to this information.
                     info["next_opponent_policy"] = opponent_manager.current_curriculum_opponent.peek(info)
 
-                agent.update(next_obs, reward, terminated, truncated, info)
+                agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
                 obs = next_obs
+                info = next_info
 
             # Determine the final game result, to provide to the self-play manager
             if terminated and (reward != 0.0):

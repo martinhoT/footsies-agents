@@ -63,8 +63,6 @@ class FootsiesAgent(FootsiesAgentTorch):
             modules["critic"] = self._critic.q_network
         self._model = AggregateModule(modules)
 
-        self.current_observation = None
-        self.current_info = None
         self.current_action = None
         self.current_action_discretes = deque([]) # only needed if using simple actions
 
@@ -85,10 +83,6 @@ class FootsiesAgent(FootsiesAgentTorch):
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
         self._has_made_decision = False
-
-        # We need to update these variables before anything!
-        self.current_observation = obs
-        self.current_info = info
 
         # If there are scheduled discrete actions, simply perform them.
         # We need to perform this during potential hitstop, so it's before the next check.
@@ -157,13 +151,10 @@ class FootsiesAgent(FootsiesAgentTorch):
 
         return action
 
-    def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
+    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
         # Don't update while in hitstop, since obs and next_obs are the same and we don't want bootstrapping during that period.
         if self._has_acted_in_hitstop and not self._has_made_decision:
             return
-
-        obs = self.current_observation
-        prev_info = self.current_info
 
         # The opponent action is inferred from observation, while the agent's action is the one the agent actually performed.
         # This means that the action spaces are slightly different for each: the opponent is internally using the primitive action space,
@@ -172,7 +163,7 @@ class FootsiesAgent(FootsiesAgentTorch):
         if self.footsies:
             # We only use this method to determine whether the agent's action was frameskipped or not, and to get the opponent's action of course.
             # We treat the agent specially because we may want to use a different action space for them (e.g. remove special moves).
-            obs_agent_action, obs_opponent_action = ActionMap.simples_from_transition_ori(prev_info, info)
+            obs_agent_action, obs_opponent_action = ActionMap.simples_from_transition_ori(info, next_info)
 
             # We always consider the action that the agent performed to be the one that they indeed performed, not inferred from the observation.
             # Unless we detect that we are being frameskipped, in which case we set that we are being frameskipped.
@@ -194,17 +185,17 @@ class FootsiesAgent(FootsiesAgentTorch):
             obs_agent_action = self.current_action
             obs_opponent_action = None
 
-        next_opponent_policy = info.get("next_opponent_policy", None) if self.consider_explicit_opponent_policy else None
+        next_opponent_policy = next_info.get("next_opponent_policy", None) if self.consider_explicit_opponent_policy else None
         if next_opponent_policy is not None:
             next_opponent_policy = next_opponent_policy.unsqueeze(1)
 
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
-            agent_will_frameskip=(not ActionMap.is_state_actionable_ori(info, True)) or (len(self.current_action_discretes) > 0),
-            opponent_will_frameskip=not ActionMap.is_state_actionable_ori(info, False),
+            agent_will_frameskip=(not ActionMap.is_state_actionable_ori(next_info, True)) or (len(self.current_action_discretes) > 0),
+            opponent_will_frameskip=not ActionMap.is_state_actionable_ori(next_info, False),
             next_obs_opponent_policy=next_opponent_policy,
-            intrinsic_reward=info.get("intrinsic_reward", 0),
+            intrinsic_reward=next_info.get("intrinsic_reward", 0),
         )
 
         # P1 learning logging
@@ -218,9 +209,6 @@ class FootsiesAgent(FootsiesAgentTorch):
         # If the episode is over, we need to reset episode variables, mainly the action that was performed!
         # If we still had the queue of current actions active, we would perform them again in the next episode, which would also break the leaner update.
         if terminated or truncated:
-            self.current_observation = None
-            self.current_info = None
-
             self.current_action = None
             self.current_action_discretes.clear()
         

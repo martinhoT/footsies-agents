@@ -24,8 +24,6 @@ class FootsiesAgent(FootsiesAgentBase):
         self._assume_action_on_frameskip = assume_action_on_frameskip
         self._p1_simple_action_correction = p1_simple_action_correction
 
-        self._current_observation = None
-        self._current_info = None
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0
 
@@ -39,8 +37,6 @@ class FootsiesAgent(FootsiesAgentBase):
         self.cumulative_loss_position = 0
 
     def act(self, obs: torch.Tensor, info: dict) -> "any":
-        self._current_observation = obs
-        self._current_info = info
         return 0
 
     def update_with_simple_actions(self, obs: torch.Tensor, p1_action: int | None, p2_action: int | None, next_obs: torch.Tensor):
@@ -84,9 +80,9 @@ class FootsiesAgent(FootsiesAgentBase):
         self.cumulative_loss = guard_loss + move_loss + move_progress_loss + position_loss
         self.cumulative_loss_n += 1
 
-    def update(self, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict):
-        p1_action, p2_action = ActionMap.simples_from_transition_ori(self._current_info, info)
-        self.update_with_simple_actions(self._current_observation, p1_action, p2_action, next_obs)
+    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
+        p1_action, p2_action = ActionMap.simples_from_transition_ori(info, next_info)
+        self.update_with_simple_actions(obs, p1_action, p2_action, next_obs)
 
     # This is the only evaluation function that clears the denominator cumulative_loss_n
     def evaluate_average_loss_and_clear(self) -> float:

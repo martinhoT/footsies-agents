@@ -141,7 +141,6 @@ class GameModel:
 
         # For training
         self.state_batch_as_list = []
-        self.current_observation = None
 
     def _convert_discrete_components(self, obs: torch.Tensor) -> torch.Tensor:
         """

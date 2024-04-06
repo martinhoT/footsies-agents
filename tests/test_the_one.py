@@ -18,8 +18,8 @@ def test_standard(footsies_env: FootsiesEnv):
     terminated, truncated = False, False
     while not (terminated or truncated):
         action = agent.act(obs, info)
-        next_obs, reward, terminated, truncated, info = env.step(action)
-        agent.update(next_obs, reward, terminated, truncated, info)
+        next_obs, reward, terminated, truncated, next_info = env.step(action)
+        agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
 
 def test_whiff_punisher(footsies_env: FootsiesEnv):
@@ -41,14 +41,17 @@ def test_whiff_punisher(footsies_env: FootsiesEnv):
 
     while not (terminated or truncated):        
         action = agent.act(obs, info)
-        next_obs, reward, terminated, truncated, info = env.step(action)
+        next_obs, reward, terminated, truncated, next_info = env.step(action)
 
         assert agent.recently_predicted_opponent_action == torch.argmax(next_opponent_policy).item()
         
-        next_opponent_policy = whiff_punisher.peek(info)
-        info["next_opponent_policy"] = next_opponent_policy
+        next_opponent_policy = whiff_punisher.peek(next_info)
+        next_info["next_opponent_policy"] = next_opponent_policy
 
-        agent.update(next_obs, reward, terminated, truncated, info)
+        agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
+        
+        obs = next_obs
+        info = next_info
     
     # Set the opponent back to the default
     footsies_env.set_opponent(None)

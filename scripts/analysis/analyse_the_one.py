@@ -159,7 +159,7 @@ if __name__ == "__main__":
             obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
             if custom_opponent is not None:
                 next_info["next_opponent_policy"] = custom_opponent.peek(next_info)
-            logged_agent.update(next_obs, reward, terminated, truncated, next_info)
+            logged_agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
     def act(obs, info):
         # This is so bad, it's a repeat of update()'s last part (since the the_one doesn't have update() called, only the A2CAgent), but idc

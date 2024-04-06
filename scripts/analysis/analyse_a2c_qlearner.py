@@ -204,9 +204,7 @@ class QLearnerAnalyserManager:
                 self.learner.learn(obs, next_obs, reward, terminated, truncated, obs_agent_action=p1_simple, obs_opponent_action=p2_simple)
             # Otherwise, assume the agent is performing `act`.
             else:
-                self.agent.current_info = info
-                self.agent.current_observation = obs
-                self.agent.update(next_obs, reward, terminated, truncated, next_info)
+                self.agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
         if isinstance(self.learner.critic, QFunctionNetwork):
             q_values = self.learner.critic.q(obs, use_target_network=self.show_target_network)

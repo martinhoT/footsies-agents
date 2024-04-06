@@ -121,13 +121,13 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
     def act(self, obs, *args, **kwargs) -> "any":
         return self.agent.act(obs, *args, **kwargs)
 
-    def update(self, next_obs, reward: float, terminated: bool, truncated: bool, info: dict):
-        self.agent.update(next_obs, reward, terminated, truncated, info)
+    def update(self, obs, next_obs, reward: float, terminated: bool, truncated: bool, info, next_info: dict):
+        self.agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
         self.episode_reward += reward
         self.episode_length += 1
         self.average_reward = self.average_reward_coef * self.average_reward + (1 - self.average_reward_coef) * reward
-        self.average_intrinsic_reward = self.average_reward_coef * self.average_intrinsic_reward + (1 - self.average_reward_coef) * info.get("intrinsic_reward", 0.0)
+        self.average_intrinsic_reward = self.average_reward_coef * self.average_intrinsic_reward + (1 - self.average_reward_coef) * next_info.get("intrinsic_reward", 0.0)
         self.current_step += 1
 
         # Update the win rate tracker (only really valid for FOOTSIES)
@@ -136,7 +136,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             self.recent_wins.append(reward > 0.0)
         # We treat truncation, which should be by time limit, as termination
         elif truncated:
-            self.recent_wins.append(info["guard"][0] > info["guard"][1])
+            self.recent_wins.append(next_info["guard"][0] > next_info["guard"][1])
 
         # Write logs (at the episode level)
         if terminated or truncated:
