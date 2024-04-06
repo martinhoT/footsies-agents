@@ -1,10 +1,10 @@
-from .agent import FootsiesAgent
+from .agent import TheOneAgent
 from agents.a2c.loggables import get_loggables as get_a2c_loggables
 from agents.mimic.loggables import get_loggables as get_mimic_loggables
 from agents.game_model.loggables import get_loggables as get_game_model_loggables
 
 
-def get_loggables(agent: FootsiesAgent):
+def get_loggables(agent: TheOneAgent):
     network_histograms = []
     custom_evaluators = []
     custom_evaluators_over_test_states = []

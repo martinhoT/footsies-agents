@@ -1,7 +1,7 @@
 from torch import nn
 from copy import deepcopy
 from agents.action import ActionMap
-from agents.game_model.agent import FootsiesAgent as GameModelAgent
+from agents.game_model.agent import GameModelAgent
 from agents.game_model.game_model import GameModel, GameModelNetwork
 from agents.game_model.loggables import get_loggables
 

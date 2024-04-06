@@ -56,7 +56,7 @@ class Autoencoder(nn.Module):
         return self.decoder(self.encoder(x))
 
 
-class FootsiesAgent(FootsiesAgentBase):
+class AutoencoderAgent(FootsiesAgentBase):
     def __init__(
         self,
         observation_space_size: int,

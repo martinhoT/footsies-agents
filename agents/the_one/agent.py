@@ -10,18 +10,17 @@ from gymnasium import Env
 from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule
 from agents.the_one.reaction_time import ReactionTimeEmulator
-from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.a2c.agent import A2CAgent
 from agents.a2c.a2c import ActorNetwork
-from agents.mimic.agent import FootsiesAgent as MimicAgent
-from agents.game_model.agent import FootsiesAgent as GameModelAgent
+from agents.mimic.agent import MimicAgent
+from agents.game_model.agent import GameModelAgent
 from agents.torch_utils import observation_invert_perspective_flattened
 from data import FootsiesDataset
 
 LOGGER = logging.getLogger("main.the_one")
 
 
-# TODO: use reaction time emulator
-class FootsiesAgent(FootsiesAgentTorch):
+class TheOneAgent(FootsiesAgentTorch):
     def __init__(
         self,
         # Dimensions

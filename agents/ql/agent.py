@@ -6,7 +6,7 @@ from typing import Callable, Tuple
 from agents.utils import extract_sub_kwargs
 
 
-class FootsiesAgent(FootsiesAgentBase):
+class QLAgent(FootsiesAgentBase):
     def __init__(
         self,
         observation_space_size: int,

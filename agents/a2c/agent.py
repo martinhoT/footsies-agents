@@ -17,7 +17,7 @@ from collections import deque
 LOGGER = logging.getLogger("main.a2c.agent")
 
 
-class FootsiesAgent(FootsiesAgentTorch):
+class A2CAgent(FootsiesAgentTorch):
     def __init__(
         self,
         learner: A2CQLearner,

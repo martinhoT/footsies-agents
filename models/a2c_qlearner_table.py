@@ -1,6 +1,6 @@
 from torch import nn
 from agents.action import ActionMap
-from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.a2c.agent import A2CAgent
 from agents.a2c.loggables import get_loggables
 from agents.a2c.a2c import A2CQLearner, ActorNetwork
 from agents.ql.ql import QFunctionTable

@@ -1,7 +1,7 @@
-from .agent import FootsiesAgent
+from .agent import AutoencoderAgent
 
 
-def get_loggables(agent: FootsiesAgent):
+def get_loggables(agent: AutoencoderAgent):
     return {
         "network_histograms": [
             agent.autoencoder.decoder,

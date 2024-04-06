@@ -6,7 +6,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.statistics import FootsiesStatistics
-from agents.autoencoder.agent import FootsiesAgent as AutoencoderAgent
+from agents.autoencoder.agent import AutoencoderAgent
 import pprint
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation

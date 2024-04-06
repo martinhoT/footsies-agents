@@ -5,7 +5,7 @@ from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDis
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 from scripts.analysis.analysis import Analyser, footsies_move_from_one_hot
-from agents.game_model.agent import FootsiesAgent as GameModelAgent
+from agents.game_model.agent import GameModelAgent
 from agents.action import ActionMap
 from main import load_agent
 

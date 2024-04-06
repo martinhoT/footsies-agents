@@ -15,7 +15,7 @@ LOGGER = logging.getLogger("main.mimic.agent")
 
 
 # TODO: there are three different ways we can predict actions: primitive actions discretized, primitive actions as tuple, and moves. Are all supported?
-class FootsiesAgent(FootsiesAgentBase):
+class MimicAgent(FootsiesAgentBase):
     def __init__(
         self,
         action_dim: int,

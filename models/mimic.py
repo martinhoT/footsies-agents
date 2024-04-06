@@ -3,7 +3,7 @@ from copy import deepcopy
 from agents.action import ActionMap
 from agents.mimic.loggables import get_loggables
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
-from agents.mimic.agent import FootsiesAgent as MimicAgent
+from agents.mimic.agent import MimicAgent
 
 
 def model_init(observation_space_size: int, action_space_size: int, *,

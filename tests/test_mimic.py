@@ -2,7 +2,7 @@ import torch
 from models import mimic_
 from torch.utils.data import DataLoader
 from typing import Callable, Iterator
-from agents.mimic.agent import FootsiesAgent as MimicAgent
+from agents.mimic.agent import MimicAgent
 
 
 def test_non_recurrent(il_dataset: Iterator):

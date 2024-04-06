@@ -1,7 +1,7 @@
-from .agent import FootsiesAgent
+from .agent import GameModelAgent
 
 
-def get_loggables(agent: FootsiesAgent):
+def get_loggables(agent: GameModelAgent):
     return {
         "network_histograms": [
             agent.game_model,

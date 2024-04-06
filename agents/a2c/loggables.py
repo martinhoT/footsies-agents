@@ -1,4 +1,4 @@
-from .agent import FootsiesAgent
+from .agent import A2CAgent
 from agents.ql.ql import QFunctionTable, QFunctionNetwork
 from agents.a2c.a2c import ValueNetwork, A2CQLearner
 from functools import partial
@@ -8,7 +8,7 @@ def q_network_target_update_step(*, qf_network: QFunctionNetwork) -> int:
     return qf_network._current_update_step
 
 
-def get_loggables(agent: FootsiesAgent) -> dict[str, list]:
+def get_loggables(agent: A2CAgent) -> dict[str, list]:
     network_histograms = [
         agent._actor
     ]

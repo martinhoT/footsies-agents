@@ -1,7 +1,7 @@
-from .agent import FootsiesAgent
+from .agent import MimicAgent
 
 
-def get_loggables(agent: FootsiesAgent):
+def get_loggables(agent: MimicAgent):
     network_histograms = []
     custom_evaluators = []
     custom_evaluators_over_test_states = []

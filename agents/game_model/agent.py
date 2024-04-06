@@ -10,7 +10,7 @@ from agents.game_model.game_model import GameModel
 
 # NOTE: trained by example
 # NOTE: player 1 is assumed to be the agent
-class FootsiesAgent(FootsiesAgentBase):
+class GameModelAgent(FootsiesAgentBase):
     def __init__(
         self,
         game_model: GameModel,

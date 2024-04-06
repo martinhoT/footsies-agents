@@ -1,9 +1,9 @@
 import optuna
 from gymnasium import Space
-from agents.game_model.agent import FootsiesAgent
+from agents.game_model.agent import GameModelAgent
 
 
-def define_model(observation_space_size: int, action_space_size: int, trial: optuna.Trial) -> FootsiesAgent:
+def define_model(observation_space_size: int, action_space_size: int, trial: optuna.Trial) -> GameModelAgent:
     hidden_layer_sizes_specification = trial.suggest_categorical("hidden_layer_sizes", [
         "",
         "128",
@@ -22,7 +22,7 @@ def define_model(observation_space_size: int, action_space_size: int, trial: opt
     else:
         hidden_layer_activation_specification = "Identity"
 
-    return FootsiesAgent(
+    return GameModelAgent(
         observation_space_size=observation_space_size,
         action_space_size=action_space_size,
         by_primitive_actions=False,
@@ -35,5 +35,5 @@ def define_model(observation_space_size: int, action_space_size: int, trial: opt
     )
 
 
-def objective(agent: FootsiesAgent):
+def objective(agent: GameModelAgent):
     return agent.evaluate_average_loss_and_clear()

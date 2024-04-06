@@ -9,7 +9,7 @@ from footsies_gym.moves import FootsiesMove
 from scripts.analysis.analysis import Analyser
 from agents.action import ActionMap
 from agents.a2c.a2c import A2CQLearner
-from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.a2c.agent import A2CAgent
 from agents.ql.ql import QFunctionNetwork, QFunctionTable
 from main import load_agent
 

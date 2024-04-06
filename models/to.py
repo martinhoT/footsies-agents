@@ -1,15 +1,15 @@
 from torch import nn
 from copy import deepcopy
 from agents.action import ActionMap
-from agents.the_one.agent import FootsiesAgent as TheOneAgent
-from agents.a2c.agent import FootsiesAgent as A2CAgent
+from agents.the_one.agent import TheOneAgent
+from agents.a2c.agent import A2CAgent
 from agents.a2c.a2c import A2CQLearner, ActorNetwork
 from agents.ql.ql import QFunctionNetwork, QNetwork, QFunctionTable
 from agents.the_one.loggables import get_loggables
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
-from agents.mimic.agent import FootsiesAgent as MimicAgent
+from agents.mimic.agent import MimicAgent
 from agents.the_one.reaction_time import ReactionTimeEmulator
-from agents.game_model.agent import FootsiesAgent as GameModelAgent
+from agents.game_model.agent import GameModelAgent
 from agents.game_model.game_model import GameModel, GameModelNetwork
 
 
