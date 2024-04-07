@@ -30,6 +30,8 @@ class MainArgs:
     """Perform curriculum learning on FOOTSIES with pre-made rule-based opponents"""
     intrinsic_reward_scheme_: Literal["count", "icm", "rnd", None] = None
     """The type of intrinsic reward to use (string specification)"""
+    skip_freeze: bool = False
+    """Skip any environment freeze in which an environment transition has equal observations. This is useful for handling hitstop in FOOTSIES"""
 
     def __post_init__(self):
         if self.agent.is_sb3 and self.episodes is not None:
@@ -48,6 +50,9 @@ class MainArgs:
                 )
         
         self.env.log_dir = f"{self.env.log_dir}/{self.agent.name}"
+
+        if self.skip_freeze and not self.env.torch:
+            raise ValueError("skipping environment freezes is not supported on observations that aren't PyTorch tensors")
     
     @property
     def intrinsic_reward_scheme(self) -> IntrinsicRewardScheme | None:

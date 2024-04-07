@@ -4,6 +4,7 @@ import gymnasium as gym
 import torch
 import logging
 import json
+import warnings
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
@@ -121,6 +122,7 @@ def train(
     intrinsic_reward_scheme: IntrinsicRewardScheme = None,
     episode_finished_callback: Callable[[int], None] = lambda episode: None,
     progress_bar: bool = True,
+    skip_freeze: bool = True,
 ):
     """
     Train an `agent` on the given Gymnasium environment `env`.
@@ -135,6 +137,7 @@ def train(
     - `intrinsic_reward`: the intrinsic reward scheme to use, if any
     - `episode_finished_callback`: function that will be called after each episode is finished
     - `progress_bar`: whether to display a progress bar (with `tqdm`)
+    - `skip_freeze`: whether to skip environment freezes, such as histop in FOOTSIES
     """
     agent.preprocess(env)
     LOGGER.info("Preprocessing done!")
@@ -162,6 +165,13 @@ def train(
                 action = agent.act(obs, info)
                 next_obs, reward, terminated, truncated, next_info = env.step(action)
                 
+                # Discard histop/freeze
+                if skip_freeze:
+                    while obs.isclose(obs, next_obs):
+                        next_obs, r, terminated, truncated, next_info = env.step(0)
+                        reward += r
+                        LOGGER.debug("Skipped one transition, which is presumed to be artificial freeze")
+
                 if penalize_truncation is not None and truncated:
                     reward = penalize_truncation
                 
@@ -487,6 +497,7 @@ if __name__ == "__main__":
             "penalize_truncation": args.penalize_truncation,
             "opponent_manager": opponent_manager,
             "intrinsic_reward_scheme": intrinsic_reward_scheme,
+            "skip_freeze": args.skip_freeze,
         }
 
         if args.misc.hogwild:

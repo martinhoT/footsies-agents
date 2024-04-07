@@ -60,14 +60,6 @@ class A2CAgent(FootsiesAgentTorch):
             modules["critic"] = self._critic.q_network
         self._model = AggregateModule(modules)
 
-        # Whether the agent has performed an action during hitstop.
-        # While in hitstop, time is frozen, so the agent should only perform one action.
-        # Likewise, there should only be one update, from the moment the agent performs an action to the moment hitstop ends.
-        self._has_acted_in_hitstop = False
-        # Whether the agent has made a decision in the previous act method.
-        # If it's False, then it means the agent was performing actions but they are a part of a previously made decision.
-        self._has_made_decision = False
-
         # For logging
         self.cumulative_delta = 0
         self.cumulative_delta_n = 0
@@ -76,17 +68,6 @@ class A2CAgent(FootsiesAgentTorch):
         self._test_observations = None
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
-        self._has_made_decision = False
-
-        # While in hitstop, don't perform any actions (just do no-op)
-        is_in_hitstop = ActionMap.is_in_hitstop_ori(info)
-        if self._has_acted_in_hitstop:
-            if is_in_hitstop:
-                return 0
-            else:
-                # If not in hitstop anymore, reset the flag
-                self._has_acted_in_hitstop = False
-        
         # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic
         if predicted_opponent_action is None:
             predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
@@ -110,20 +91,9 @@ class A2CAgent(FootsiesAgentTorch):
             else:
                 simple_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
         
-        # If the action was performed in hitstop, then ignore the next frames, that are frozen in time, which just mess with the updates
-        if is_in_hitstop:
-            LOGGER.debug("Agent performed action %s in hitstop, will ignore any further acts and updates until it is over (except the very next update)", self.current_action)
-            self._has_acted_in_hitstop = True
-
-        self._has_made_decision = True
-
         return simple_action
 
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
-        # Don't update while in hitstop, since obs and next_obs are the same and we don't want bootstrapping during that period.
-        if self._has_acted_in_hitstop and not self._has_made_decision:
-            return
-
         # We always consider the agent's simple action, never the one inferred from the observation.
         obs_agent_action = next_info["agent_simple"]
         obs_opponent_action = next_info["p2_simple"]
@@ -149,12 +119,6 @@ class A2CAgent(FootsiesAgentTorch):
                 self.cumulative_qtable_error += self._learner.extrinsic_td_error
                 self.cumulative_qtable_error_n += 1
         
-        # If the episode is over, we need to reset episode variables, mainly the action that was performed!
-        # If we still had the queue of current actions active, we would perform them again in the next episode, which would also break the leaner update.
-        if terminated or truncated:
-            self._has_acted_in_hitstop = False
-            self._has_made_decision = False
-
     # NOTE: if by the time this function is called `act_with_qvalues` is true, then the extracted policy will act according to the Q-values as well
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         if self.act_with_qvalues:

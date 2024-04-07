@@ -234,6 +234,10 @@ class FootsiesSimpleActions(Wrapper):
         info["p1_nonactionable"] = False
         info["p2_nonactionable"] = False
         self._previous_info = info
+        self._agent_simple_action = None
+        self._agent_simple_action_queue.clear()
+        self._last_valid_p1_action = 0
+        self._last_valid_p2_action = 0
 
         return obs, info
 
@@ -266,7 +270,7 @@ class FootsiesSimpleActions(Wrapper):
             self._last_valid_p1_action = inferred_p1_action
         if inferred_p2_action is not None:
             self._last_valid_p2_action = inferred_p2_action
-        
+
         return obs, reward, terminated, truncated, info
 
     def effective_action(self, inferred_action: int | None, nonactionable_resolution_method: Literal["last", "none", "stand"], last_valid_action: int) -> int | None:

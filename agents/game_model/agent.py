@@ -34,12 +34,6 @@ class GameModelAgent(FootsiesAgentBase):
 
     def update_with_simple_actions(self, obs: torch.Tensor, p1_action: int | None, p2_action: int | None, next_obs: torch.Tensor):
         """Perform an update with the given simple actions, useful to avoid recomputing them."""
-        # Skip updates in hitstop (i.e. don't predict the time "freeze")
-        p1_in_hitstop = ActionMap.is_in_hitstop_torch(obs, True)
-        p2_in_hitstop = ActionMap.is_in_hitstop_torch(obs, False)
-        if (p1_in_hitstop or p2_in_hitstop) and obs.isclose(next_obs).all():
-            return
-
         guard_loss, move_loss, move_progress_loss, position_loss = self._game_model.update(obs, p1_action, p2_action, next_obs)
 
         self.cumulative_loss_guard += guard_loss
