@@ -101,6 +101,8 @@ class TheOneAgent(FootsiesAgentTorch):
 
         # Logging
         self._test_observations = None
+        self._cumulative_reaction_time = 0
+        self._cumulative_reaction_time_n = 0
 
     def env_concat(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -185,7 +187,10 @@ class TheOneAgent(FootsiesAgentTorch):
                     _, self.current_opponent_model_hidden_state_perceived = self.opponent_model.p2_model.network.compute_hidden_state(skipped, self.current_opponent_model_hidden_state_perceived)
 
             obs, opponent_model_hidden_state = self.multi_step_prediction(self.current_observation_delayed, reaction_time, self.current_opponent_model_hidden_state_perceived)
+            
             LOGGER.debug("Reacted with decision distribution %s and entropy %s, resulting in a reaction time of %s, and predicted the current observation is %s", decision_distribution.probs, decision_entropy, reaction_time, obs)
+            self._cumulative_reaction_time += reaction_time
+            self._cumulative_reaction_time_n += 1
             
         if self.opponent_model is not None:
             predicted_opponent_distribution, _ = self.opponent_model.p2_model.network.distribution(obs, opponent_model_hidden_state)
@@ -395,3 +400,13 @@ class TheOneAgent(FootsiesAgentTorch):
         # Save opponent model (even though this is meant to be discardable)
         if self.opponent_model is not None:
             self.opponent_model.save(folder_path)
+
+    def evaluate_average_reaction_time(self) -> float:
+        res = (
+            self._cumulative_reaction_time / self._cumulative_reaction_time_n
+        ) if self._cumulative_reaction_time_n != 0 else 0
+
+        self._cumulative_reaction_time = 0
+        self._cumulative_reaction_time_n = 0
+
+        return res
