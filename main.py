@@ -8,6 +8,7 @@ from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.time_limit import TimeLimit
+from agents.wrappers import FootsiesSimpleActions, FootsiesEncourageAdvance, FootsiesPhasicMoveProgress, AppendSimpleHistoryWrapper
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.envs.exceptions import FootsiesGameClosedError
 from footsies_gym.wrappers.normalization import FootsiesNormalized
@@ -28,7 +29,7 @@ from args import parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
 from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher, UnsafePunisher
 from opponents.base import OpponentManager
-from agents.utils import find_footsies_ports, FootsiesEncourageAdvance, FootsiesPhasicMoveProgress, AppendSimpleHistoryWrapper
+from agents.utils import find_footsies_ports
 from intrinsic.base import IntrinsicRewardScheme
 
 LOGGER = logging.getLogger("main")
@@ -219,6 +220,9 @@ def create_env(args: EnvArgs) -> Env:
         env = FootsiesEnv(
             **args.kwargs,
         )
+
+        if args.footsies_wrapper_simple[0]:
+            env = FootsiesSimpleActions(env, *args.footsies_wrapper_simple[1:])
 
         if args.footsies_wrapper_norm:
             if not args.footsies_wrapper_norm_guard:

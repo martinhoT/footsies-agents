@@ -40,7 +40,6 @@ def model_init(observation_space_size: int, action_space_size: int) -> tuple[A2C
     agent = A2CAgent(
         learner=learner,
         action_space_size=action_dim,
-        footsies=True,
     )
 
     loggables = get_loggables(agent)

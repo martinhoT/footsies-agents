@@ -14,10 +14,7 @@ LOGGER = logging.getLogger("main.tensorboard")
 @dataclass(slots=True, frozen=True)
 class TestState:
     observation:            "any"
-    p1_action_discrete:     int
-    p1_action_simple:       int
-    p2_action_discrete:     int
-    p2_action_simple:       int
+    info:                   dict
     terminated:             bool
     truncated:              bool
 
@@ -228,15 +225,10 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                 action = env.action_space.sample()
                 next_obs, _, next_terminated, next_truncated, next_info = env.step(action)
 
-                p1_action_simple, p2_action_simple = ActionMap.simples_from_transition_ori(info, next_info)
-
                 # In order to create a test state, we need to evaluate transitions, hence why we perform this weird roundabout environment iteration
                 test_state = TestState(
                     observation=obs,
-                    p1_action_discrete=ActionMap.primitive_to_discrete(next_info["p1_action"]),
-                    p1_action_simple=p1_action_simple,
-                    p2_action_discrete=ActionMap.primitive_to_discrete(next_info["p2_action"]),
-                    p2_action_simple=p2_action_simple,
+                    info=info,
                     terminated=terminated,
                     truncated=truncated,
                 )
@@ -250,10 +242,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                 if terminated or truncated:
                     final_test_state = TestState(
                         observation=next_obs,
-                        p1_action_discrete=None,
-                        p1_action_simple=None,
-                        p2_action_discrete=None,
-                        p2_action_simple=None,
+                        info=next_info,
                         terminated=next_terminated,
                         truncated=next_truncated,
                     )

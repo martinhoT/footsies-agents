@@ -319,7 +319,8 @@ class MimicAnalyserManager:
             obs, next_obs, _, terminated, truncated, info, next_info = analyser.most_recent_transition
 
             # Determine which actions the players did
-            p1_simple, p2_simple = ActionMap.simples_from_transition_ori(info, next_info)
+            p1_simple = next_info["p1_simple"]
+            p2_simple = next_info["p2_simple"]
 
             if p1_simple is not None:
                 p1_simple_move = ActionMap.simple_as_move(p1_simple)

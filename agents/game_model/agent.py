@@ -14,15 +14,8 @@ class GameModelAgent(FootsiesAgentBase):
     def __init__(
         self,
         game_model: GameModel,
-        assume_action_on_frameskip: Literal["last", "any", "none"] = "last",
-        p1_simple_action_correction: bool = True,
     ):
-        if assume_action_on_frameskip not in ("last", "any", "none"):
-            raise ValueError("'assume_action_on_frameskip' must be either 'last', 'any' or 'none'")
-
         self._game_model = game_model
-        self._assume_action_on_frameskip = assume_action_on_frameskip
-        self._p1_simple_action_correction = p1_simple_action_correction
 
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0
@@ -46,30 +39,6 @@ class GameModelAgent(FootsiesAgentBase):
         p2_in_hitstop = ActionMap.is_in_hitstop_torch(obs, False)
         if (p1_in_hitstop or p2_in_hitstop) and obs.isclose(next_obs).all():
             return
-        
-        if p1_action is None:
-            if self._assume_action_on_frameskip == "last":
-                p1_action = self._last_valid_p1_action
-            elif self._assume_action_on_frameskip == "none":
-                p1_action = 0
-            else:
-                p1_action = None
-        else:
-            self._last_valid_p1_action = p1_action
-
-        if p2_action is None:
-            p2_action = self._last_valid_p2_action
-            p2_action = 0
-        else:
-            self._last_valid_p2_action = p2_action
-
-        # Perform a move progress correction, by considering the agent to be performing a special move even as it's attempting its motion (primitive input sequence).
-        # We therefore consider the move to be finished, and visible, at the last primitive action.
-        if self._p1_simple_action_correction and ActionMap.is_simple_action_special_move(p1_action):
-            p1_simple = ActionMap.simple_as_move(p1_action)
-            p1_primitive_sequence_length = len(ActionMap.simple_to_primitive(p1_action))
-            obs = obs.clone()
-            obs[:, 32] = obs[:, 32] * p1_simple.value.duration / (p1_simple.value.duration + p1_primitive_sequence_length - 1)
 
         guard_loss, move_loss, move_progress_loss, position_loss = self._game_model.update(obs, p1_action, p2_action, next_obs)
 
@@ -81,7 +50,9 @@ class GameModelAgent(FootsiesAgentBase):
         self.cumulative_loss_n += 1
 
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
-        p1_action, p2_action = ActionMap.simples_from_transition_ori(info, next_info)
+        # We treat both players equally, to guarantee the Markov property
+        p1_action = next_info["p1_simple"]
+        p2_action = next_info["p2_simple"]
         self.update_with_simple_actions(obs, p1_action, p2_action, next_obs)
 
     # This is the only evaluation function that clears the denominator cumulative_loss_n

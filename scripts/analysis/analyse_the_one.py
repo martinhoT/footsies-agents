@@ -14,7 +14,7 @@ from scripts.analysis.analyse_opponent_model import MimicAnalyserManager
 from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger, load_agent, load_agent_parameters, import_agent
-from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher, NSpammer
+from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher, NSpammer, CurriculumOpponent
 from agents.utils import FootsiesPhasicMoveProgress
 from agents.logger import TrainingLoggerWrapper
 import logging
@@ -162,13 +162,7 @@ if __name__ == "__main__":
             logged_agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
     def act(obs, info):
-        # This is so bad, it's a repeat of update()'s last part (since the the_one doesn't have update() called, only the A2CAgent), but idc
-        prev_obs = agent.a2c.current_info
-        if prev_obs is not None:
-            _, opponent_action = ActionMap.simples_from_transition_ori(prev_obs, info)
-            agent._previous_valid_opponent_action = opponent_action if opponent_action is not None else agent._previous_valid_opponent_action
-
-        if custom_opponent is not None:
+        if isinstance(custom_opponent, CurriculumOpponent):
             info["next_opponent_policy"] = custom_opponent.peek(info)
 
         action = logged_agent.act(obs, info)

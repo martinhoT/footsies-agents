@@ -195,7 +195,8 @@ class QLearnerAnalyserManager:
             # If the agent is performing custom actions, we skip over `act` and `update` and pass information directly to the learner.
             # NOTE: not recommended, since during `act` the agent performs important operations that affect the learning update.
             if analyser.use_custom_action:
-                p1_simple, p2_simple = ActionMap.simples_from_transition_ori(info, next_info)
+                p1_simple = next_info["p1_simple"]
+                p2_simple = next_info["p2_simple"]
 
                 # Avoid using special moves if they weren't specified
                 if p1_simple is not None:

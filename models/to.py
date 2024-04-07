@@ -124,7 +124,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     a2c = A2CAgent(
         learner=learner,
         opponent_action_dim=opponent_action_dim,
-        footsies=True,
         use_opponents_perspective=False,
         consider_explicit_opponent_policy=consider_explicit_opponent_policy,
         act_with_qvalues=act_with_qvalues,

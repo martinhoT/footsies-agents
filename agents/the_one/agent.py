@@ -220,14 +220,6 @@ class TheOneAgent(FootsiesAgentTorch):
     #       We aren't considering delayed information for the updates, since neural network updates are slow and thus
     #       it's unlikely that these privileged updates are going to make a difference. In turn, the code is simpler.
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
-        # Get the actions that were effectively performed by each player on the previous step
-        agent_action, opponent_action = ActionMap.simples_from_transition_ori(info, next_info)
-        if self.remove_agent_special_moves:
-            # Convert the detected special move input to a simple action
-            if agent_action == 8 or agent_action == 7:
-                LOGGER.warning("We detected the agent performing a special move, even though they can't perform special moves! Will convert to the respective attack action.\nCurrent observation: %s\nNext observation: %s", self.current_observation, next_obs)
-                agent_action -= 2
-
         if self.opponent_model is not None:
             if "next_opponent_policy" in next_info:
                 warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
@@ -237,14 +229,14 @@ class TheOneAgent(FootsiesAgentTorch):
         # Update the different models
         self.a2c.update(obs, next_obs, reward, terminated, truncated, info, next_info)
         if self.env_model is not None:
-            self.env_model.update_with_simple_actions(obs, agent_action, opponent_action, next_obs)
+            self.env_model.update(obs, next_obs, reward, terminated, truncated, info, next_info)
         if self.opponent_model is not None:
-            self.opponent_model.update_with_simple_actions(obs, None, opponent_action, terminated or truncated)
+            self.opponent_model.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
         # that originated the temporal action in the first place.
-        self._previous_valid_opponent_action = opponent_action if opponent_action is not None else self._previous_valid_opponent_action
+        self._previous_valid_opponent_action = next_info["p2_simple"] if next_info["p2_actionable"] else self._previous_valid_opponent_action
 
         # The reaction time emulator needs to know when an episode terminated/truncated.
         if terminated or truncated:
@@ -319,16 +311,16 @@ class TheOneAgent(FootsiesAgentTorch):
                 self.deterministic = deterministic
                 self.current_action = None
                 self.current_action_iterator = None
+                self.previous_observation
             
             def __call__(self, obs) -> int:
                 # Invert the perspective, since the agent was trained as if they were on the left side of the screen
                 obs = observation_invert_perspective_flattened(obs)
 
                 opp_action = None
-                previous_observation = getattr(actor, "previous_observation__") if hasattr(actor, "previous_observation__") else None
-                if previous_observation is not None:
+                if self.previous_observation is not None:
                     # Weak, rollback-inspired opponent model: if the opponent did action X, then they will keep doing X
-                    _, opp_action = ActionMap.simples_from_transition_torch(actor.previous_observation__, obs)
+                    _, opp_action = ActionMap.simples_from_transition_torch(self.previous_observation, obs)
                 
                 # When in doubt, assume the opponent is standing
                 if opp_action is None:
@@ -351,8 +343,8 @@ class TheOneAgent(FootsiesAgentTorch):
                     self.current_action_iterator = iter(ActionMap.simple_to_discrete(self.current_action))
                     action = next(self.current_action_iterator)
 
-                # Save the current observation in an attribute that *surely* won't overlap with an existing one
-                actor.previous_observation__ = obs
+                # Save the current observation.
+                self.previous_observation = obs
                 
                 # We need to invert the action since the agent was trained to perform actions as if they were on the left side of the screen,
                 # so we need to mirror them

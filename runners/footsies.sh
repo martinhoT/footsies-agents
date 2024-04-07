@@ -7,6 +7,7 @@ python3 main.py $agent \
     --env.torch \
     --env.footsies-wrapper-norm \
     --env.footsies-wrapper-acd \
+    --env.footsies-wrapper-simple True True last last \
     --env.wrapper-time-limit 3000 \
     --env.kwargs \
         game_path ../Footsies-Gym/Build/FOOTSIES.x86_64 \

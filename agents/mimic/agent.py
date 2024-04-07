@@ -89,7 +89,8 @@ class MimicAgent(FootsiesAgentBase):
                 self._p2_cumulative_loss_n += 1
 
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
-        p1_simple, p2_simple = ActionMap.simples_from_transition_ori(info, next_info)
+        p1_simple = next_info["p1_simple"]
+        p2_simple = next_info["p2_simple"]
 
         self.update_with_simple_actions(obs, p1_simple, p2_simple, terminated or truncated)
 

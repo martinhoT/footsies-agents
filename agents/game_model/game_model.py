@@ -84,6 +84,16 @@ class GameModelNetwork(nn.Module):
         """Whether the network uses a residual architecture."""
         return self._residual
 
+    @property
+    def p1_action_dim(self) -> int:
+        """Action dimensionality of player 1."""
+        return self._p1_action_dim
+
+    @property
+    def p2_action_dim(self) -> int:
+        """Action dimensionality of player 2."""
+        return self._p2_action_dim
+
 
 class GameModel:
     def __init__(
@@ -185,7 +195,7 @@ class GameModel:
 
         return prediction
 
-    def update(self, obs: torch.Tensor, p1_action: torch.Tensor | int, p2_action: torch.Tensor | int, next_obs: torch.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
+    def update(self, obs: torch.Tensor, p1_action: torch.Tensor | int | None, p2_action: torch.Tensor | int | None, next_obs: torch.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
         """
         Update the game model with the given transition.
         
@@ -203,8 +213,14 @@ class GameModel:
         # Obtain prediction
         if isinstance(p1_action, int):
             p1_action = torch.tensor([p1_action])
+        elif p1_action is None:
+            p1_action = torch.zeros(1, self._network.p1_action_dim)
+        
         if isinstance(p2_action, int):
             p2_action = torch.tensor([p2_action])
+        elif p2_action is None:
+            p2_action = torch.zeros(1, self._network.p2_action_dim)
+        
         predicted = self._network(obs, p1_action, p2_action)
         
         # Prepare the targets
