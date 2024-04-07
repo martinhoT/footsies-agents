@@ -166,7 +166,7 @@ if __name__ == "__main__":
         prev_obs = agent.a2c.current_info
         if prev_obs is not None:
             _, opponent_action = ActionMap.simples_from_transition_ori(prev_obs, info)
-            agent.previous_valid_opponent_action = opponent_action if opponent_action is not None else agent.previous_valid_opponent_action
+            agent._previous_valid_opponent_action = opponent_action if opponent_action is not None else agent._previous_valid_opponent_action
 
         if custom_opponent is not None:
             info["next_opponent_policy"] = custom_opponent.peek(info)

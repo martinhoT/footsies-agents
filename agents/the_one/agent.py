@@ -15,6 +15,7 @@ from agents.a2c.a2c import ActorNetwork
 from agents.mimic.agent import MimicAgent
 from agents.game_model.agent import GameModelAgent
 from agents.torch_utils import observation_invert_perspective_flattened
+from collections import deque
 from data import FootsiesDataset
 
 LOGGER = logging.getLogger("main.the_one")
@@ -88,13 +89,18 @@ class TheOneAgent(FootsiesAgentTorch):
         )
 
         # The perceived observation, delayed N time steps according to reaction time.
-        self.current_observation_delayed = None
+        self._current_observation_delayed = None
         # We set the previous opponent action to 0, which should correspond to a no-op (STAND).
         # This is only used for the rollback opponent prediction method.
-        self.previous_valid_opponent_action = 0
+        self._previous_valid_opponent_action = 0
         # The hidden state of the opponent model (only matters if recurrent).
         # This version of the hidden state is the one calculated after advancing the opponent model up to predicted observation.
-        self.current_opponent_model_hidden_state_perceived = None
+        self._current_opponent_model_hidden_state_perceived = None
+        # The actions that the agent has previously performed.
+        # This is a buffer of the same size of the reaction time observation buffer to aid in multi-step prediction of the current state.
+        # The buffer doesn't need to include the action that was performed at the current state, so we subtract 1.
+        past_agent_actions_size = (reaction_time_emulator.history_size - 1) if reaction_time_emulator is not None else 0
+        self._past_agent_actions = deque([], maxlen=past_agent_actions_size)
 
         # Merely for tracking
         self._recently_predicted_opponent_action = None
@@ -172,21 +178,21 @@ class TheOneAgent(FootsiesAgentTorch):
     def act(self, obs: torch.Tensor, info: dict) -> int:
         # Update the reaction time emulator and substitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
-            if self.current_observation_delayed is None:
+            if self._current_observation_delayed is None:
                 self.reaction_time_emulator.fill_history(obs)
-                self.current_observation_delayed = obs
+                self._current_observation_delayed = obs
             
-            opponent_probabilities, hidden_state = self.opponent_model.p2_model.network.probabilities(self.current_observation_delayed, self.current_opponent_model_hidden_state_perceived)
+            opponent_probabilities, hidden_state = self.opponent_model.p2_model.network.probabilities(self._current_observation_delayed, self._current_opponent_model_hidden_state_perceived)
             opponent_probabilities = opponent_probabilities.detach()
-            self.current_opponent_model_hidden_state_perceived = hidden_state.detach()
-            decision_distribution = self.a2c.learner.actor.decision_distribution(self.current_observation_delayed, opponent_probabilities, detached=True)
+            self._current_opponent_model_hidden_state_perceived = hidden_state.detach()
+            decision_distribution = self.a2c.learner.actor.decision_distribution(self._current_observation_delayed, opponent_probabilities, detached=True)
             decision_entropy = decision_distribution.entropy().item()
-            self.current_observation_delayed, reaction_time, skipped_observations = self.reaction_time_emulator.register_and_perceive(obs, decision_entropy)
+            self._current_observation_delayed, reaction_time, skipped_observations = self.reaction_time_emulator.register_and_perceive(obs, decision_entropy)
             for skipped in skipped_observations:
                 if ActionMap.is_state_actionable_torch(skipped, False):
-                    _, self.current_opponent_model_hidden_state_perceived = self.opponent_model.p2_model.network.compute_hidden_state(skipped, self.current_opponent_model_hidden_state_perceived)
+                    _, self._current_opponent_model_hidden_state_perceived = self.opponent_model.p2_model.network.compute_hidden_state(skipped, self._current_opponent_model_hidden_state_perceived)
 
-            obs, opponent_model_hidden_state = self.multi_step_prediction(self.current_observation_delayed, reaction_time, self.current_opponent_model_hidden_state_perceived)
+            obs, opponent_model_hidden_state = self.multi_step_prediction(self._current_observation_delayed, reaction_time, self._current_opponent_model_hidden_state_perceived)
             
             LOGGER.debug("Reacted with decision distribution %s and entropy %s, resulting in a reaction time of %s, and predicted the current observation is %s", decision_distribution.probs, decision_entropy, reaction_time, obs)
             self._cumulative_reaction_time += reaction_time
@@ -196,7 +202,7 @@ class TheOneAgent(FootsiesAgentTorch):
             predicted_opponent_distribution, _ = self.opponent_model.p2_model.network.distribution(obs, opponent_model_hidden_state)
             predicted_opponent_action = predicted_opponent_distribution.sample()
         elif self.rollback_as_opponent_model:
-            predicted_opponent_action = self.previous_valid_opponent_action
+            predicted_opponent_action = self._previous_valid_opponent_action
         else:
             opponent_policy = info.get("next_opponent_policy", None)
             if opponent_policy is not None:
@@ -206,6 +212,8 @@ class TheOneAgent(FootsiesAgentTorch):
 
         action = self.a2c.act(obs, info, predicted_opponent_action=predicted_opponent_action)
         self._recently_predicted_opponent_action = predicted_opponent_action
+        # We need to store the simple action, not the discretized one!
+        self._past_agent_actions.append(self.a2c.current_action)
         return action
 
     # NOTE: reaction time is not used here, it's only used for acting not for learning.
@@ -236,19 +244,19 @@ class TheOneAgent(FootsiesAgentTorch):
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
         # that originated the temporal action in the first place.
-        self.previous_valid_opponent_action = opponent_action if opponent_action is not None else self.previous_valid_opponent_action
+        self._previous_valid_opponent_action = opponent_action if opponent_action is not None else self._previous_valid_opponent_action
 
         # The reaction time emulator needs to know when an episode terminated/truncated.
         if terminated or truncated:
-            self.current_observation_delayed = None
+            self._current_observation_delayed = None
     
     def multi_step_prediction(self, obs: torch.Tensor, n: int, opponent_model_hidden_state: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Predict the observation `n` time steps into the future, using the agent's policy, opponent model and game model."""
+        """Predict the observation `n` time steps into the future, using the agent's past executed actions, opponent model and game model."""
         o = self.env_model.game_model.preprocess_observation(obs)
-        for _ in range(n):
-            p1_actionable = ActionMap.is_state_actionable_torch(o, True)
+        for t in reversed(range(n)):
             p2_actionable = ActionMap.is_state_actionable_torch(o, False)
 
+            # TODO: support "last" action assumption, like in the critic
             if p2_actionable:
                 p2_action, opponent_model_hidden_state = self.opponent_model.p2_model.network.probabilities(o, opponent_model_hidden_state)
                 p2_action = p2_action.detach()
@@ -257,14 +265,7 @@ class TheOneAgent(FootsiesAgentTorch):
                 p2_action = torch.zeros(1, self.opponent_action_dim)
                 p2_action[0, 0] = 1.0
 
-            # At frameskipping we assume the action to be no-op to match what the game model was trained on
-            # TODO: support "last" action assumption, like in the critic
-            if p1_actionable:
-                # TODO: THIS IS WRONG RETARD, P2_ACTION SHOULD BE THE LAST ACTION OF OPPONENT
-                p1_action = self.a2c.learner.actor.decision_distribution(o, p2_action, detached=True).probs
-            else:
-                p1_action = torch.zeros(1, self.action_dim)
-                p1_action[0, 0] = 1.0
+            p1_action = self._past_agent_actions[-1 - t]
             
             o = self.env_model.game_model.network(o, p1_action, p2_action).detach()
         

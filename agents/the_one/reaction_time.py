@@ -164,3 +164,8 @@ class ReactionTimeEmulator:
     def previous_reaction_time(self) -> int:
         """The most recently perceived reaction time (last call to `register_and_perceive`)."""
         return self._previous_reaction_time
+
+    @property
+    def history_size(self) -> int:
+        """The (maximum) size of the observation history."""
+        return self._observations.maxlen
