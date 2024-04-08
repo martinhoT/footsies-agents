@@ -30,7 +30,7 @@ class MainArgs:
     """Perform curriculum learning on FOOTSIES with pre-made rule-based opponents"""
     intrinsic_reward_scheme_: Literal["count", "icm", "rnd", None] = None
     """The type of intrinsic reward to use (string specification)"""
-    skip_freeze: bool = False
+    skip_freeze: bool = True
     """Skip any environment freeze in which an environment transition has equal observations. This is useful for handling hitstop in FOOTSIES"""
 
     def __post_init__(self):
@@ -134,13 +134,13 @@ class EnvArgs:
     wrapper_time_limit: int = 99 * 60 # NOTE: not actually sure if it's 60, for FOOTSIES it may be 50
     """Add a time limit wrapper to the environment, with the time limit being enforced after the given number of time steps. Defaults to a number equivalent to 99 seconds in FOOTSIES"""
     
-    footsies_wrapper_norm: bool = False
+    footsies_wrapper_norm: bool = True
     """Use the Normalized wrapper for FOOTSIES"""
     footsies_wrapper_norm_guard: bool = True
     """For the Normalized wrapper, whether to normalize the guard variable"""
-    footsies_wrapper_acd: bool = False
+    footsies_wrapper_acd: bool = True
     """Use the Action Combinations Discretized wrapper for FOOTSIES"""
-    footsies_wrapper_simple: tuple[bool, bool, str, str] = (False, True, "last", "last")
+    footsies_wrapper_simple: tuple[bool, bool, str, str] = (True, True, "last", "last")
     """Use the Simple Actions wrapper for FOOTSIES (tuple of `(enabled, remove_agent_special_moves, assumed_agent_action_on_nonactionable, assumed_opponent_action_on_nonactionable)`)"""
     footsies_wrapper_fs: bool = False
     """Use the Frame Skipped wrapper for FOOTSIES"""
@@ -151,7 +151,7 @@ class EnvArgs:
     footsies_wrapper_history: Dict[str, int | float | bool | str] | None = None
     """Use the Simple History wrapper for FOOTSIES, if not `None`. This specifies the arguments that should be passed to the wrapper (`p{1,2}`, `p{1,2}_n` and `p{1,2}_distinct`)"""
     
-    torch: bool = False
+    torch: bool = True
     """Whether to transform environment observations to torch tensors"""
     log_dir: str = "runs"
     """The directory where any environment-related Tensorboard logs are to be saved"""

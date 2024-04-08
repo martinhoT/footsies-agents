@@ -4,11 +4,6 @@ shift 1 # Remove the first argument, which is the path to the wrapped script, so
 
 # This is supposed to be the very last script in the runner script chain
 python3 main.py $agent \
-    --skip-freeze \
-    --env.torch \
-    --env.footsies-wrapper-norm \
-    --env.footsies-wrapper-acd \
-    --env.footsies-wrapper-simple True True last last \
     --env.wrapper-time-limit 3000 \
     --env.kwargs \
         game_path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
