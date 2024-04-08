@@ -97,7 +97,7 @@ class MimicAgent(FootsiesAgentBase):
     def decision_entropy(self, obs: torch.Tensor, p1: bool) -> torch.Tensor:
         """The decision entropy of the player model at the given observation."""
         model = self._p1_model if p1 else self._p2_model
-        dist = model.network.distribution(obs)
+        dist, _ = model.network.distribution(obs)
         return dist.entropy()
 
     def load(self, folder_path: str):
@@ -141,7 +141,7 @@ class MimicAgent(FootsiesAgentBase):
     def _initialize_test_states(self, test_states: List[TestState]):
         if self._test_observations is None:
             # Only consider observations in which an action was performed (this is not the case, for instance, when the environment terminates)
-            test_observations, test_p1_actions, test_p2_actions = zip((s.observation, s.p1_action_simple, s.p2_action_simple) for s in test_states if not (s.terminated or s.truncated))
+            test_observations, test_p1_actions, test_p2_actions = zip(*[(s.observation, s.info["p1_simple"], s.info["p2_simple"]) for s in test_states if not (s.terminated or s.truncated)])
             self._test_observations = torch.vstack(test_observations)
             self._test_p1_actions = torch.tensor(test_p1_actions, dtype=torch.long).view(-1, 1)
             self._test_p2_actions = torch.tensor(test_p2_actions, dtype=torch.long).view(-1, 1)

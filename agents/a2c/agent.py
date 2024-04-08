@@ -9,6 +9,7 @@ from agents.base import FootsiesAgentTorch
 from gymnasium import Env
 from typing import Any, Callable, Tuple
 from agents.a2c.a2c import A2CQLearner, ValueNetwork
+from agents.logger import TestState
 from agents.ql.ql import QFunction, QFunctionTable, QFunctionNetwork
 from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
 from agents.action import ActionMap
@@ -105,8 +106,8 @@ class A2CAgent(FootsiesAgentTorch):
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
-            agent_will_frameskip=(not next_info["p1_actionable"]) or (next_info["agent_simple_frozen"]),
-            opponent_will_frameskip=not next_info["p2_actionable"],
+            agent_will_frameskip=(not next_info["p1_is_actionable"]) or (not next_info["agent_simple_completed"]),
+            opponent_will_frameskip=not next_info["p2_is_actionable"],
             next_obs_opponent_policy=next_opponent_policy,
             intrinsic_reward=next_info.get("intrinsic_reward", 0),
         )
@@ -211,12 +212,12 @@ class A2CAgent(FootsiesAgentTorch):
 
         return res
 
-    def _initialize_test_states(self, test_states: list[torch.Tensor]):
+    def _initialize_test_states(self, test_states: list[TestState]):
         if self._test_observations is None:
-            test_observations, _ = zip(*test_states)
+            test_observations = [s.observation for s in test_states]
             self._test_observations = torch.vstack(test_observations)
 
-    def evaluate_average_policy_entropy(self, test_states: list[tuple[Any, Any]]) -> float:
+    def evaluate_average_policy_entropy(self, test_states: list[TestState]) -> float:
         self._initialize_test_states(test_states)
 
         with torch.no_grad():

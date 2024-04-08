@@ -9,7 +9,6 @@ from agents.game_model.loggables import get_loggables
 def model_init(observation_space_size: int, action_space_size: int, *,
     # Important modifiers
     residual: bool = True,
-    assume_action_on_frameskip: str = "last",
     discrete_conversion: bool = False,
     
     # Highly-tunable hyperparameters
@@ -18,7 +17,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     # Probably should be kept as-is
     discrete_guard: bool = False,
     remove_special_moves: bool = False,
-    p1_simple_action_correction: bool = False,
 ) -> tuple[GameModelAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -43,8 +41,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     )
     agent = GameModelAgent(
         game_model,
-        assume_action_on_frameskip=assume_action_on_frameskip,
-        p1_simple_action_correction=p1_simple_action_correction,
     )
 
     loggables = get_loggables(agent)

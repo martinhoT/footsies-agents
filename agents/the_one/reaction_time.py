@@ -146,11 +146,16 @@ class ReactionTimeEmulator:
 
         return perceived_observation, reaction_time, skipped_observations
 
-    def fill_history(self, observation: T):
+    def _fill_history(self, observation: T):
         """Fill the observation history with a single observation. Should be done initially, immediately after an environment reset."""
         self._observations.clear()
         self._observations.extend([observation] * self._history_size)
     
+    def reset(self, observation: T):
+        """Reset the internal state of the reaction time emulator, which should be done at the start of every episode."""
+        self._fill_history(observation)
+        self._previous_reaction_time = None
+
     @property
     def constant(self) -> bool:
         """Whether reaction time is a constant and thus not dependent on the decision distribution's entropy."""

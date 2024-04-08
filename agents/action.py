@@ -326,8 +326,8 @@ class ActionMap:
         opponent_move_frame = obs["move_frame"][1 - idx]
         player_move_index = obs["move"][idx]
         opponent_move_index = obs["move"][1 - idx]
-        player_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
-        opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
+        player_move_state = ActionMap.move_from_move_index(player_move_index)
+        opponent_move_state = ActionMap.move_from_move_index(opponent_move_index)
         return ActionMap.is_state_actionable(player_move_state, opponent_move_state, player_move_frame, opponent_move_frame)
 
     @staticmethod
@@ -341,8 +341,8 @@ class ActionMap:
         opponent_move_progress = obs[0, 33 - idx]
         player_move_index = obs[0, 2 + idx * 15:17 + idx * 15].argmax(dim=-1)
         opponent_move_index = obs[0, 17 - idx * 15:32 - idx * 15].argmax(dim=-1)
-        player_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
-        opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
+        player_move_state = ActionMap.move_from_move_index(player_move_index)
+        opponent_move_state = ActionMap.move_from_move_index(opponent_move_index)
         
         player_move_frame = (player_move_progress * player_move_state.value.duration).round().item()
         opponent_move_frame = (opponent_move_progress * opponent_move_state.value.duration).round().item()

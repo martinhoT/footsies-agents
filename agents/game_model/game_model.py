@@ -65,9 +65,9 @@ class GameModelNetwork(nn.Module):
         if p2_action.dim() < 2:
             p2_action = F.one_hot(p2_action, num_classes=self._p2_action_dim).float()
         
-        if self._residual:
-            x = torch.hstack((obs, p1_action, p2_action))
-            
+        x = torch.hstack((obs, p1_action, p2_action))
+        
+        if self._residual:    
             f = self._forget_network(x)
             d = self._delta_network(x)
             n = self._new_network(x)
@@ -169,10 +169,22 @@ class GameModel:
         
         return obs
 
-    def predict(self, obs: torch.Tensor, p1_action: torch.Tensor | int, p2_action: torch.Tensor | int, raw: bool = False) -> torch.Tensor:
+    def _action_to_tensor(self, action: torch.Tensor | int | None, action_dim: int) -> torch.Tensor:
+        if isinstance(action, int):
+            return torch.tensor([action])
+        
+        if action is None:
+            return torch.zeros(1, action_dim)
+    
+        return action
+
+    def predict(self, obs: torch.Tensor, p1_action: torch.Tensor | int | None, p2_action: torch.Tensor | int | None) -> torch.Tensor:
         """Predict the next observation given the current observation and each player's action (either as a probability distribution or as the action ID). The result is detached from the computational graph."""
         obs = self.preprocess_observation(obs)
         
+        p1_action = self._action_to_tensor(p1_action, self._network.p1_action_dim)
+        p2_action = self._action_to_tensor(p2_action, self._network.p2_action_dim)
+
         next_obs = self._network(obs, p1_action, p2_action).detach()
         
         next_obs = self.postprocess_prediction(next_obs)
@@ -193,6 +205,13 @@ class GameModel:
         prediction[:, self._move_p1_slice] = logits_to_probs(prediction[:, self._move_p1_slice])
         prediction[:, self._move_p2_slice] = logits_to_probs(prediction[:, self._move_p2_slice])
 
+        # Fix other variables (this should aid in reducing error accumulation when performing multi-step predictions)
+        if not self._discrete_guard:
+            prediction[:, self._guard_p1_slice].clamp_(0.0, 1.0)
+            prediction[:, self._guard_p2_slice].clamp_(0.0, 1.0)
+        prediction[:, self._move_progress_slice].clamp_(0.0, 1.0)
+        prediction[:, self._position_slice].clamp_(-1.0, 1.0)
+
         return prediction
 
     def update(self, obs: torch.Tensor, p1_action: torch.Tensor | int | None, p2_action: torch.Tensor | int | None, next_obs: torch.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
@@ -211,16 +230,8 @@ class GameModel:
         next_obs = self._convert_discrete_components(next_obs)
 
         # Obtain prediction
-        if isinstance(p1_action, int):
-            p1_action = torch.tensor([p1_action])
-        elif p1_action is None:
-            p1_action = torch.zeros(1, self._network.p1_action_dim)
-        
-        if isinstance(p2_action, int):
-            p2_action = torch.tensor([p2_action])
-        elif p2_action is None:
-            p2_action = torch.zeros(1, self._network.p2_action_dim)
-        
+        p1_action = self._action_to_tensor(p1_action, self._network.p1_action_dim)
+        p2_action = self._action_to_tensor(p2_action, self._network.p2_action_dim)
         predicted = self._network(obs, p1_action, p2_action)
         
         # Prepare the targets
@@ -245,7 +256,7 @@ class GameModel:
             guard_p2_loss = F.mse_loss(predicted[:, self._guard_p2_slice], guard_p2_target)
 
         move_p1_loss = F.cross_entropy(predicted[:, self._move_p1_slice], move_p1_target)
-        move_p2_loss = F.cross_entropy(predicted[:, self._move_p1_slice], move_p2_target)
+        move_p2_loss = F.cross_entropy(predicted[:, self._move_p2_slice], move_p2_target)
         move_progress_loss = F.mse_loss(predicted[:, self._move_progress_slice], move_progress_target)
         position_loss = F.mse_loss(predicted[:, self._position_slice], position_target)
         

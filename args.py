@@ -138,7 +138,7 @@ class EnvArgs:
     """Use the Normalized wrapper for FOOTSIES"""
     footsies_wrapper_norm_guard: bool = True
     """For the Normalized wrapper, whether to normalize the guard variable"""
-    footsies_wrapper_acd: bool = True
+    footsies_wrapper_acd: bool = False
     """Use the Action Combinations Discretized wrapper for FOOTSIES"""
     footsies_wrapper_simple: tuple[bool, bool, str, str] = (True, True, "last", "last")
     """Use the Simple Actions wrapper for FOOTSIES (tuple of `(enabled, remove_agent_special_moves, assumed_agent_action_on_nonactionable, assumed_opponent_action_on_nonactionable)`)"""

@@ -162,7 +162,6 @@ class FootsiesPhasicMoveProgress(ObservationWrapper):
 class FootsiesSimpleActions(Wrapper):
     """
     Wrapper for using simple actions. Appends to the info dictionaries the simple action that each player performed, and correctly executes simple actions from the agent on `step`.
-    This wrapper should be put *right* after `FootsiesEnv`.
 
     The agent's and opponent's simplified actions are treated differently.
     For the opponent, we don't care how they performed the action at the low level, we only care about its effect on the state (i.e. the move they are performing).
@@ -204,10 +203,10 @@ class FootsiesSimpleActions(Wrapper):
         """
         super().__init__(env)
 
-        if assumed_agent_action_on_nonactionable not in ("last", "any", "none"):
-            raise ValueError("'assumed_agent_action_on_nonactionable' must be either 'last', 'any' or 'none'")
-        if assumed_opponent_action_on_nonactionable not in ("last", "any", "none"):
-            raise ValueError("'assumed_opponent_action_on_nonactionable' must be either 'last', 'any' or 'none'")
+        if assumed_agent_action_on_nonactionable not in ("last", "stand", "none"):
+            raise ValueError("'assumed_agent_action_on_nonactionable' must be either 'last', 'stand' or 'none'")
+        if assumed_opponent_action_on_nonactionable not in ("last", "stand", "none"):
+            raise ValueError("'assumed_opponent_action_on_nonactionable' must be either 'last', 'stand' or 'none'")
 
         self._remove_agent_special_moves = remove_agent_special_moves
         self._assumed_agent_action_on_nonactionable = assumed_agent_action_on_nonactionable
@@ -228,7 +227,7 @@ class FootsiesSimpleActions(Wrapper):
         obs, info = self.env.reset()
         
         info["agent_simple"] = 0
-        info["agent_simple_frozen"] = False
+        info["agent_simple_completed"] = True
         info["p1_simple"] = 0
         info["p2_simple"] = 0
         info["p1_nonactionable"] = False
@@ -242,29 +241,30 @@ class FootsiesSimpleActions(Wrapper):
         return obs, info
 
     def step(self, simple_action: int) -> tuple[dict, float, bool, bool, dict[str, Any]]:
-        agent_simple_action_frozen = len(self._agent_simple_action_queue) > 0
-        if agent_simple_action_frozen:
-            action = self._agent_simple_action_queue.popleft()
+        if self._agent_simple_action_queue:
+            primitive_action = self._agent_simple_action_queue.popleft()
         else:
             self._agent_simple_action = simple_action
-            self._agent_simple_action_queue.extend(ActionMap.simple_to_discrete(simple_action))
-            action = self._agent_simple_action_queue.popleft()
+            self._agent_simple_action_queue.extend(ActionMap.simple_to_primitive(simple_action))
+            primitive_action = self._agent_simple_action_queue.popleft()
 
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(primitive_action)
 
         inferred_p1_action, inferred_p2_action = ActionMap.simples_from_transition_ori(self._previous_info, info)
-        if self.remove_agent_special_moves:
+        if self._remove_agent_special_moves:
             # Convert the detected special move input to a simple action.
-            if agent_action == 8 or agent_action == 7:
+            if simple_action == 8 or simple_action == 7:
                 self.LOGGER.warning("We detected the agent performing a special move, even though they can't perform special moves! Will convert to the respective attack action.\nPrevious info: %s\nCurrent info: %s", self._previous_info, info)
-                agent_action -= 2
+                simple_action -= 2
 
         info["agent_simple"] = self._agent_simple_action
-        info["agent_simple_frozen"] = agent_simple_action_frozen
+        info["agent_simple_completed"] = len(self._agent_simple_action_queue) == 0
         info["p1_simple"] = self.effective_action(inferred_p1_action, self._assumed_agent_action_on_nonactionable, self._last_valid_p1_action)
         info["p2_simple"] = self.effective_action(inferred_p2_action, self._assumed_opponent_action_on_nonactionable, self._last_valid_p2_action)
-        info["p1_actionable"] = inferred_p1_action is not None
-        info["p2_actionable"] = inferred_p2_action is not None
+        info["p1_was_actionable"] = inferred_p1_action is not None
+        info["p2_was_actionable"] = inferred_p2_action is not None
+        info["p1_is_actionable"] = ActionMap.is_state_actionable_ori(info, p1=True)
+        info["p2_is_actionable"] = ActionMap.is_state_actionable_ori(info, p1=False)
         self._previous_info = info
         if inferred_p1_action is not None:
             self._last_valid_p1_action = inferred_p1_action
@@ -293,3 +293,13 @@ class FootsiesSimpleActions(Wrapper):
     def opponent_action_space(self) -> spaces.Discrete:
         """The opponent's action space."""
         return self._opponent_action_space
+
+    @property
+    def assumed_agent_action_on_nonactionable(self) -> Literal["last", "stand", "none"]:
+        """Which agent action to assume when it can't act."""
+        return self._assumed_agent_action_on_nonactionable
+    
+    @property
+    def assumed_opponent_action_on_nonactionable(self) -> Literal["last", "stand", "none"]:
+        """Which opponent action to assume when it can't act."""
+        return self._assumed_opponent_action_on_nonactionable

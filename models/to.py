@@ -15,13 +15,9 @@ from agents.game_model.game_model import GameModel, GameModelNetwork
 
 def model_init(observation_space_size: int, action_space_size: int, *,
     # Important modifiers
-    ppo: bool = False,
     remove_special_moves: bool = True,
-    perceive_intrinsic_reward: bool = False,
     use_reaction_time: bool = False,
     use_game_model: bool = False,
-    maxent: float = 0.0,
-    maxent_gradient_flow: bool = False,
     
     # Opponent modifiers
     rollback: bool = False,
@@ -39,18 +35,21 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_discount: float = 0.9,
 
     # Miscellaneous, but should be scrutinized
-    broadcast_at_frameskip: bool = False,
     accumulate_at_frameskip: bool = True,
     alternative_advantage: bool = True,
     reaction_time_constant: bool = False,
+    action_masking: bool = True,
 
     # Probably should be kept as-is
+    ppo: bool = False,
+    perceive_intrinsic_reward: bool = False,
+    maxent: float = 0.0,
+    maxent_gradient_flow: bool = False,
     critic_tanh: bool = False,
     critic_agent_update: str = "expected_sarsa",
     critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
-    action_masking: bool = True,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -117,7 +116,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         ppo_objective=ppo,
         alternative_advantage=alternative_advantage,
         accumulate_at_frameskip=accumulate_at_frameskip,
-        critic_assumed_action_at_frameskip="last",
         intrinsic_critic=intrinsic_critic,
     )
 
@@ -197,6 +195,9 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             epoch_minibatch_size=1,
         )
         game_model_agent = GameModelAgent(game_model)
+
+    else:
+        game_model_agent = None
 
     agent = TheOneAgent(
         obs_dim=obs_dim,

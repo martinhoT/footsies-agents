@@ -32,6 +32,7 @@ from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSp
 from opponents.base import OpponentManager
 from agents.utils import find_footsies_ports
 from intrinsic.base import IntrinsicRewardScheme
+from agents.action import ActionMap
 
 LOGGER = logging.getLogger("main")
 
@@ -167,8 +168,12 @@ def train(
                 
                 # Discard histop/freeze
                 if skip_freeze:
-                    while obs.isclose(obs, next_obs):
-                        next_obs, r, terminated, truncated, next_info = env.step(0)
+                    in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
+                    while in_hitstop and obs.isclose(next_obs).all():
+                        # The agent keeps acting. For the case of the_one, this means that they have more time to react when hitstop occurs which makes sense.
+                        # We are only doing this freeze-skipping thing to avoid updating the agent on meaningless transitions.
+                        action = agent.act(obs, info)
+                        next_obs, r, terminated, truncated, next_info = env.step(action)
                         reward += r
                         LOGGER.debug("Skipped one transition, which is presumed to be artificial freeze")
 
@@ -231,13 +236,13 @@ def create_env(args: EnvArgs) -> Env:
             **args.kwargs,
         )
 
-        if args.footsies_wrapper_simple[0]:
-            env = FootsiesSimpleActions(env, *args.footsies_wrapper_simple[1:])
-
         if args.footsies_wrapper_norm:
             if not args.footsies_wrapper_norm_guard:
                 raise NotImplementedError("non-normalized guard observation variable is not supported until ActionMap (and potentially other regions of code) are slice-independent when evaluating observation regions")
             env = FootsiesNormalized(env, normalize_guard=args.footsies_wrapper_norm_guard)
+
+        if args.footsies_wrapper_simple[0]:
+            env = FootsiesSimpleActions(env, *args.footsies_wrapper_simple[1:])
 
         if args.footsies_wrapper_history:
             env = AppendSimpleHistoryWrapper(env,

@@ -35,10 +35,14 @@ def main(
     evaluators = loggables["custom_evaluators"]
 
     step = 0
-    for epoch in range(10):
+    for epoch in range(100):
         for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader):
             obs = obs.float()
             next_obs = next_obs.float()
+
+            # Discard hitstop/freeze
+            if (ActionMap.is_in_hitstop_torch(obs, True) or ActionMap.is_in_hitstop_torch(obs, False)) and obs.isclose(next_obs).all():
+                continue
 
             p1_action, p2_action = ActionMap.simples_from_transition_torch(obs, next_obs)
             

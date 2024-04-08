@@ -139,7 +139,7 @@ class PlayerModelNetwork(nn.Module):
 
     def update_hidden_state(self, obs: torch.Tensor):
         """Update the internal hidden state, useful if using recurrency."""
-        _, hidden = self.compute_hidden_state(obs, self._hidden)
+        hidden = self.compute_hidden_state(obs, self._hidden)
         if hidden is not None:
             # If in the future we need to use the hidden state to compute something, we don't want to backpropagate through this hidden state,
             # or else we would be backpropagating again through the same computational graph and it would get messy.
@@ -315,7 +315,8 @@ class PlayerModel:
                 self._update_action_frequency(action)
 
                 # Update the hidden state with the most recent observation, so that everything else using the network can have up-to-date inference
-                self._network.update_hidden_state(obs) # TODO: this should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
+                # This should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
+                self._network.update_hidden_state(obs)
 
                 self._accumulated_args.append((obs, action, multiplier))
             

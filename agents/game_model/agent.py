@@ -97,11 +97,11 @@ class GameModelAgent(FootsiesAgentBase):
         return res
 
     def load(self, folder_path: str):
-        model_path = os.path.join(folder_path, "model_weights.pth")
+        model_path = os.path.join(folder_path, "game_model.pth")
         self.game_model.network.load_state_dict(torch.load(model_path))
 
     def save(self, folder_path: str):
-        model_path = os.path.join(folder_path, "model_weights.pth")
+        model_path = os.path.join(folder_path, "game_model.pth")
         torch.save(self.game_model.network.state_dict(), model_path)        
 
     def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
