@@ -248,7 +248,6 @@ class TheOneAgent(FootsiesAgentTorch):
         return o, opponent_model_hidden_state
 
     # It's in this function that the current observation and representation variables are updated.
-    # NOTE: needs "p2_simple" info if using reaction time.
     def act(self, obs: torch.Tensor, info: dict) -> int:
         # Do some pre-processing.
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
@@ -301,7 +300,7 @@ class TheOneAgent(FootsiesAgentTorch):
             if self.opponent_model is not None:
                 self.opponent_model.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
-        # The reaction time emulator needs to know when an episode terminated/truncated.
+        # The reaction time emulator needs to know when an episode terminated/truncated, so we reset (which includes resetting the reaction time emulator).
         if terminated or truncated:
             self.reset()
 

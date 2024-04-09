@@ -43,7 +43,7 @@ if __name__ == "__main__":
         sync_mode="synced_non_blocking",
         fast_forward=False,
         dense_reward=False,
-        # vs_player=True,
+        vs_player=True,
         # opponent=custom_opponent.act,
     )
 

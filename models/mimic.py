@@ -1,5 +1,6 @@
 from torch import nn
 from copy import deepcopy
+from typing import Literal
 from agents.action import ActionMap
 from agents.mimic.loggables import get_loggables
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
@@ -16,6 +17,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     p1_model: bool = True,
     p2_model: bool = True,
     recurrent: bool = False,
+    reset_context_at: Literal["hit", "neutral", "end"] = "end",
 ) -> tuple[MimicAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -41,6 +43,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         loss_dynamic_weights=dynamic_loss_weights,
         loss_dynamic_weights_max=dynamic_loss_weights_max,
         entropy_coef=entropy_coef,
+        reset_context_at=reset_context_at,
     )
 
     p2_model = deepcopy(p1_model)

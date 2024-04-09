@@ -473,7 +473,7 @@ class Analyser:
                     dpg.add_checkbox(label="Right", tag="action_right")
                     dpg.add_checkbox(label="Attack", tag="action_attack")
                 elif self.action_type == "simple":
-                    dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="simple_action")
+                    dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], default_value=ActionMap.SIMPLE_ACTIONS[0].name, tag="simple_action")
             
             with dpg.group(horizontal=True):
                 dpg.add_text("Custom action:")

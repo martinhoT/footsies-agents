@@ -7,6 +7,7 @@ from tqdm import tqdm
 from models import mimic_
 from torch.utils.tensorboard import SummaryWriter
 from agents.torch_utils import ActionHistoryAugmentation, TimeSinceLastCommitAugmentation
+from typing import Literal
 import tyro
 
 
@@ -17,6 +18,7 @@ def main(
     scar_size: int = 1,
     scar_min_loss: float = 10000.0,
     recurrent: bool = True,
+    reset_context_at: Literal["hit", "neutral", "end"] = "end",
     # wrappers
     history_p1: bool = False,
     history_p2: bool = False,
@@ -64,6 +66,7 @@ def main(
         p1_model=True,
         p2_model=True,
         recurrent=recurrent,
+        reset_context_at=reset_context_at,
     )
 
     # 5% of the dataset
@@ -73,7 +76,7 @@ def main(
     step = 0
     p1_action_prev = 0
     p2_action_prev = 0
-    for epoch in range(100):
+    for epoch in range(10):
         for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader):
             obs = obs.float()
 

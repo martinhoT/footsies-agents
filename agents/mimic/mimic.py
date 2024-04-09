@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass
 from math import log
 from contextlib import contextmanager
+from typing import Literal
 
 LOGGER = logging.getLogger("main.mimic")
 
@@ -231,6 +232,7 @@ class PlayerModel:
         loss_dynamic_weights: bool = False,
         loss_dynamic_weights_max: float = 10.0,
         entropy_coef: float = 0.0,
+        reset_context_at: Literal["hit", "neutral", "end"] = "end",
     ):
         """
         Player model for predicting actions given an observation.
@@ -256,6 +258,7 @@ class PlayerModel:
         - `entropy_coef`: the entropy regularization coefficient for the loss, implemented as a linear interpolation between the cross-entropy and the predicted distribution's entropy.
         If 0, no entropy regularization is added to the loss.
         If 1, then only entropy is maximized
+        - `reset_context_at`: the point at which to reset the opponent model's context/hidden state
         """
         if player_model_network.is_recurrent and scar_store.max_size > 1:
             raise ValueError("the scar system should not be used with recurrent networks, as the hidden state is not properly managed")
@@ -268,6 +271,8 @@ class PlayerModel:
         # That's because in that case the values in this interpolation have vastly different scales (advantage vs entropy), which makes the coefficient awkward to tune.
         # Here, since we are calculating entropies, we can expect values in similar ranges, so we perform linear interpolation.
         self._entropy_coef = entropy_coef
+        self._reset_context_at = reset_context_at
+        self._reset_context_at_neutral_dist_threshold = 0.5 # normalized
 
         self.loss_function = nn.CrossEntropyLoss(reduction="none")
 
@@ -295,9 +300,36 @@ class PlayerModel:
         self._action_counts = torch.zeros(self._network.action_dim)
         self._action_counts_total = 0
 
+        # We need to keep track of the previous observation so that we know whether to reset the model's context in some circumstances.
+        # (only relevant if recurrency is being used)
+        self._prev_obs = None
+
         # If the network is recurrent, then we need to keep track of data within an episode before training.
         # We train over an entire episode's worth of data at once.
         self._accumulated_args = []
+
+    def _should_reset_context(self, obs: torch.Tensor, terminated_or_truncated: bool) -> bool:
+        """Whether to reset the context of the opponent model (if recurrent)."""
+        prev_obs = self._prev_obs
+        self._prev_obs = obs
+        
+        # ALWAYS terminate on episode termination, regardless of mode.
+        if terminated_or_truncated:
+            return True
+
+        # Don't reset hidden state at the beginning.
+        if prev_obs is None:
+            return False
+        
+        hit = ((obs[0, 0] < prev_obs[0, 0]) or (obs[0, 1] < prev_obs[0, 1])).item()
+        
+        if self._reset_context_at == "neutral":
+            prev_dist = (prev_obs[0, 34] - prev_obs[0, 35]).abs().item()
+            dist = (obs[0, 34] - obs[0, 35]).abs().item()
+            # We only care about crossing the distance threshold, not staying below it (or else we are constantly resetting the state when under this distance)
+            return hit or (dist < self._reset_context_at_neutral_dist_threshold and prev_dist >= self._reset_context_at_neutral_dist_threshold)
+        elif self._reset_context_at == "hit":
+            return hit
 
     def update(self, obs: torch.Tensor, action: torch.Tensor | None | int, terminated_or_truncated: bool, multiplier: torch.Tensor | float = 1.0) -> float:
         """
@@ -320,7 +352,15 @@ class PlayerModel:
 
                 self._accumulated_args.append((obs, action, multiplier))
             
-            if not terminated_or_truncated:
+            # Don't train as long as the context should be reset
+            if not self._should_reset_context(obs, terminated_or_truncated):
+                return None
+
+            # Reset the hidden state, it's not even going to be used during training, it's only for access outside of update
+            self._network.reset_hidden_state()
+
+            # If we haven't accumulated updates at all (imagine when the player is non-actionable for instance)
+            if not self._accumulated_args:
                 return None
 
             obs, action, multiplier = zip(*self._accumulated_args)
@@ -370,10 +410,10 @@ class PlayerModel:
             
             self._most_recent_loss = loss_agg.item()
 
-        # Reset the player network's hidden state if the episode terminated or truncated
+        # Reset the action counts once an episode has terminated or truncated, as well as the previous observation variable.
         if terminated_or_truncated:
-            self._network.reset_hidden_state()
             self._reset_action_counts()
+            self._prev_obs = None
 
         return self._most_recent_loss
 

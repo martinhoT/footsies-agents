@@ -1,5 +1,6 @@
 from torch import nn
 from copy import deepcopy
+from typing import Literal
 from agents.action import ActionMap
 from agents.the_one.agent import TheOneAgent
 from agents.a2c.agent import A2CAgent
@@ -26,6 +27,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     consider_explicit_opponent_policy: bool = True,
     opponent_model_dynamic_loss_weights: bool = True,
     opponent_model_recurrent: bool = False,
+    opponent_model_reset_context_at: Literal["hit", "neutral", "end"] = "end",
     
     # Highly-tunable hyperparameters
     actor_lr: float = 3e-2,
@@ -149,6 +151,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             loss_dynamic_weights=opponent_model_dynamic_loss_weights,
             loss_dynamic_weights_max=10.0,
             entropy_coef=0.3,
+            reset_context_at=opponent_model_reset_context_at,
         )
 
         opponent_model = MimicAgent(
