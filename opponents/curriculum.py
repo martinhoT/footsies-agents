@@ -6,7 +6,7 @@ from collections import deque
 from footsies_gym.moves import FootsiesMove
 from itertools import cycle
 from agents.action import ActionMap
-from opponents.base import OpponentManager
+from opponents.base import Opponent, OpponentManager
 from typing import Callable
 from torch.utils.tensorboard import SummaryWriter
 
@@ -57,7 +57,7 @@ class CurriculumManager(OpponentManager):
         if self.exhausted:
             return None
 
-        new_opponent = self.current_curriculum_opponent
+        new_opponent = self.current_opponent
         return new_opponent
     
     def update_at_episode(self, game_result: float):
@@ -71,7 +71,7 @@ class CurriculumManager(OpponentManager):
         opponent_change = False
 
         if self._is_next_opponent_ready():
-            previous_opponent = self.current_curriculum_opponent
+            previous_opponent = self.current_opponent
             previous_wins = sum(self._agent_wins)
             previous_episodes = self._current_episodes
 
@@ -79,9 +79,6 @@ class CurriculumManager(OpponentManager):
 
             LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} episodes after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
             opponent_change = True
-
-        else:
-            self.current_curriculum_opponent.reset()
 
         # Logging
         if self._summary_writer is not None:
@@ -94,8 +91,8 @@ class CurriculumManager(OpponentManager):
         return opponent_change
 
     @property
-    def current_opponent(self) -> Callable[[dict], tuple[bool, bool, bool]]:
-        return self.current_curriculum_opponent.act
+    def current_opponent(self) -> "CurriculumOpponent":
+        return self._opponents[self._current_opponent_idx]
 
     @property
     def exhausted(self) -> bool:
@@ -105,16 +102,8 @@ class CurriculumManager(OpponentManager):
     def current_recent_win_rate(self) -> float:
         return sum(self._agent_wins) / len(self._agent_wins) if self._agent_wins else 0.5
 
-    @property
-    def current_curriculum_opponent(self) -> "CurriculumOpponent":
-        return self._opponents[self._current_opponent_idx]
 
-
-class CurriculumOpponent(ABC):
-
-    @abstractmethod
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
-        """The method by which the opponent performs actions."""
+class CurriculumOpponent(Opponent):
 
     @abstractmethod
     def peek(self, next_obs: dict) -> torch.Tensor:

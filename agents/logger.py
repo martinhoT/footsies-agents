@@ -24,19 +24,19 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self,
         agent: FootsiesAgentBase,
         log_frequency: int,
-        log_dir: str = None,
+        log_dir: str | None = None,
         episode_reward: bool = False,
         average_reward: bool = False,
-        average_reward_coef: float = None,
+        average_reward_coef: float | None = None,
         win_rate: bool = False,
         win_rate_over_last: int = 100,
         truncation: bool = False,
         episode_length: bool = False,
-        network_histograms: List[nn.Module] = None,
-        custom_evaluators: List[Tuple[str, Callable[[], float]]] = None,
+        network_histograms: List[nn.Module] | None = None,
+        custom_evaluators: List[Tuple[str, Callable[[], float]]] | None = None,
         custom_evaluators_over_test_states: List[
-            Tuple[str, Callable[[List[Tuple[Any, Any]]], float]]
-        ] = None,
+            Tuple[str, Callable[[List[TestState]], float]]
+        ] | None = None,
         test_states_number: int = 10_000,
         step_start_value: int = 0,
         episode_start_value: int = 0,
@@ -84,6 +84,10 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             the value with which the episode counter will begin.
             This is useful if one training run is stopped, and if future logs should continue after the previous training run
         """
+        if network_histograms:
+            network_histograms = []
+            LOGGER.info("Will disable logging of network histograms, since it hogs up all space of the poor hard drive")
+
         self.agent = agent
         self.log_frequency = log_frequency
         self.episode_reward_enabled = episode_reward
@@ -257,5 +261,5 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
     def save(self, folder_path: str):
         self.agent.save(folder_path)
 
-    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        return self.agent.extract_policy(env)
+    def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+        return self.agent.extract_opponent(env)

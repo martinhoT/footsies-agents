@@ -30,7 +30,6 @@ from args import parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
 from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher, UnsafePunisher
 from opponents.base import OpponentManager
-from agents.utils import find_footsies_ports
 from intrinsic.base import IntrinsicRewardScheme
 from agents.action import ActionMap
 
@@ -117,10 +116,10 @@ def save_agent_parameters(parameters: dict, name: str, folder: str = "saved"):
 def train(
     agent: FootsiesAgentBase,
     env: Env,
-    n_episodes: int = None,
-    penalize_truncation: float = None,
-    opponent_manager: OpponentManager = None,
-    intrinsic_reward_scheme: IntrinsicRewardScheme = None,
+    n_episodes: int | None = None,
+    penalize_truncation: float | None = None,
+    opponent_manager: OpponentManager | None = None,
+    intrinsic_reward_scheme: IntrinsicRewardScheme | None = None,
     episode_finished_callback: Callable[[int], None] = lambda episode: None,
     progress_bar: bool = True,
     skip_freeze: bool = True,
@@ -154,10 +153,12 @@ def train(
     try:
         for episode in training_iterator:
             obs, info = env.reset()
+            if opponent_manager is not None:
+                opponent_manager.current_opponent.reset()
 
             # Immediately after a reset, we can notify the agent of the next opponent's policy
             if tell_agent_of_opponent:
-                info["next_opponent_policy"] = opponent_manager.current_curriculum_opponent.peek(info)
+                info["next_opponent_policy"] = opponent_manager.current_opponent.peek(info)
 
             terminated = False
             truncated = False
@@ -192,7 +193,7 @@ def train(
                 if tell_agent_of_opponent:
                     # Notify the agent of the opponent's next action distribution, using the same storage method for the intrinsic reward.
                     # Note that this info dict will be kept for the next iteration, which means the agent's `act` method also has access to this information.
-                    info["next_opponent_policy"] = opponent_manager.current_curriculum_opponent.peek(info)
+                    info["next_opponent_policy"] = opponent_manager.current_opponent.peek(info)
 
                 agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
                 obs = next_obs
@@ -215,7 +216,8 @@ def train(
                     break
 
                 if should_change:
-                    env.unwrapped.set_opponent(opponent_manager.current_opponent)
+                    opponent = opponent_manager.current_opponent.act if opponent_manager.current_opponent else None
+                    env.unwrapped.set_opponent(opponent)
             
             episode_finished_callback(episode)
 
@@ -350,10 +352,10 @@ if __name__ == "__main__":
 
     # Alleviate the need of specifically specifying different ports for each parallel instance.
     # Still, allow the user to specify specific ports if they want to.
-    game_port, opponent_port, remote_control_port = find_footsies_ports()
-    args.env.kwargs.setdefault("game_port", game_port)
-    args.env.kwargs.setdefault("opponent_port", opponent_port)
-    args.env.kwargs.setdefault("remote_control_port", remote_control_port)
+    ports = FootsiesEnv.find_ports(start=11000)
+    args.env.kwargs.setdefault("game_port", ports["game_port"])
+    args.env.kwargs.setdefault("opponent_port", ports["opponent_port"])
+    args.env.kwargs.setdefault("remote_control_port", ports["remote_control_port"])
 
     # Set up the main logger
 
@@ -401,12 +403,15 @@ if __name__ == "__main__":
     # Create the custom opponent manager (self-play or curriculum), or nothing if None
     opponent_manager = None
     if args.self_play.enabled:
+        if args.agent.is_sb3:
+            raise ValueError("self-play with an SB3 agent is not supported")
+        
         footsies_env: FootsiesEnv = env.unwrapped
-        snapshot_method = (lambda: wrap_policy(env, snapshot_sb3_policy(agent))) if args.agent.is_sb3 else (lambda: agent.extract_policy(env))
+        snapshot_method = lambda: agent.extract_opponent(env)
         starter_opponent = snapshot_method()
 
         # Set a good default agent for self-play
-        footsies_env.set_opponent(starter_opponent)
+        footsies_env.set_opponent(starter_opponent.act)
         opponent_manager = SelfPlayManager(
             snapshot_method=snapshot_method,
             max_opponents=args.self_play.max_opponents,
@@ -441,7 +446,7 @@ if __name__ == "__main__":
         )
 
         footsies_env: FootsiesEnv = env.unwrapped
-        footsies_env.set_opponent(opponent_manager.current_opponent)
+        footsies_env.set_opponent(opponent_manager.current_opponent.act)
 
         LOGGER.info("Activated curriculum learning")
 

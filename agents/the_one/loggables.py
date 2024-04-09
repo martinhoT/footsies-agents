@@ -32,9 +32,6 @@ def get_loggables(agent: TheOneAgent):
     if agent.reaction_time_emulator is not None:
         custom_evaluators.append(("Training/Reaction time", agent.evaluate_average_reaction_time))
 
-    # Deactivate network histograms, they hog up space
-    # network_histograms.clear()
-
     return {
         "network_histograms": network_histograms,
         "custom_evaluators": custom_evaluators,

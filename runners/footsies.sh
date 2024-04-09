@@ -12,4 +12,5 @@ python3 main.py $agent \
     --env.kwargs \
         render_mode human \
     --misc.log-frequency 10000 \
+    --misc.log-file-level info
     "$@"

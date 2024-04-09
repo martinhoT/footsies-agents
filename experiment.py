@@ -8,7 +8,6 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from args import parse_args_experiment
-from main import find_footsies_ports
 
 
 class TrialManager:
@@ -63,16 +62,12 @@ if __name__ == "__main__":
     define_model_function: Callable[[optuna.Trial], FootsiesAgentBase] = optimize_module.define_model
     objective_function: Callable[[FootsiesAgentBase], float] = optimize_module.objective
 
-    game_port, opponent_port, remote_control_port = find_footsies_ports()
-
     env = FootsiesActionCombinationsDiscretized(
         FlattenObservation(
             FootsiesNormalized(
                 FootsiesEnv(
                     game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
-                    game_port=game_port,
-                    opponent_port=opponent_port,
-                    remote_control_port=remote_control_port,
+                    **FootsiesEnv.find_ports(),
                     
                     # TODO: should probably be specified through CLI arguments
                     by_example=True,

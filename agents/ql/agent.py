@@ -41,5 +41,5 @@ class QLAgent(FootsiesAgentBase):
         path = os.path.join(folder_path, "q")
         self.q_table.save(path)
 
-    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         raise NotImplementedError("policy extraction not supported")

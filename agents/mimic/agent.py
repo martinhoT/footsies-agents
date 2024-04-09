@@ -199,18 +199,16 @@ class MimicAgent(FootsiesAgentBase):
         model = self.p1_model if p1 else self.p2_model
 
         total_score = 0
-        for (observations, p1_actions, p2_actions) in zip(self._test_observations_partitioned, self._test_p1_actions_partitioned, self._test_p2_actions_partitioned):
+        for (observations, p2_actions) in zip(self._test_observations_partitioned, self._test_p2_actions_partitioned):
             probs, _ = model.network.probabilities(observations, None)
-            p1_score = probs.gather(1, p1_actions).sum().item()
             p2_score = probs.gather(1, p2_actions).sum().item()
 
-            total_score += p1_score + p2_score
+            total_score += p2_score
 
-        # We are making 2 predictions at each observation, so the denominator is multiplied by 2.
-        return total_score / (2 * len(test_states))
+        return total_score / len(test_states)
 
     # NOTE: this only works if the class was defined to be over primitive actions
-    def extract_policy(self, env: Env, use_p1: bool = True) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_opponent(self, env: Env, use_p1: bool = True) -> Callable[[dict], Tuple[bool, bool, bool]]:
         model_to_use = self._p1_model if use_p1 else self._p2_model
         obs_mask = self._p1_model.obs_mask if use_p1 else self._p2_model.obs_mask
 
@@ -222,7 +220,7 @@ class MimicAgent(FootsiesAgentBase):
             predicted = policy_network(obs[:, obs_mask])
             return torch.argmax(predicted)
 
-        return super()._extract_policy(env, internal_policy)
+        return super()._extract_opponent(env, internal_policy)
 
     @property
     def p1_model(self) -> PlayerModel:

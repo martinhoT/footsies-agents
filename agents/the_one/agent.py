@@ -1,3 +1,4 @@
+from copy import deepcopy
 import os
 import torch
 import logging
@@ -5,7 +6,7 @@ import random
 import warnings
 from torch import nn
 from agents.action import ActionMap
-from agents.base import FootsiesAgentTorch
+from agents.base import FootsiesAgentTorch, FootsiesAgentOpponent
 from gymnasium import Env
 from typing import Callable, Tuple
 from agents.the_one.model import FullModel, RepresentationModule
@@ -196,7 +197,6 @@ class TheOneAgent(FootsiesAgentTorch):
         if self._current_observation_delayed is None:
             self.reaction_time_emulator.reset(obs)
             self._current_observation_delayed = obs
-            self._past_agent_actions.extend([0] * self._past_agent_actions.maxlen)
         
         # Compute decision distribution.
         opponent_probabilities, hidden_state = self.opponent_model.p2_model.network.probabilities(self._current_observation_delayed, self._current_opponent_model_hidden_state_perceived)
@@ -223,7 +223,7 @@ class TheOneAgent(FootsiesAgentTorch):
 
     def multi_step_prediction(self, obs: torch.Tensor, n: int, opponent_model_hidden_state: torch.Tensor, p2_action: torch.Tensor | int) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict the observation `n` time steps into the future, using the agent's past executed actions, opponent model and game model."""
-        o = self.env_model.game_model.preprocess_observation(obs)
+        o = obs
         for t in reversed(range(n)):
             p2_actionable = ActionMap.is_state_actionable_torch(o, False)
 
@@ -245,11 +245,19 @@ class TheOneAgent(FootsiesAgentTorch):
             
             o = self.env_model.game_model.predict(o, p1_action, p2_action).detach()
         
-        final_obs = self.env_model.game_model.postprocess_prediction(o)
-        return final_obs, opponent_model_hidden_state
+        return o, opponent_model_hidden_state
 
-    # It's in this function that the current observation and representation variables are updated
+    # It's in this function that the current observation and representation variables are updated.
+    # NOTE: needs "p2_simple" info if using reaction time.
     def act(self, obs: torch.Tensor, info: dict) -> int:
+        # Do some pre-processing.
+        # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
+        # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
+        # that originated the temporal action in the first place.
+        self._previous_valid_opponent_action = info["p2_simple"] if info["p2_was_actionable"] else self._previous_valid_opponent_action
+        # The buffer of past agent actions needs to have the actions that the game model reads, since that's the only thing this buffer is for.
+        self._past_agent_actions.append(info["p1_simple"])
+
         # Update the reaction time emulator and substitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
             obs, opponent_model_hidden_state, reaction_time = self.react(obs, info)
@@ -279,32 +287,23 @@ class TheOneAgent(FootsiesAgentTorch):
     #       We aren't considering delayed information for the updates, since neural network updates are slow and thus
     #       it's unlikely that these privileged updates are going to make a difference. In turn, the code is simpler.
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
-        if self.opponent_model is not None:
-            if "next_opponent_policy" in next_info:
-                warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
-            next_opponent_policy, _ = self.opponent_model.p2_model.network.probabilities(next_obs, "auto")
-            next_info["next_opponent_policy"] = next_opponent_policy.detach().squeeze()
-
         # Update the different models
         if self._learn:
+            if self.opponent_model is not None:
+                if "next_opponent_policy" in next_info:
+                    warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
+                next_opponent_policy, _ = self.opponent_model.p2_model.network.probabilities(next_obs, "auto")
+                next_info["next_opponent_policy"] = next_opponent_policy.detach().squeeze()
+
             self.a2c.update(obs, next_obs, reward, terminated, truncated, info, next_info)
             if self.env_model is not None:
                 self.env_model.update(obs, next_obs, reward, terminated, truncated, info, next_info)
             if self.opponent_model is not None:
                 self.opponent_model.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
-        # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
-        # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
-        # that originated the temporal action in the first place.
-        self._previous_valid_opponent_action = next_info["p2_simple"] if next_info["p2_was_actionable"] else self._previous_valid_opponent_action
-
         # The reaction time emulator needs to know when an episode terminated/truncated.
         if terminated or truncated:
-            self._current_observation_delayed = None
-            self._past_agent_actions.clear()
-        else:
-            # The buffer of past agent actions needs to have the actions that the game model reads, since that's the only thing this buffer is for.
-            self._past_agent_actions.append(next_info["p1_simple"])
+            self.reset()
 
     def preprocess(self, env: Env):
         # Obtain the way the environment is resolving opponent actions when it can't act.
@@ -318,6 +317,12 @@ class TheOneAgent(FootsiesAgentTorch):
         
         if self._assumed_opponent_action_on_nonactionable is None:
             raise ValueError("expected environment to have the `FootsiesSimpleActions` wrapper with `assumed_opponent_action_on_nonactionable` property set, but that's not the case")
+
+    def reset(self):
+        self._current_observation_delayed = None
+        self._current_opponent_model_hidden_state_perceived = None
+        self._past_agent_actions.clear()
+        self._past_agent_actions.extend([0] * self._past_agent_actions.maxlen)
 
     def initialize(
         self,
@@ -355,59 +360,16 @@ class TheOneAgent(FootsiesAgentTorch):
                     action = p1_action if agent_is_p1 else p2_action
                     self.imitator.learn(obs, action, frozen_representation)
 
-    # NOTE: extracts the policy only, doesn't include any other component
-    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        # We assume the actor is going to be used as an opponent
-        actor = self.a2c.learner.actor.clone(p1=False)
+    # NOTE: watch out! The current way we handle the SimpleActions wrapper we don't include some keys in info that allow for the A2C module to learn.
+    #       As long as the opponent doesn't learn, and no other component uses that information, there should be no problem.
+    def extract_opponent(self, env: Env) -> FootsiesAgentOpponent:
+        opponent = deepcopy(self)
+        opponent.learn = False
 
-        class ExtractedPolicy:
-            def __init__(self, actor: ActorNetwork, deterministic: bool = False):
-                self.actor = actor
-                self.deterministic = deterministic
-                self.current_action = None
-                self.current_action_iterator = None
-                self.previous_observation
-            
-            def __call__(self, obs) -> int:
-                # Invert the perspective, since the agent was trained as if they were on the left side of the screen
-                obs = observation_invert_perspective_flattened(obs)
-
-                opp_action = None
-                if self.previous_observation is not None:
-                    # Weak, rollback-inspired opponent model: if the opponent did action X, then they will keep doing X
-                    _, opp_action = ActionMap.simples_from_transition_torch(self.previous_observation, obs)
-                
-                # When in doubt, assume the opponent is standing
-                if opp_action is None:
-                    opp_action = 0
-
-                # Keep sampling the next discrete action from the simple action
-                if self.current_action is not None:
-                    try:
-                        action = next(self.current_action_iterator)
-                
-                    except StopIteration:
-                        self.current_action = None
-                
-                if self.current_action is None:
-                    # Sample the action
-                    if self.deterministic:
-                        self.current_action = actor.probabilities(obs, next_opponent_action=opp_action).argmax().item()
-                    else:
-                        self.current_action = actor.sample_action(obs, next_opponent_action=opp_action).item()
-                    self.current_action_iterator = iter(ActionMap.simple_to_discrete(self.current_action))
-                    action = next(self.current_action_iterator)
-
-                # Save the current observation.
-                self.previous_observation = obs
-                
-                # We need to invert the action since the agent was trained to perform actions as if they were on the left side of the screen,
-                # so we need to mirror them
-                return ActionMap.invert_discrete(action)
-
-        policy = ExtractedPolicy(actor)
-
-        return super()._extract_policy(env, policy)
+        return FootsiesAgentOpponent(
+            agent=opponent,
+            env=env,
+        )
 
     @property
     def model(self) -> nn.Module:

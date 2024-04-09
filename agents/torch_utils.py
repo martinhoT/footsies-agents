@@ -10,10 +10,10 @@ from itertools import pairwise
 from gymnasium import Env
 from agents.base import FootsiesAgentTorch
 from agents.logger import TrainingLoggerWrapper
-from agents.utils import find_footsies_ports
 from agents.action import ActionMap
 from functools import wraps
 from torch.utils.data import DataLoader, Dataset
+from footsies_gym.envs.footsies import FootsiesEnv
 
 
 def create_layered_network(
@@ -133,14 +133,12 @@ def hogwild(
         # We need to set different FOOTSIES instances with different ports for each worker
         if is_footsies:
             base_port = 10000 + rank * 1000
-            ports = find_footsies_ports(start=base_port, end=base_port + 1000)
+            ports = FootsiesEnv.find_ports(start=base_port, stop=base_port + 1000)
 
             worker_logger.info("[%s] I was assigned the ports: %s", rank, ports)
             
             env = env_generator(
-                game_port=ports[0],
-                opponent_port=ports[1],
-                remote_control_port=ports[2],
+                **ports,
                 log_file="out.log" if rank == 0 else None,
                 log_file_overwrite=True,
             )

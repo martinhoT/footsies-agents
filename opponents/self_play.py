@@ -4,15 +4,16 @@ from torch.utils.tensorboard import SummaryWriter
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable
-from opponents.base import OpponentManager
+from opponents.base import OpponentManager, Opponent
 from opponents.curriculum import CurriculumOpponent
+from agents.base import FootsiesAgentBase, FootsiesAgentOpponent
 
 LOGGER = logging.getLogger("main.self_play")
 
 
 @dataclass
-class Opponent:
-    method:     Callable[[dict], tuple[bool, bool, bool]]
+class SelfPlayOpponentInfo:
+    opp:        FootsiesAgentOpponent | None
     name:       str
     elo:        int         = 1200
 
@@ -33,7 +34,7 @@ class SelfPlayManager(OpponentManager):
 
     def __init__(
         self,
-        snapshot_method: callable,
+        snapshot_method: Callable[[], FootsiesAgentOpponent],
         max_opponents: int = 10,
         snapshot_interval: int = 2000,
         switch_interval: int = 100,
@@ -42,7 +43,7 @@ class SelfPlayManager(OpponentManager):
         log_elo: bool = False,
         log_dir: str = None,
         log_interval: int = 1,
-        starter_opponent: Callable[[dict], tuple[bool, bool, bool]] = None,
+        starter_opponent: FootsiesAgentOpponent = None,
     ):
         """
         Instance of an opponent pool manager for self-play.
@@ -74,7 +75,7 @@ class SelfPlayManager(OpponentManager):
             self._register_opponent(starter_opponent, "Starter opponent")
         self.episode = 0
 
-        ingame_bot = Opponent(None, "In-game bot")
+        ingame_bot = SelfPlayOpponentInfo(None, "In-game bot")
         self._ingame_bot = ingame_bot
         self._current_opponent = self.opponent_pool[0] if starter_opponent is not None else ingame_bot
         self._agent_elo = 1200
@@ -85,19 +86,19 @@ class SelfPlayManager(OpponentManager):
         # This is used to deetermine whether the agent has surpassed the current opponent and should switch to another one.
         self._current_wins = 0
         self._current_n_games = 0
-        self._min_games = 10
+        self._min_games = 20
 
         # Logging
         self.summary_writer = SummaryWriter(log_dir=log_dir) if log_dir is not None else None
         self.log_elo = log_elo
         self.log_frequency = log_interval
 
-    def _register_opponent(self, opponent_f: Callable[[dict], tuple[bool, bool, bool]], name: str) -> Opponent:
-        opponent = Opponent(opponent_f, name)
+    def _register_opponent(self, opp: FootsiesAgentOpponent, name: str) -> Opponent:
+        opponent = SelfPlayOpponentInfo(opp, name)
         self.opponent_pool.append(opponent)
         return opponent
 
-    def _sample_opponent(self) -> Opponent:
+    def _sample_opponent(self) -> SelfPlayOpponentInfo:
         full_pool = [self._ingame_bot] + list(self.opponent_pool)
         counts = [self.mix_bot] + [1] * len(self.opponent_pool)
         return random.sample(full_pool, counts=counts, k=1)[0]
@@ -150,9 +151,9 @@ class SelfPlayManager(OpponentManager):
         return self._current_opponent != previous_opponent
 
     @property
-    def current_opponent(self) -> Callable[[dict], tuple[bool, bool, bool]]:
+    def current_opponent(self) -> Opponent:
         """The opponent being currently used for self-play. If `None`, then the in-game bot is being used."""
-        return self._current_opponent.method
+        return self._current_opponent.opp
     
     @property
     def elo(self) -> int:

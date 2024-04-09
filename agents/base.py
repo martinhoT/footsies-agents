@@ -1,11 +1,13 @@
 import os
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Tuple
-from gymnasium import Env
-from torch import nn
 import torch
-
-from agents.utils import wrap_policy
+from abc import ABC, abstractmethod
+from typing import Any
+from gymnasium import ActionWrapper, Env, ObservationWrapper
+from torch import nn
+from agents.utils import observation_invert_perspective
+from agents.wrappers import FootsiesSimpleActionExecutor, FootsiesSimpleActionExtractor, FootsiesSimpleActions
+from agents.action import ActionMap
+from opponents.base import Opponent
 
 
 class FootsiesAgentBase(ABC):
@@ -29,25 +31,19 @@ class FootsiesAgentBase(ABC):
         """Save the agent to disk (overwriting an already saved agent at that path)."""
 
     @abstractmethod
-    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_opponent(self, env: Env) -> "FootsiesAgentOpponent":
         """
         Extract a policy which can be provided to the FOOTSIES environment as an opponent.
 
-        Subclasses of `FootsiesAgentBase` should implement the `extract_policy` method themselves.
-        This method should return `super()._extract_policy(env, wrapped)`, where `wrapped` is the subclass's policy
-        as used for training.
-        This is relevant since the environment can be wrapped with observation and action wrappers, of which the
-        subclass agent is not aware (or at least doesn't need to be).
-        The superclass method deals with some of these wrappers to avoid code duplication.
+        This method should ideally return a deep copy of the agent, to avoid state interference.
 
-        NOTE: the internal policy implementations might need to perform some transformations on the observations and actions,
+        NOTE: the internal policy implementations don't need to perform some transformations on the observations and actions
         to account for the change in perspective between player 1 (agent) and player 2 (opponent, i.e. the extracted policy).
+        This is already handled externally.
         """
 
-    def _extract_policy(
-        self, env: Env, internal_policy: Callable
-    ) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        return wrap_policy(env, internal_policy)
+    def reset(self):
+        """Reset any internal state that the agent builds up over an episode. Important for when an opponent is extracted, so that we can reset its internal state."""
 
 
 class FootsiesAgentTorch(FootsiesAgentBase):
@@ -68,3 +64,81 @@ class FootsiesAgentTorch(FootsiesAgentBase):
     def save(self, folder_path: str):
         model_path = os.path.join(folder_path, "model")
         torch.save(self.model.state_dict(), model_path)
+
+
+class FootsiesAgentOpponent(Opponent):
+    def __init__(self, agent: FootsiesAgentBase, env: Env):
+        self._agent = agent
+        self._agent.reset()
+
+        self._observation_wrappers: list[ObservationWrapper] = []
+        self._action_wrappers: list[ActionWrapper] = []
+
+        # We treat the simple actions wrapper differently.
+        # This wrapper would ideally be an action wrapper but oh well.
+        simple_actions_wrapper: FootsiesSimpleActions | None = None
+
+        current_env = env
+        while current_env != current_env.unwrapped:
+            if isinstance(current_env, ObservationWrapper):
+                self._observation_wrappers.append(current_env)
+
+            elif isinstance(current_env, ActionWrapper):
+                self._action_wrappers.append(current_env)
+
+            elif isinstance(current_env, FootsiesSimpleActions):
+                simple_actions_wrapper = current_env
+
+            current_env = current_env.env
+
+        if simple_actions_wrapper:
+            self._simple_action_executor = FootsiesSimpleActionExecutor(
+                allow_special_moves=simple_actions_wrapper.agent_allow_special_moves
+            )
+            self._simple_action_extractor = FootsiesSimpleActionExtractor(
+                assumed_agent_action_on_nonactionable=simple_actions_wrapper.assumed_agent_action_on_nonactionable,
+                assumed_opponent_action_on_nonactionable=simple_actions_wrapper.assumed_opponent_action_on_nonactionable,
+            )
+        else:
+            self._simple_action_executor = None
+            self._simple_action_extractor = None
+        self._simple_action_extractor_should_reset = True
+
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
+        # Invert the perspective, since the agent was trained as if they were on the left side of the screen
+        obs = observation_invert_perspective(obs)
+        info = observation_invert_perspective(info)
+        
+        if self._simple_action_extractor is not None:
+            if self._simple_action_extractor_should_reset:
+                info = self._simple_action_extractor.reset(info)
+                self._simple_action_extractor_should_reset = False
+            else:
+                info = self._simple_action_extractor.update(info)
+
+        for observation_wrapper in reversed(self._observation_wrappers):
+            obs = observation_wrapper.observation(obs)
+        
+        action = self._agent.act(obs, info)
+
+        if self._simple_action_executor is not None:
+            action = self._simple_action_executor.act(action)
+        
+        for action_wrapper in self._action_wrappers:
+            action = action_wrapper.action(action)
+        
+        # Invert the action, again for the same reason as the observation
+        action = ActionMap.invert_primitive(action)
+
+        return action
+
+    def reset(self):
+        self._agent.reset()
+        self._simple_action_executor.reset()
+        self._simple_action_extractor_should_reset = True
+
+    @property
+    def agent(self) -> FootsiesAgentBase:
+        """The internal agent that is acting as the opponent."""
+        return self._agent
+    

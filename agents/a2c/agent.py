@@ -72,13 +72,13 @@ class A2CAgent(FootsiesAgentTorch):
         self._test_observations = None
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
-        # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic
-        if predicted_opponent_action is None:
-            predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
-
         # If we can't perform an action, don't even attempt one
         if not ActionMap.is_state_actionable_ori(info):
             return 0
+        
+        # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic
+        if predicted_opponent_action is None:
+            predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
 
         if self.act_with_qvalues:
             qs = self._learner.critic.q(obs, opponent_action=predicted_opponent_action).detach()
@@ -125,7 +125,7 @@ class A2CAgent(FootsiesAgentTorch):
                 self.cumulative_qtable_error_n += 1
         
     # NOTE: if by the time this function is called `act_with_qvalues` is true, then the extracted policy will act according to the Q-values as well
-    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         if self.act_with_qvalues:
             critic = deepcopy(self._critic)
 
@@ -140,7 +140,7 @@ class A2CAgent(FootsiesAgentTorch):
                 probs = actor(obs)
                 return Categorical(probs=probs).sample().item()
 
-        return super()._extract_policy(env, internal_policy)
+        return super()._extract_opponent(env, internal_policy)
     
     @property
     def model(self) -> nn.Module:

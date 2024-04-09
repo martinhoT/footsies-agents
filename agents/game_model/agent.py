@@ -104,7 +104,7 @@ class GameModelAgent(FootsiesAgentBase):
         model_path = os.path.join(folder_path, "game_model.pth")
         torch.save(self.game_model.network.state_dict(), model_path)        
 
-    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         return lambda s: None
 
     @property

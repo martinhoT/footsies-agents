@@ -172,5 +172,5 @@ class AutoencoderAgent(FootsiesAgentBase):
         model_path = os.path.join(folder_path, "model_weights.pth")
         torch.save(self.autoencoder.state_dict(), model_path)
 
-    def extract_policy(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
+    def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         return lambda s: None

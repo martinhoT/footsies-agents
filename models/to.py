@@ -50,6 +50,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
+    learn: bool = True,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -209,6 +210,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         reaction_time_emulator=reaction_time_emulator,
         remove_special_moves=remove_special_moves,
         rollback_as_opponent_model=rollback,
+        learn=learn,
         # Not used
         representation=None,
     )

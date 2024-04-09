@@ -1,8 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import Callable
 
 
-class OpponentManager:
+class Opponent(ABC):
+
+    @abstractmethod
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
+        """Perform an action given an observation and info."""
+    
+    @abstractmethod
+    def reset(self):
+        """Reset internal state, done at the beginning of every episode."""
+
+
+class OpponentManager(ABC):
 
     @abstractmethod
     def update_at_episode(self, game_result: float) -> bool:
@@ -10,7 +20,7 @@ class OpponentManager:
 
     @property
     @abstractmethod
-    def current_opponent(self) -> Callable[[dict], tuple[bool, bool, bool]]:
+    def current_opponent(self) -> Opponent | None:
         """The opponent being currently used for training. If `None`, then the in-game bot is being used rather than a custom one."""
 
     @property
