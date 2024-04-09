@@ -100,6 +100,6 @@ def observation_invert_perspective(obs: dict) -> dict:
     inverted["guard"] = tuple(reversed(inverted["guard"]))
     inverted["move"] = tuple(reversed(inverted["move"]))
     inverted["move_frame"] = tuple(reversed(inverted["move_frame"]))
-    inverted["position"] = tuple(reversed(inverted["position"]))
+    inverted["position"] = tuple(map(float.__neg__, reversed(inverted["position"])))
 
     return inverted
