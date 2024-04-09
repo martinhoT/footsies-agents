@@ -130,7 +130,6 @@ class QLearnerAnalyserManager:
 
     def add_custom_elements(self, analyser: Analyser):
         with dpg.window(label="Attribute modifier", show=False) as self.attribute_modifier_window:
-            dpg.add_checkbox(label="Broadcast at frameskip", default_value=self.learner.broadcast_at_frameskip, callback=lambda s, a: setattr(self.learner, "broadcast_at_frameskip", a))
             dpg.add_slider_float(label="MaxEnt", default_value=self.learner.maxent, min_value=0.0, max_value=1.0, callback=lambda s, a: setattr(self.learner, "maxent", a))
             dpg.add_checkbox(label="MaxEnt gradient flow", default_value=self.learner.maxent_gradient_flow, callback=lambda s, a: setattr(self.learner, "maxent_gradient_flow", a))
             

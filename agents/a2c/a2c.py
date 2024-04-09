@@ -477,9 +477,9 @@ class A2CQLearner(A2CLearnerBase):
         actor_entropy = -torch.sum(action_log_probabilities * action_probabilities, dim=-1)
         # Perform a correction depending on whether action masking was used
         action_distribution_size = self.actor.distribution_size(obs)
-        actor_entropy = actor_entropy / torch.log(torch.tensor(action_distribution_size))
+        actor_entropy_corrected = actor_entropy / torch.log(torch.tensor(action_distribution_size))
         actor_delta = self.cumulative_discount * delta * action_log_probability
-        actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy.mean()
+        actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy_corrected.mean()
         actor_score.backward()
 
         if self._actor_gradient_clipping is not None:
@@ -786,14 +786,6 @@ class A2CQLearner(A2CLearnerBase):
     @critic_learning_rate.setter
     def critic_learning_rate(self, value: float):
         self._critic.learning_rate = value
-    
-    @property
-    def broadcast_at_frameskip(self) -> bool:
-        return self._critic_assumed_action_at_frameskip
-    
-    @broadcast_at_frameskip.setter
-    def broadcast_at_frameskip(self, value: bool):
-        self._critic_assumed_action_at_frameskip = value
 
     @property
     def maxent(self) -> float:

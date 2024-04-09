@@ -15,7 +15,7 @@ from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger, load_agent, load_agent_parameters, import_agent
 from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher, NSpammer, CurriculumOpponent
-from agents.utils import FootsiesPhasicMoveProgress
+from agents.wrappers import FootsiesPhasicMoveProgress, FootsiesSimpleActions
 from agents.logger import TrainingLoggerWrapper
 import logging
 import warnings
@@ -23,7 +23,7 @@ import warnings
 
 CUSTOM = False
 MODEL = "to"
-NAME = "f_opp_recurrent"
+NAME = "f_opp"
 LOAD = True
 LOG = False
 ROLLBACK_IF_POSSIBLE = True
@@ -41,14 +41,14 @@ if __name__ == "__main__":
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=True,
+        fast_forward=False,
         dense_reward=False,
         # vs_player=True,
         # opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
-        FootsiesActionCombinationsDiscretized(
+        FootsiesSimpleActions(
             FlattenObservation(
                 # FootsiesPhasicMoveProgress(
                     FootsiesNormalized(
@@ -147,6 +147,9 @@ if __name__ == "__main__":
         dpg.add_checkbox(label="Online learning", default_value=False, tag="the_one_online_learning")
 
         qlearner_manager.add_custom_elements(analyser)
+
+        dpg.add_separator()
+
         if mimic_manager is not None:
             mimic_manager.include_mimic_dpg_elements(analyser)
 

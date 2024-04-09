@@ -211,7 +211,7 @@ class TheOneAgent(FootsiesAgentTorch):
         # Calculate the opponent model hidden state correctly.
         for skipped in skipped_observations:
             if ActionMap.is_state_actionable_torch(skipped, False):
-                _, self._current_opponent_model_hidden_state_perceived = self.opponent_model.p2_model.network.compute_hidden_state(skipped, self._current_opponent_model_hidden_state_perceived)
+                self._current_opponent_model_hidden_state_perceived = self.opponent_model.p2_model.network.compute_hidden_state(skipped, self._current_opponent_model_hidden_state_perceived)
 
         # Correct perceived observation.
         p2_action = info["p2_simple"]

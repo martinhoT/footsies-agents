@@ -13,6 +13,7 @@ from footsies_gym.state import FootsiesBattleState, FootsiesState
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE, FOOTSIES_MOVE_ID_TO_INDEX
 from agents.action import ActionMap
 from dataclasses import dataclass
+from agents.wrappers import FootsiesSimpleActions
 
 
 @dataclass
@@ -79,17 +80,27 @@ class Analyser:
         self.custom_state_update_callback = custom_state_update_callback
 
         # Check environment wrappers
-        self.discretized_actions = False
+        self.action_type = None
         normalized_observations = False
         current_env = env
         while current_env != self.footsies_env:
             if isinstance(current_env, FootsiesActionCombinationsDiscretized):
-                self.discretized_actions = True
+                if self.action_type is not None:
+                    raise ValueError("the environment has conflicting action wrappers, could not determine the action type of the agent")
+                self.action_type = "discrete"
+
+            if isinstance(current_env, FootsiesSimpleActions):
+                if self.action_type is not None:
+                    raise ValueError("the environment has conflicting action wrappers, could not determine the action type of the agent")
+                self.action_type = "simple"
 
             if isinstance(current_env, FootsiesNormalized):
                 normalized_observations = True
     
             current_env = current_env.env
+
+        if self.action_type is None:
+            self.action_type = "primitive"
 
         if not normalized_observations:
             raise ValueError("the environment should have the normalized observations wrapper on")
@@ -182,10 +193,15 @@ class Analyser:
         if action is None:
             raise RuntimeError("this agent could not produce an action for the current observation")
 
-        if self.discretized_actions:
+        if self.action_type == "discrete":
             action_tuple = ActionMap.discrete_to_primitive(action)
-
-        self.action_left, self.action_right, self.action_attack = action_tuple
+            self.action_left, self.action_right, self.action_attack = action_tuple
+        elif self.action_type == "simple":
+            self.simple_action = action
+        elif self.action_type == "primitive":
+            self.action_left, self.action_right, self.action_attack = action
+        else:
+            raise RuntimeError(f"'action_type' has an invalid value '{self.action_type}', expected one of ('discrete', 'simple', 'primitive')")
 
     def update_state(self, observation: "any", original_observation: dict, info: dict, reward: float, terminated: bool, truncated: bool, *, previous_observation: "any" = None, previous_original_observation: dict = None, previous_info: dict = None):
         # Observation
@@ -267,8 +283,8 @@ class Analyser:
         original_observation = self.footsies_env.most_recent_observation
         self.update_state(obs, original_observation, info, reward, terminated, truncated)
         
-        if terminated and reward > 0:
-            self.wins_counter += 1
+        if terminated:
+            self.wins_counter += (reward > 0)
             self.win_rate = self.wins_counter / (self.episode_counter + 1)
 
         self.custom_state_update_callback(self)
@@ -276,9 +292,12 @@ class Analyser:
 
     @property
     def current_action(self) -> tuple[bool, bool, bool] | int:
+        if self.action_type == "simple":
+            return self.simple_action
+    
         action = (self.action_left, self.action_right, self.action_attack)
         
-        if self.discretized_actions:
+        if self.action_type == "discrete":
             return ActionMap.primitive_to_discrete(action)
 
         return action
@@ -352,6 +371,10 @@ class Analyser:
     action_left: bool = editable_dpg_value("action_left")
     action_right: bool = editable_dpg_value("action_right")
     action_attack: bool = editable_dpg_value("action_attack")
+    simple_action: int = property(
+        fget=lambda self: ActionMap.simple_from_move(FootsiesMove[dpg.get_value("simple_action")]),
+        fset=lambda self, value: dpg.set_value("simple_action", ActionMap.simple_as_move(value).name),
+    )
     use_custom_action: bool = editable_dpg_value("use_custom_action")
     reward: float = editable_dpg_value("reward")
     frame: int = editable_dpg_value("frame")
@@ -444,10 +467,13 @@ class Analyser:
             
             with dpg.group(horizontal=True):
                 dpg.add_text("Action:")
-                # Disabled by default, will simply display what the agent outputs
-                dpg.add_checkbox(label="Left", tag="action_left")
-                dpg.add_checkbox(label="Right", tag="action_right")
-                dpg.add_checkbox(label="Attack", tag="action_attack")
+                if self.action_type in ("primitive" or "discrete"):
+                    # Disabled by default, will simply display what the agent outputs
+                    dpg.add_checkbox(label="Left", tag="action_left")
+                    dpg.add_checkbox(label="Right", tag="action_right")
+                    dpg.add_checkbox(label="Attack", tag="action_attack")
+                elif self.action_type == "simple":
+                    dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="simple_action")
             
             with dpg.group(horizontal=True):
                 dpg.add_text("Custom action:")

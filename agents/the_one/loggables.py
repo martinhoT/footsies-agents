@@ -30,7 +30,10 @@ def get_loggables(agent: TheOneAgent):
         custom_evaluators_over_test_states.extend(game_model_loggables["custom_evaluators_over_test_states"])
 
     if agent.reaction_time_emulator is not None:
-        custom_evaluators.append(("Training/Reaction time", lambda: agent.evaluate_average_reaction_time))
+        custom_evaluators.append(("Training/Reaction time", agent.evaluate_average_reaction_time))
+
+    # Deactivate network histograms, they hog up space
+    # network_histograms.clear()
 
     return {
         "network_histograms": network_histograms,

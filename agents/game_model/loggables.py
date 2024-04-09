@@ -4,7 +4,7 @@ from .agent import GameModelAgent
 def get_loggables(agent: GameModelAgent):
     return {
         "network_histograms": [
-            agent.game_model,
+            agent.game_model.network,
         ],
         "custom_evaluators": [
             ("Learning/Loss_Guard", agent.evaluate_average_loss_guard),

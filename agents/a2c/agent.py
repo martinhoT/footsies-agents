@@ -61,6 +61,9 @@ class A2CAgent(FootsiesAgentTorch):
             modules["critic"] = self._critic.q_network
         self._model = AggregateModule(modules)
 
+        # For tracking
+        self._current_action = None
+
         # For logging
         self.cumulative_delta = 0
         self.cumulative_delta_n = 0
@@ -92,6 +95,7 @@ class A2CAgent(FootsiesAgentTorch):
             else:
                 simple_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
         
+        self._current_action = simple_action
         return simple_action
 
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
@@ -145,6 +149,10 @@ class A2CAgent(FootsiesAgentTorch):
     @property
     def learner(self) -> A2CQLearner:
         return self._learner
+
+    @property
+    def current_action(self) -> int | None:
+        return self._current_action
 
     @property
     def act_with_qvalues(self) -> bool:
