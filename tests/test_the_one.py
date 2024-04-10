@@ -52,6 +52,3 @@ def test_whiff_punisher(footsies_env: FootsiesEnv):
         
         obs = next_obs
         info = next_info
-    
-    # Set the opponent back to the default
-    footsies_env.set_opponent(None)

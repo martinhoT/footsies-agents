@@ -308,11 +308,8 @@ class PlayerModel:
         # We train over an entire episode's worth of data at once.
         self._accumulated_args = []
 
-    def _should_reset_context(self, obs: torch.Tensor, terminated_or_truncated: bool) -> bool:
+    def should_reset_context(self, prev_obs: torch.Tensor, obs: torch.Tensor, terminated_or_truncated: bool) -> bool:
         """Whether to reset the context of the opponent model (if recurrent)."""
-        prev_obs = self._prev_obs
-        self._prev_obs = obs
-        
         # ALWAYS terminate on episode termination, regardless of mode.
         if terminated_or_truncated:
             return True
@@ -353,7 +350,9 @@ class PlayerModel:
                 self._accumulated_args.append((obs, action, multiplier))
             
             # Don't train as long as the context should be reset
-            if not self._should_reset_context(obs, terminated_or_truncated):
+            prev_obs = self._prev_obs
+            self._prev_obs = obs
+            if not self.should_reset_context(prev_obs, obs, terminated_or_truncated):
                 return None
 
             # Reset the hidden state, it's not even going to be used during training, it's only for access outside of update

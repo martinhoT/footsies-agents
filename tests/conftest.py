@@ -35,7 +35,7 @@ def il_dataset():
 
 
 @pytest.fixture(scope="package")
-def footsies_env():
+def footsies_env_root():
     env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
         game_port=15000,
@@ -54,6 +54,16 @@ def footsies_env():
     yield env
 
     env.close()
+
+
+@pytest.fixture(scope="function")
+def footsies_env(footsies_env_root: FootsiesEnv):
+    env = footsies_env_root
+
+    yield env
+
+    env.set_opponent(None)
+    env.reset()
 
 
 def wrap_env(footsies_env: FootsiesEnv, wrappers: list[gym.Wrapper]) -> gym.Env:

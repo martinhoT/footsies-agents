@@ -119,6 +119,9 @@ class TheOneAgent(FootsiesAgentTorch):
         self._cumulative_reaction_time = 0
         self._cumulative_reaction_time_n = 0
 
+        # Initial reset
+        self.reset()
+
     def env_concat(self, n: int) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Obtain the concatenated weights that calculate the next environment observation `n` steps into the future.
@@ -198,6 +201,8 @@ class TheOneAgent(FootsiesAgentTorch):
             self.reaction_time_emulator.reset(obs)
             self._current_observation_delayed = obs
         
+        prev_obs_delayed = self._current_observation_delayed
+
         # Compute decision distribution.
         opponent_probabilities, hidden_state = self.opponent_model.p2_model.network.probabilities(self._current_observation_delayed, self._current_opponent_model_hidden_state_perceived)
         opponent_probabilities = opponent_probabilities.detach()
@@ -209,9 +214,17 @@ class TheOneAgent(FootsiesAgentTorch):
         self._current_observation_delayed, reaction_time, skipped_observations = self.reaction_time_emulator.register_and_perceive(obs, decision_entropy)
         
         # Calculate the opponent model hidden state correctly.
+        prev_obs = prev_obs_delayed
         for skipped in skipped_observations:
             if ActionMap.is_state_actionable_torch(skipped, False):
-                self._current_opponent_model_hidden_state_perceived = self.opponent_model.p2_model.network.compute_hidden_state(skipped, self._current_opponent_model_hidden_state_perceived)
+                hidden_state = self.opponent_model.p2_model.network.compute_hidden_state(skipped, self._current_opponent_model_hidden_state_perceived)
+                if self.opponent_model.p2_model.should_reset_context(prev_obs, skipped, False):
+                    self._current_opponent_model_hidden_state_perceived = None
+                self._current_opponent_model_hidden_state_perceived = hidden_state.detach() if hidden_state is not None else hidden_state
+                prev_obs = skipped
+
+        if self.opponent_model.p2_model.should_reset_context(skipped, self._current_observation_delayed, False):
+            self._current_opponent_model_hidden_state_perceived = None
 
         # Correct perceived observation.
         p2_action = info["p2_simple"]
@@ -223,14 +236,21 @@ class TheOneAgent(FootsiesAgentTorch):
 
     def multi_step_prediction(self, obs: torch.Tensor, n: int, opponent_model_hidden_state: torch.Tensor, p2_action: torch.Tensor | int) -> tuple[torch.Tensor, torch.Tensor]:
         """Predict the observation `n` time steps into the future, using the agent's past executed actions, opponent model and game model."""
+        o_prev = None
         o = obs
         for t in reversed(range(n)):
             p2_actionable = ActionMap.is_state_actionable_torch(o, False)
 
             if p2_actionable:
+                # If the opponent model hidden state should be reset, according to the reset strategy employed opponent model, do so.
+                if o_prev is not None and self.opponent_model.p2_model.should_reset_context(o_prev, o, False):
+                    opponent_model_hidden_state = None
+
                 p2_action, opponent_model_hidden_state = self.opponent_model.p2_model.network.probabilities(o, opponent_model_hidden_state)
+
                 p2_action = p2_action.detach()
-                opponent_model_hidden_state = opponent_model_hidden_state.detach() if opponent_model_hidden_state is not None else opponent_model_hidden_state
+                if opponent_model_hidden_state is not None:
+                    opponent_model_hidden_state = opponent_model_hidden_state.detach()
             
             else:
                 if self._assumed_opponent_action_on_nonactionable == "last":
@@ -243,6 +263,7 @@ class TheOneAgent(FootsiesAgentTorch):
 
             p1_action = self._past_agent_actions[-1 - t]
             
+            o_prev = o
             o = self.env_model.game_model.predict(o, p1_action, p2_action).detach()
         
         return o, opponent_model_hidden_state
