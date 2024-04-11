@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
     # idle_distribution[0, 0] = 1.0
 
-    if agent.opponent_model.p2_model.network.is_recurrent:
+    if agent.opp.p2_model.network.is_recurrent:
         warnings.warn("Since the agent is recurrent, it needs to have 'online learning' enabled in order to have the recurrent state updated. Additionally, loading and saving states is discouraged for the same reason.")
 
     if LOAD:
@@ -128,10 +128,10 @@ if __name__ == "__main__":
         include_online_learning=False,
     )
 
-    if agent.opponent_model is not None:
+    if agent.opp is not None:
         mimic_manager = MimicAnalyserManager(
             p1_model=None,
-            p2_model=agent.opponent_model.p2_model,
+            p2_model=agent.opp.p2_model,
             p1_mirror_p2=False,
             include_online_learning=False,
         )

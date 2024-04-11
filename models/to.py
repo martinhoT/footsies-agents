@@ -166,7 +166,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
 
     if use_reaction_time:
         reaction_time_emulator = ReactionTimeEmulator(
-            inaction_probability=0.0,
+            actor=actor,
+            opponent=opponent_model,
             history_size=30,
             # These don't matter since they will be substituted by the call below
             multiplier=1.0,
@@ -180,8 +181,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     else:
         reaction_time_emulator = None
 
-    # Since reaction time depends on the game model, we also create a game model in that case
-    if use_game_model or use_reaction_time:
+    if use_game_model:
         game_model = GameModel(
             game_model_network=GameModelNetwork(
                 obs_dim=obs_dim,
@@ -214,8 +214,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         remove_special_moves=remove_special_moves,
         rollback_as_opponent_model=rollback,
         learn=learn,
-        # Not used
-        representation=None,
     )
 
     loggables = get_loggables(agent)

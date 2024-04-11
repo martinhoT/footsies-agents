@@ -72,11 +72,11 @@ class A2CAgent(FootsiesAgentTorch):
         self._test_observations = None
 
     def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
-        # If we can't perform an action, don't even attempt one
-        if not ActionMap.is_state_actionable_ori(info):
+        # If we can't perform an action, don't even attempt one.
+        if not info["p1_is_actionable"]:
             return 0
         
-        # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic
+        # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic.
         if predicted_opponent_action is None:
             predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
 

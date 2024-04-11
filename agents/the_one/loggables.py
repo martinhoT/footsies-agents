@@ -17,14 +17,14 @@ def get_loggables(agent: TheOneAgent):
     custom_evaluators.extend(a2c_loggables["custom_evaluators"])
     custom_evaluators_over_test_states.extend(a2c_loggables["custom_evaluators_over_test_states"])
 
-    if agent.opponent_model is not None:
-        mimic_loggables = get_mimic_loggables(agent.opponent_model)
+    if agent.opp is not None:
+        mimic_loggables = get_mimic_loggables(agent.opp)
         network_histograms.extend(mimic_loggables["network_histograms"])
         custom_evaluators.extend(mimic_loggables["custom_evaluators"])
         custom_evaluators_over_test_states.extend(mimic_loggables["custom_evaluators_over_test_states"])
 
-    if agent.env_model is not None:
-        game_model_loggables = get_game_model_loggables(agent.env_model)
+    if agent.gm is not None:
+        game_model_loggables = get_game_model_loggables(agent.gm)
         network_histograms.extend(game_model_loggables["network_histograms"])
         custom_evaluators.extend(game_model_loggables["custom_evaluators"])
         custom_evaluators_over_test_states.extend(game_model_loggables["custom_evaluators_over_test_states"])
