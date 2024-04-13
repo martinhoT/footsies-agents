@@ -1,24 +1,17 @@
 from copy import deepcopy
-import os
 import torch
 import logging
 import random
 import warnings
 from torch import nn
-from agents.action import ActionMap
 from agents.base import FootsiesAgentTorch, FootsiesAgentOpponent
 from gymnasium import Env
-from typing import Callable, Tuple
-from agents.the_one.model import FullModel, RepresentationModule
+from agents.the_one.model import FullModel
 from agents.the_one.reaction_time import ReactionTimeEmulator, MultiStepPredictor
 from agents.a2c.agent import A2CAgent
-from agents.a2c.a2c import ActorNetwork
 from agents.mimic.agent import MimicAgent
 from agents.game_model.agent import GameModelAgent
-from agents.torch_utils import observation_invert_perspective_flattened
-from collections import deque
 from agents.wrappers import FootsiesSimpleActions
-from data import FootsiesDataset
 
 LOGGER = logging.getLogger("main.the_one")
 
@@ -70,10 +63,11 @@ class TheOneAgent(FootsiesAgentTorch):
         LOGGER.info("Agent was setup with opponent prediction strategy: %s", "rollback" if rollback_as_opponent_model else "opponent model" if opponent_model is not None else "random (unless doing curriculum learning)")
 
         # If we have both a reaction time emulator and a game model, add a predictor to correct delayed observations.
-        reaction_time_emulator.predictor = MultiStepPredictor(
-            reaction_time_emulator,
-            game_model.game_model,
-        )
+        if reaction_time_emulator is not None:
+            reaction_time_emulator.predictor = MultiStepPredictor(
+                reaction_time_emulator,
+                game_model.game_model if game_model is not None else None,
+            )
 
         # Store required values
         #  Dimensions
@@ -92,7 +86,7 @@ class TheOneAgent(FootsiesAgentTorch):
 
         # To report in the `model` property
         self._full_model = FullModel(
-            game_model=self.gm.game_model.network,
+            game_model=None if self.gm is None else self.gm.game_model.network,
             opponent_model=None if self.opp is None else self.opp.p2_model.network,
             actor_critic=self.a2c.model,
         )

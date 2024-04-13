@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import logging
-from typing import Literal, TypeVar
+from typing import Literal, TypeVar, Union
 from collections import deque
 from itertools import islice
 from math import log
@@ -182,12 +182,12 @@ class ReactionTimeEmulator:
         return self._states.maxlen
     
     @property
-    def predictor(self) -> "MultiStepPredictor" | None:
+    def predictor(self) -> Union["MultiStepPredictor", None]:
         """The multi-step predictor that may optionally be appended to this emulator for correction of delayed observations into observations at the current time step. If `None`, no correction will be performed."""
         return self._predictor
 
     @predictor.setter
-    def predictor(self, value: "MultiStepPredictor" | None):
+    def predictor(self, value: Union["MultiStepPredictor", None]):
         self._predictor = value
     
 

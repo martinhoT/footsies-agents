@@ -9,9 +9,6 @@ def get_loggables(agent: TheOneAgent):
     custom_evaluators = []
     custom_evaluators_over_test_states = []
 
-    if agent.representation is not None:
-        network_histograms.append(agent.representation)
-
     a2c_loggables = get_a2c_loggables(agent.a2c)
     network_histograms.extend(a2c_loggables["network_histograms"])
     custom_evaluators.extend(a2c_loggables["custom_evaluators"])
