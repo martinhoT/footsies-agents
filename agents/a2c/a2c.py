@@ -677,6 +677,7 @@ class A2CQLearner(A2CLearnerBase):
         # Save the TD error in case the caller wants to check it. The TD error is None if no critic update was performed
         self.extrinsic_td_error = None
         self.intrinsic_td_error = None
+        self.delta = None
 
         next_obs_agent_policy = self._effective_next_agent_policy(obs_agent_action, agent_will_frameskip, next_obs)
         next_obs_opponent_policy = self._effective_next_opponent_policy(obs_opponent_action, opponent_will_frameskip, next_obs_opponent_policy)

@@ -4,7 +4,7 @@ import gymnasium as gym
 import torch
 import logging
 import json
-import warnings
+import datetime
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
@@ -26,12 +26,16 @@ from agents.diayn import DIAYN, DIAYNWrapper
 from agents.logger import TrainingLoggerWrapper
 from agents.utils import snapshot_sb3_policy, wrap_policy
 from agents.torch_utils import hogwild
-from args import parse_args, EnvArgs
+from args import MainArgs, parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
 from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher, UnsafePunisher
 from opponents.base import OpponentManager
 from intrinsic.base import IntrinsicRewardScheme
 from agents.action import ActionMap
+from dataclasses import asdict
+from stable_baselines3.common.callbacks import BaseCallback
+from collections import deque
+from torch.utils.tensorboard import SummaryWriter
 
 LOGGER = logging.getLogger("main")
 
@@ -87,11 +91,16 @@ def save_agent(agent: FootsiesAgentBase | BaseAlgorithm, name: str, folder: str 
     agent_folder_path = os.path.join(folder, name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
 
-    if is_footsies_agent and not os.path.exists(agent_folder_path):
+    if not os.path.exists(agent_folder_path):
         os.makedirs(agent_folder_path)
 
-    # Both FOOTSIES and SB3 agents use the same method and signature (mostly)
-    agent.save(agent_folder_path)
+    # Both FOOTSIES and SB3 agents use the same method and signature (mostly).
+    # FOOTSIES agents expect a folder, and SB3 agents expect the actual file.
+    if is_footsies_agent:
+        agent.save(agent_folder_path)
+    else:
+        agent_path = os.path.join(agent_folder_path, name)
+        agent.save(agent_path)
     LOGGER.info("Agent '%s' saved", name)
 
 
@@ -110,7 +119,19 @@ def save_agent_parameters(parameters: dict, name: str, folder: str = "saved"):
     
     # Save the parameters used to instantiate this agent
     with open(os.path.join(agent_folder_path, "parameters.json"), "wt") as f:
-        json.dump(parameters, f)
+        json.dump(parameters, f, indent=4)
+
+
+def save_agent_training_args(training_args: dict, name: str, folder: str = "saved"):
+    """Save the arguments passed for training the agent to disk. If there are training args already saved, then older ones will be renamed (similar to how logging does it)."""
+    agent_folder_path = os.path.join(folder, name)
+
+    timestamp = datetime.datetime.now().strftime("%d-%m-%y_%H-%M-%S")
+    file_name = os.path.join(agent_folder_path, f"training_args_{timestamp}.json")
+
+    # Save the parameters used to instantiate this agent
+    with open(file_name, "wt") as f:
+        json.dump(training_args, f, indent=4)
 
 
 def train(
@@ -345,8 +366,40 @@ def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: 
     return logger
 
 
-if __name__ == "__main__":
-    args = parse_args()
+# For logging the win-rate of the SB3 algorithm
+class WinRateCallback(BaseCallback):
+    def __init__(self, log_frequency: int, log_dir: str, last: int = 100):
+        super().__init__()
+        self.log_frequency = log_frequency
+        self.summary_writer = SummaryWriter(log_dir=log_dir)
+        self.current_step = 0
+
+        self._wins = deque([], maxlen=last)
+
+    def _on_step(self) -> bool:
+        info = self.locals["infos"][0]
+        terminated = self.locals["dones"][0]
+        truncated = info["TimeLimit.truncated"]
+        reward = self.locals["rewards"][0]
+
+        if terminated or truncated:
+            won = (info["guard"][0] > info["guard"][1]) if truncated else (reward > 0)
+            self._wins.append(won)
+
+        if self.current_step % self.log_frequency == 0:
+            self.summary_writer.add_scalar(
+                f"Performance/Win rate over the last {self._wins.maxlen} games",
+                (sum(self._wins) / len(self._wins)) if self._wins else 0.5,
+                self.current_step,
+            )
+        
+        self.current_step += 1
+
+        # Never stop because of this
+        return True
+
+
+def main(args: MainArgs):
     # Use the same logging directory as the one the environment uses. Everything should be logging to the same place.
     log_dir = args.env.log_dir
 
@@ -487,8 +540,17 @@ if __name__ == "__main__":
             # if will_footsies_self_play:
             #     opponent_pool.append(env.unwrapped.opponent)
 
+            if args.misc.log:
+                logging_callback = WinRateCallback(
+                    log_frequency=args.misc.log_frequency,
+                    log_dir=log_dir,
+                )
+            else:
+                logging_callback = None
+
             agent.learn(
                 total_timesteps=args.time_steps,
+                callback=logging_callback,
                 tb_log_name=log_dir,
                 reset_num_timesteps=False,
                 progress_bar=True,
@@ -552,5 +614,11 @@ if __name__ == "__main__":
     if args.misc.save:
         save_agent(agent, args.agent.name)
         save_agent_parameters(args.agent.kwargs, args.agent.name)
+        save_agent_training_args(asdict(args), args.agent.name)
 
     env.close()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(args)

@@ -120,6 +120,9 @@ class AgentArgs:
 
     def __post_init__(self):
         self.name = self.name if self.name is not None else self.model
+        self.is_sb3 = "sb3." == self.model[:4]
+        if self.is_sb3:
+            self.model = self.model[4:]
 
 
 @dataclass

@@ -192,7 +192,8 @@ class TheOneAgent(FootsiesAgentTorch):
         if assumed_opponent_action_on_nonactionable is None:
             raise ValueError("expected environment to have the `FootsiesSimpleActions` wrapper with `assumed_opponent_action_on_nonactionable` property set, but that's not the case")
     
-        self.reaction_time_emulator.predictor.assumed_opponent_action_on_nonactionable = assumed_opponent_action_on_nonactionable
+        if self.reaction_time_emulator is not None:
+            self.reaction_time_emulator.predictor.assumed_opponent_action_on_nonactionable = assumed_opponent_action_on_nonactionable
 
     def reset(self):
         self._reaction_time_emulator_should_reset = True

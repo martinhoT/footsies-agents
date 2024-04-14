@@ -63,7 +63,8 @@ class WinRateObserver(Observer):
 
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
         if terminated or truncated:
-            self._wins.append(reward > 0)
+            won = (reward > 0) if terminated else (next_info["guard"][0] > next_info["guard"][1])
+            self._wins.append(won)
             self._win_rates.append(sum(self._wins) / len(self._wins))
 
     @property
@@ -73,7 +74,7 @@ class WinRateObserver(Observer):
 # %% Test the agents
 
 with mp.Pool(2) as pool:
-    test_1000 = partial(test, episodes=1000)
+    test_1000 = partial(test, episodes=10000)
     observers: list[WinRateObserver] = pool.starmap(test_1000, (
         (agent_0, "control", 0, WinRateObserver, opponent.act),
         (agent_1, "initted", 1, WinRateObserver, opponent.act),
@@ -93,3 +94,10 @@ plt.title("Adaptation performance between agent\nwith a pre-trained Q-function v
 plt.xlabel("Episode")
 plt.ylabel("Win rate")
 plt.savefig(result_path)
+
+# %% Save the data for posterity
+
+import numpy as np
+
+data = np.array([observers[0].win_rates, observers[1].win_rates])
+np.save(result_path, data)

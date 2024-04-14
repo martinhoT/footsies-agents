@@ -117,9 +117,10 @@ class A2CAgent(FootsiesAgentTorch):
         )
 
         # P1 learning logging
-        self.cumulative_delta += self._learner.delta
-        self.cumulative_delta_n += 1
         if isinstance(self._learner, A2CQLearner):
+            if self._learner.delta is not None:     
+                self.cumulative_delta += self._learner.delta
+                self.cumulative_delta_n += 1
             if self._learner.extrinsic_td_error is not None:
                 self.cumulative_qtable_error += self._learner.extrinsic_td_error
                 self.cumulative_qtable_error_n += 1
