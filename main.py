@@ -65,19 +65,19 @@ def import_agent(model: str, env: Env, parameters: dict) -> tuple[FootsiesAgentB
 
 def load_agent(agent: FootsiesAgentBase | BaseAlgorithm, name: str, folder: str = "saved") -> bool:
     """Load the trained parameters of the `agent` from disk."""
-    agent_folder_path = os.path.join(folder, name)
+    agent_path = os.path.join(folder, name)
     is_footsies_agent = isinstance(agent, FootsiesAgentBase)
     if not is_footsies_agent:
-        agent_folder_path = agent_folder_path + ".zip"
+        agent_path = os.path.join(agent_path, name + ".zip")
 
-    if os.path.exists(agent_folder_path):
-        if is_footsies_agent and not os.path.isdir(agent_folder_path):
-            raise OSError(f"the existing file '{agent_folder_path}' is not a folder!")
+    if os.path.exists(agent_path):
+        if is_footsies_agent and not os.path.isdir(agent_path):
+            raise OSError(f"the existing file '{agent_path}' is not a folder!")
 
         if is_footsies_agent:
-            agent.load(agent_folder_path)
+            agent.load(agent_path)
         else:
-            agent.set_parameters(agent_folder_path)
+            agent.set_parameters(agent_path)
 
         LOGGER.info("Agent '%s' loaded", name)
         return True
