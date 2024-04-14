@@ -368,11 +368,11 @@ def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: 
 
 # For logging the win-rate of the SB3 algorithm
 class WinRateCallback(BaseCallback):
-    def __init__(self, log_frequency: int, log_dir: str, last: int = 100):
+    def __init__(self, log_frequency: int, log_dir: str, last: int = 100, start_step: int = 0):
         super().__init__()
         self.log_frequency = log_frequency
         self.summary_writer = SummaryWriter(log_dir=log_dir)
-        self.current_step = 0
+        self.current_step = start_step
 
         self._wins = deque([], maxlen=last)
 
@@ -544,6 +544,7 @@ def main(args: MainArgs):
                 logging_callback = WinRateCallback(
                     log_frequency=args.misc.log_frequency,
                     log_dir=log_dir,
+                    start_step=args.misc.log_step_start,
                 )
             else:
                 logging_callback = None
