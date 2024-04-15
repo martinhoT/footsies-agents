@@ -123,7 +123,7 @@ class Idle(CurriculumOpponent):
         self._probs = torch.zeros((ActionMap.n_simple(),)).float()
         self._probs[ActionMap.simple_from_move(FootsiesMove.STAND)] = 1.0
 
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         return (False, False, False)
     
     def peek(self, next_obs: dict) -> torch.Tensor:
@@ -139,7 +139,7 @@ class Backer(CurriculumOpponent):
         self._probs = torch.zeros((ActionMap.n_simple(),)).float()
         self._probs[ActionMap.simple_from_move(FootsiesMove.BACKWARD)] = 1.0
 
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         return (False, True, False)
 
     def peek(self, next_obs: dict) -> torch.Tensor:
@@ -154,7 +154,7 @@ class NSpammer(CurriculumOpponent):
     def __init__(self):
         self.reset()
 
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         if self._peeked_action is not None:
             action = self._peeked_action
             self._peeked_action = None
@@ -196,7 +196,7 @@ class BSpammer(CurriculumOpponent):
     def __init__(self):
         self.reset()
     
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         if self._peeked_action is not None:
             action = self._peeked_action
             self._peeked_action = None
@@ -240,7 +240,7 @@ class NSpecialSpammer(CurriculumOpponent):
         self._probs = torch.zeros((ActionMap.n_simple(),)).float()
         self._probs[ActionMap.simple_from_move(FootsiesMove.N_SPECIAL)] = 1.0
     
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         return next(self._action_cycle)
     
     def peek(self, next_obs: dict) -> torch.Tensor:
@@ -263,7 +263,7 @@ class BSpecialSpammer(CurriculumOpponent):
         self._probs = torch.zeros((ActionMap.n_simple(),)).float()
         self._probs[ActionMap.simple_from_move(FootsiesMove.B_SPECIAL)] = 1.0
     
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         return next(self._action_cycle)
     
     def peek(self, next_obs: dict) -> torch.Tensor:
@@ -325,7 +325,7 @@ class WhiffPunisher(CurriculumOpponent):
         self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
 
     # NOTE: keep in mind that the opponent has actions inverted, so FORWARD -> BACKWARD and vice versa
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         # If there were actions that was previously queued, perform them.
         # We also clean up the discrete action queue since they should be in sync.
         if self._primitive_action_queue:
@@ -396,7 +396,7 @@ class UnsafePunisher(CurriculumOpponent):
         # We need to correct the action since it will be performed on the other side of the screen
         self._primitive_action_queue.extend(ActionMap.invert_primitive(p) for p in ActionMap.simple_as_move_to_primitive(simple_action))
 
-    def act(self, obs: dict) -> tuple[bool, bool, bool]:
+    def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         # If there were actions that was previously queued, perform them.
         # We also clean up the discrete action queue since they should be in sync.
         if self._primitive_action_queue:
