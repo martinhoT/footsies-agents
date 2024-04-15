@@ -9,4 +9,5 @@
     --agent.kwargs max_grad_norm 0.5 \
     --agent.kwargs use_sde False \
     --agent.kwargs gae_lambda 1.0 \
+    --agent.kwargs use_rms_prop False \
     "$@"

@@ -59,16 +59,16 @@ class AppendSimpleHistoryWrapper(Wrapper):
 
         return obs
 
-    def reset(self) -> dict:
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict]:
         self.history.clear()
         self.history.extend([0] * self.history.maxlen)
         self.prev_obs = None
 
         obs = self.observation(obs)
 
-        return self.env.reset()
+        return self.env.reset(seed=seed, options=options)
 
-    def step(self, action) -> dict:
+    def step(self, action) -> tuple[Any, float, bool, bool, dict]:
         next_obs, reward, terminated, truncated, info = self.env.step(action)
 
         next_obs = self.observation(next_obs)
@@ -326,8 +326,8 @@ class FootsiesSimpleActions(Wrapper):
         self.action_space = spaces.Discrete(n_simple - (2 if not agent_allow_special_moves else 0))
         self._opponent_action_space = spaces.Discrete(n_simple)
     
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict[str, Any]]:
-        obs, info = self.env.reset()
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict]:
+        obs, info = self.env.reset(seed=seed, options=options)
         
         self._executor.reset()
         info = self._extractor.reset(info)

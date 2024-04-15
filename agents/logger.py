@@ -222,7 +222,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.agent.preprocess(env)
 
         if len(self.custom_evaluators_over_test_states) > 0:
-            obs, info = env.reset()
+            # Use the same starter seed, it's whatever and more reproducible
+            obs, info = env.reset(seed=0)
             terminated, truncated = False, False
 
             for _ in range(self.test_states_number):

@@ -23,7 +23,7 @@ class MainArgs:
     episodes: int | None = None
     """Number of episodes. Doesn't work if an SB3 agent is used"""
     time_steps: int | None = None
-    """Number of time steps. Doesn't work if a FOOTSIES agent is used"""
+    """Number of time steps"""
     penalize_truncation: float | None = None
     """How much to penalize the agent in case the environment is truncated, useful when a time limit is defined for instance. No penalization by default"""
     curriculum: bool = False
@@ -32,6 +32,8 @@ class MainArgs:
     """The type of intrinsic reward to use (string specification)"""
     skip_freeze: bool = True
     """Skip any environment freeze in which an environment transition has equal observations. This is useful for handling hitstop in FOOTSIES"""
+    seed: int | None = None
+    """Random seed for both the agent and the environment. For the environment, it's only set on the first `reset()` call"""
 
     def __post_init__(self):
         if self.agent.is_sb3 and self.episodes is not None:

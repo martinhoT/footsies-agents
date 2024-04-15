@@ -5,6 +5,7 @@ import torch
 import logging
 import json
 import datetime
+import random
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
@@ -24,7 +25,6 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.base import FootsiesAgentBase, FootsiesAgentTorch
 from agents.diayn import DIAYN, DIAYNWrapper
 from agents.logger import TrainingLoggerWrapper
-from agents.utils import snapshot_sb3_policy, wrap_policy
 from agents.torch_utils import hogwild
 from args import MainArgs, parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
@@ -138,12 +138,14 @@ def train(
     agent: FootsiesAgentBase,
     env: Env,
     n_episodes: int | None = None,
+    n_timesteps: int | None = None,
     penalize_truncation: float | None = None,
     opponent_manager: OpponentManager | None = None,
     intrinsic_reward_scheme: IntrinsicRewardScheme | None = None,
     episode_finished_callback: Callable[[int], None] = lambda episode: None,
     progress_bar: bool = True,
     skip_freeze: bool = True,
+    initial_seed: int | None = None,
 ):
     """
     Train an `agent` on the given Gymnasium environment `env`.
@@ -152,14 +154,21 @@ def train(
     ----------
     - `agent`: implementation of FootsiesAgentBase, representing the agent
     - `env`: the Gymnasium environment to train on
-    - `n_episodes`: if specified, the number of training episodes
+    - `n_episodes`: if specified, the number of training episodes. Should not be specified along with `n_timesteps`
+    - `n_timesteps`: if specified, the number of timesteps to train on. Should not be specified along with `n_episodes`
     - `penalize_truncation`: penalize the agent if the time limit was exceeded, to discourage lengthening the episode
     - `opponent_manager`: manager of a custom opponent pool. Can be used for for self-play or curriculum learning. If None, custom opponents will not be used
     - `intrinsic_reward`: the intrinsic reward scheme to use, if any
     - `episode_finished_callback`: function that will be called after each episode is finished
     - `progress_bar`: whether to display a progress bar (with `tqdm`)
     - `skip_freeze`: whether to skip environment freezes, such as histop in FOOTSIES
+    - `initial_seed`: the environment seed that will be passed to the first `reset()` call
     """
+    if n_episodes is not None and n_timesteps is not None:
+        raise ValueError(f"either 'n_episodes' ({n_episodes}) or 'n_timesteps' ({n_timesteps}) is allowed to be specified, not both")
+
+    seed = initial_seed
+
     agent.preprocess(env)
     LOGGER.info("Preprocessing done!")
 
@@ -171,9 +180,11 @@ def train(
     if progress_bar:
         training_iterator = tqdm(training_iterator)
 
+    timestep_counter = 0
+
     try:
         for episode in training_iterator:
-            obs, info = env.reset()
+            obs, info = env.reset(seed=seed)
             if opponent_manager is not None:
                 opponent_manager.current_opponent.reset()
 
@@ -204,7 +215,6 @@ def train(
                 
                 if intrinsic_reward_scheme is not None:
                     intrinsic_reward = intrinsic_reward_scheme.update_and_reward(obs, next_obs, reward, terminated, truncated, info)
-
                     # It's not great to use the `info` dict as the storage for intrinsic reward, but this allows the addition of such without breaking the current API.
                     # I could change it but I won't bother. Whathever agent wants to use intrinsic reward can just check if the key is present.
                     if "intrinsic_reward" in info:
@@ -219,6 +229,8 @@ def train(
                 agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
                 obs = next_obs
                 info = next_info
+
+                timestep_counter += 1
 
             # Determine the final game result, to provide to the self-play manager
             if terminated and (reward != 0.0):
@@ -241,6 +253,12 @@ def train(
                     env.unwrapped.set_opponent(opponent)
             
             episode_finished_callback(episode)
+
+            if n_timesteps is not None and timestep_counter > n_timesteps:
+                break
+        
+            # Only use the seed for the first episode/reset call
+            seed = None
 
     except KeyboardInterrupt:
         LOGGER.info("Training manually interrupted (KeyboardInterrupt)")
@@ -414,6 +432,13 @@ def main(args: MainArgs):
 
     setup_logger(args.agent.name, stdout_level=args.misc.log_stdout_level, file_level=args.misc.log_file_level, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
 
+    # Pre-processing
+
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
+        LOGGER.info("Seed was set to %s", args.seed)
+
     # Prepare environment
 
     if LOGGER.isEnabledFor(logging.INFO):
@@ -571,6 +596,7 @@ def main(args: MainArgs):
             "opponent_manager": opponent_manager,
             "intrinsic_reward_scheme": intrinsic_reward_scheme,
             "skip_freeze": args.skip_freeze,
+            "initial_seed": args.seed,
         }
 
         if args.misc.hogwild:
