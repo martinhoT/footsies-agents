@@ -5,8 +5,12 @@ from agents.action import ActionMap
 from agents.base import FootsiesAgentBase
 from typing import List, Callable, Any, Tuple
 from collections import deque
-import logging
 from dataclasses import dataclass
+from os import path
+from io import TextIOBase
+import logging
+import csv
+import string
 
 
 LOGGER = logging.getLogger("main.tensorboard")
@@ -40,6 +44,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         test_states_number: int = 10_000,
         step_start_value: int = 0,
         episode_start_value: int = 0,
+        csv_save: bool = True,
     ):
         """
         A wrapper on FOOTSIES agents which logs the specified training metrics.
@@ -83,6 +88,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         episode_start_value: int
             the value with which the episode counter will begin.
             This is useful if one training run is stopped, and if future logs should continue after the previous training run
+        csv_save: bool
+            also save the data as a CSV file for each scalar. Only saves the most recent run
         """
         if network_histograms:
             network_histograms = []
@@ -105,6 +112,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
             if custom_evaluators_over_test_states is None
             else custom_evaluators_over_test_states
         )
+        self.csv_save = csv_save
 
         # In case there are custom evaluators over test states
         self.test_states: list[TestState] = []
@@ -118,6 +126,36 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
         self.average_reward = 0 # exponentially weighted average
         self.average_intrinsic_reward = 0 # exponentially weighted average
         self.recent_wins: deque[bool] = deque([], maxlen=win_rate_over_last)
+
+        self._simplify_tag_translation_table = str.maketrans(string.whitespace, "_" * len(string.whitespace), string.punctuation)
+        self.csv_files: dict[str, tuple[csv.DictWriter, TextIOBase]] = {}
+        if self.csv_save:
+            if self.episode_reward_enabled:
+                self._add_csv_writer(log_dir, "episode_reward")
+            if self.episode_length_enabled:
+                self._add_csv_writer(log_dir, "episode_length")
+            if self.truncation_enabled:
+                self._add_csv_writer(log_dir, "episode_truncations")
+            if self.average_reward_enabled:
+                self._add_csv_writer(log_dir, "average_reward")
+                self._add_csv_writer(log_dir, "average_reward_intrinsic")
+            if self.win_rate_enabled:
+                self._add_csv_writer(log_dir, "win_rate")
+            for tag, _ in self.custom_evaluators:
+                tag = self._simplify_tag(tag)
+                self._add_csv_writer(log_dir, tag)
+            for tag, _ in self.custom_evaluators_over_test_states:
+                tag = self._simplify_tag(tag)
+                self._add_csv_writer(log_dir, tag)
+            
+    # NOTE: merely for code reuse
+    def _add_csv_writer(self, log_dir: str, tag: str):
+        f = open(path.join(log_dir, tag + ".csv"), "wt")
+        writer = csv.writer(f, dialect="unix", quoting=csv.QUOTE_MINIMAL)
+        self.csv_files[tag] = (writer, f)
+
+    def _simplify_tag(self, tag: str) -> str:
+        return tag.translate(self._simplify_tag_translation_table).lower()
 
     def act(self, obs, *args, **kwargs) -> "any":
         return self.agent.act(obs, *args, **kwargs)
@@ -149,6 +187,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                     self.episode_reward,
                     self.current_episode,
                 )
+                self.csv_files["episode_reward"][0].writerow((self.current_episode, self.episode_reward))
 
             if self.episode_length_enabled:
                 self.summary_writer.add_scalar(
@@ -156,13 +195,16 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                     self.episode_length,
                     self.current_episode,
                 )
+                self.csv_files["episode_length"][0].writerow((self.current_episode, self.episode_length))
             
             if self.truncation_enabled:
+                truncation = 1 if truncated else 0
                 self.summary_writer.add_scalar(
                     "Training/Episode truncations",
-                    1 if truncated else 0,
+                    truncation,
                     self.current_episode,
                 )
+                self.csv_files["episode_truncations"][0].writerow((self.current_episode, truncation))
 
             self.episode_reward = 0
             self.episode_length = 0
@@ -175,6 +217,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                     self.average_reward,
                     self.current_step,
                 )
+                self.csv_files["average_reward"][0].writerow((self.current_step, self.average_reward))
 
                 # Let's avoid writing 0s, which will happen if we are not even using intrinsic rewards
                 if self.average_intrinsic_reward != 0.0:
@@ -183,13 +226,16 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                         self.average_intrinsic_reward,
                         self.current_step,
                     )
+                    self.csv_files["average_intrinsic_reward"][0].writerow((self.current_step, self.average_intrinsic_reward))
 
             if self.win_rate_enabled:
+                win_rate = (sum(self.recent_wins) / len(self.recent_wins)) if self.recent_wins else 0.5
                 self.summary_writer.add_scalar(
                     f"Performance/Win rate over the last {self.recent_wins.maxlen} games",
-                    (sum(self.recent_wins) / len(self.recent_wins)) if self.recent_wins else 0.5,
+                    win_rate,
                     self.current_step,
                 )
+                self.csv_files["win_rate"][0].writerow((self.current_step, win_rate))
 
             for network in self.network_histograms:
                 for layer_name, layer in network.named_parameters():
@@ -210,6 +256,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                 scalar = evaluator()
                 if scalar is not None:
                     self.summary_writer.add_scalar(tag, scalar, self.current_step)
+                    self.csv_files[self._simplify_tag(tag)][0].writerow((self.current_step, scalar))
 
             for tag, evaluator in self.custom_evaluators_over_test_states:
                 scalar = evaluator(self.test_states)
@@ -217,6 +264,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
                     self.summary_writer.add_scalar(
                         tag, scalar, self.current_step
                     )
+                    self.csv_files[self._simplify_tag(tag)][0].writerow((self.current_step, scalar))
 
     def preprocess(self, env: Env):
         self.agent.preprocess(env)
@@ -264,3 +312,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase):
 
     def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
         return self.agent.extract_opponent(env)
+
+    def close(self):
+        self.summary_writer.close()
+        for _, file in self.csv_files.values():
+            file.close()

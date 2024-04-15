@@ -34,8 +34,16 @@ class MainArgs:
     """Skip any environment freeze in which an environment transition has equal observations. This is useful for handling hitstop in FOOTSIES"""
     seed: int | None = None
     """Random seed for both the agent and the environment. For the environment, it's only set on the first `reset()` call"""
+    progress_bar_kwargs: tyro.conf.UseAppendAction[Dict[str, int | float | bool | str]] = field(default_factory=dict)
+    """Keyword arguments to pass to the `tqdm` progress bar during training"""
+
+    post_process_init: tyro.conf.Suppress[bool] = True
+    """If this is `False`, do not perform `__post_init__` initializations, which are mainly useful when passing arguments throught the CLI. If `False`, there may be a risk of ill-set arguments"""
 
     def __post_init__(self):
+        if not self.post_process_init:
+            return
+        
         if self.agent.is_sb3 and self.episodes is not None:
             raise ValueError("specifying a number of episodes for SB3 algorithms is not supported")
 
@@ -76,9 +84,11 @@ class MiscArgs:
     load: bool = True
     """Whether the agent is loaded from disk before training"""
     
-    log: bool = True
-    """Whether the agent is logged (both standard and Tensorboard logs)"""
-    log_frequency: int = 5000
+    log_tensorboard: bool = True
+    """Whether the agent is logged (Tensorboard logs)"""
+    log_file: bool = True
+    """Whether to write standard logs to a file"""
+    log_frequency: int = 10000
     """Number of time steps between each Tensorboard log"""
     log_test_states_number: int = 5000
     """Number of test states to use when evaluating some metrics for Tensorboard logging"""
@@ -120,7 +130,13 @@ class AgentArgs:
     is_sb3: bool = False
     """Whether the agent is a Stable-Baselines3 agent"""
 
+    post_process_init: tyro.conf.Suppress[bool] = True
+    """If this is `False`, do not perform `__post_init__` initializations, which are mainly useful when passing arguments throught the CLI. If `False`, there may be a risk of ill-set arguments"""
+
     def __post_init__(self):
+        if not self.post_process_init:
+            return
+        
         self.name = self.name if self.name is not None else self.model
         self.is_sb3 = "sb3." == self.model[:4]
         if self.is_sb3:

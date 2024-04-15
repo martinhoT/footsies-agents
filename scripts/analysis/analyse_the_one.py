@@ -23,7 +23,7 @@ import warnings
 
 CUSTOM = False
 MODEL = "to"
-NAME = "f_opp"
+NAME = "f_opp_recurrent_no_mask"
 LOAD = True
 LOG = False
 ROLLBACK_IF_POSSIBLE = True
@@ -41,10 +41,12 @@ if __name__ == "__main__":
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=False,
+        fast_forward=True,
         dense_reward=False,
+        log_file="out.log",
+        log_file_overwrite=True,
         # vs_player=True,
-        # opponent=custom_opponent.act,
+        opponent=custom_opponent.act,
     )
 
     env = TransformObservation(
@@ -153,16 +155,25 @@ if __name__ == "__main__":
         if mimic_manager is not None:
             mimic_manager.include_mimic_dpg_elements(analyser)
 
+    r = 0
     def custom_state_update_callback(analyser: Analyser):
+        global r
+
         qlearner_manager.on_state_update(analyser)
         if mimic_manager is not None:
             mimic_manager.predict_next_move(analyser)
         
         if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
             obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
-            if custom_opponent is not None:
-                next_info["next_opponent_policy"] = custom_opponent.peek(next_info)
-            logged_agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
+            r += reward
+            
+            # Ignore hitstop/freeze
+            in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
+            if not (in_hitstop and obs.isclose(next_obs).all()):
+                if custom_opponent is not None:
+                    next_info["next_opponent_policy"] = custom_opponent.peek(next_info)
+                logged_agent.update(obs, next_obs, r, terminated, truncated, info, next_info)
+                r = 0
 
     def act(obs, info):
         if isinstance(custom_opponent, CurriculumOpponent):

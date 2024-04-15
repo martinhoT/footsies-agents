@@ -144,6 +144,7 @@ def train(
     intrinsic_reward_scheme: IntrinsicRewardScheme | None = None,
     episode_finished_callback: Callable[[int], None] = lambda episode: None,
     progress_bar: bool = True,
+    progress_bar_kwargs: dict | None = None,
     skip_freeze: bool = True,
     initial_seed: int | None = None,
 ):
@@ -161,6 +162,7 @@ def train(
     - `intrinsic_reward`: the intrinsic reward scheme to use, if any
     - `episode_finished_callback`: function that will be called after each episode is finished
     - `progress_bar`: whether to display a progress bar (with `tqdm`)
+    - `progress_bar_kwargs`: keyword arguments to pass to the `tqdm` progress bar
     - `skip_freeze`: whether to skip environment freezes, such as histop in FOOTSIES
     - `initial_seed`: the environment seed that will be passed to the first `reset()` call
     """
@@ -178,7 +180,8 @@ def train(
     tell_agent_of_opponent = isinstance(opponent_manager, CurriculumManager)
 
     if progress_bar:
-        training_iterator = tqdm(training_iterator)
+        total = n_episodes if n_episodes is not None else n_timesteps / 180 if n_timesteps is not None else None
+        training_iterator = tqdm(training_iterator, total=total, unit="ep", colour="#80e4ed", dynamic_ncols=True, **progress_bar_kwargs)
 
     timestep_counter = 0
 
@@ -430,7 +433,7 @@ def main(args: MainArgs):
 
     # Set up the main logger
 
-    setup_logger(args.agent.name, stdout_level=args.misc.log_stdout_level, file_level=args.misc.log_file_level, log_to_file=args.misc.log, multiprocessing=args.misc.hogwild)
+    setup_logger(args.agent.name, stdout_level=args.misc.log_stdout_level, file_level=args.misc.log_file_level, log_to_file=args.misc.log_file, multiprocessing=args.misc.hogwild)
 
     # Pre-processing
 
@@ -530,7 +533,7 @@ def main(args: MainArgs):
 
     # Identity function, used when logging is disabled
     agent_logging_wrapper = lambda a: a
-    if args.misc.log and not args.agent.is_sb3:
+    if args.misc.log_tensorboard and not args.agent.is_sb3:
         LOGGER.info("Logging enabled on the agent")
 
         agent_logging_wrapper = lambda a: TrainingLoggerWrapper(
@@ -565,7 +568,7 @@ def main(args: MainArgs):
             # if will_footsies_self_play:
             #     opponent_pool.append(env.unwrapped.opponent)
 
-            if args.misc.log:
+            if args.misc.log_tensorboard:
                 logging_callback = WinRateCallback(
                     log_frequency=args.misc.log_frequency,
                     log_dir=log_dir,
@@ -592,9 +595,11 @@ def main(args: MainArgs):
     else:
         train_kwargs = {
             "n_episodes": args.episodes,
+            "n_timesteps": args.time_steps,
             "penalize_truncation": args.penalize_truncation,
             "opponent_manager": opponent_manager,
             "intrinsic_reward_scheme": intrinsic_reward_scheme,
+            "progress_bar_kwargs": args.progress_bar_kwargs,
             "skip_freeze": args.skip_freeze,
             "initial_seed": args.seed,
         }
@@ -644,6 +649,9 @@ def main(args: MainArgs):
         save_agent_training_args(asdict(args), args.agent.name)
 
     env.close()
+
+    if isinstance(agent, TrainingLoggerWrapper):
+        agent.close()
 
 
 if __name__ == "__main__":

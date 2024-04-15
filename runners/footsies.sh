@@ -9,6 +9,5 @@ python3 main.py $agent \
         game_path ../Footsies-Gym/Build/FOOTSIES.x86_64 \
     --env.kwargs \
         dense_reward False \
-    --misc.log-frequency 10000 \
     --misc.log-file-level info \
     "$@"
