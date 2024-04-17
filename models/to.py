@@ -14,11 +14,16 @@ from agents.game_model.agent import GameModelAgent
 from agents.game_model.game_model import GameModel, GameModelNetwork
 
 
+
+REACTION_TIME_MIN = 15
+REACTION_TIME_MAX = 29
+
 def model_init(observation_space_size: int, action_space_size: int, *,
     # Important modifiers
     remove_special_moves: bool = True,
     use_reaction_time: bool = False,
     use_game_model: bool = False,
+    game_model_skippers: bool = True,
     
     # Opponent modifiers
     rollback: bool = False,
@@ -41,6 +46,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     alternative_advantage: bool = True,
     reaction_time_constant: bool = False,
     action_masking: bool = True,
+    game_model_skippers_every: int = 5,
 
     # Probably should be kept as-is
     ppo: bool = False,
@@ -111,7 +117,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         critic=critic,
         actor_learning_rate=actor_lr,
         actor_entropy_loss_coef=actor_entropy_coef,
-        policy_cumulative_discount=False,
+        policy_cumulative_discount=policy_cumulative_discount,
         actor_gradient_clipping=actor_gradient_clipping,
         agent_update_style=getattr(A2CQLearner.UpdateStyle, critic_agent_update.upper()),
         opponent_update_style=getattr(A2CQLearner.UpdateStyle, critic_opponent_update.upper()),
@@ -168,13 +174,13 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     if use_reaction_time:
         reaction_time_emulator = ReactionTimeEmulator(
             actor=actor,
-            opponent=opponent_model,
+            opponent=opponent_model.p2_model,
             history_size=30,
             # These don't matter since they will be substituted by the call below
             multiplier=1.0,
             additive=0.0,
         )
-        reaction_time_emulator.confine_to_range(15, 29, action_dim)
+        reaction_time_emulator.confine_to_range(REACTION_TIME_MIN, REACTION_TIME_MAX, action_dim)
 
         if reaction_time_constant:
             reaction_time_emulator.constant = True
@@ -199,7 +205,13 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             epoch_epochs=1,
             epoch_minibatch_size=1,
         )
-        game_model_agent = GameModelAgent(game_model)
+
+        steps_n = list(range(REACTION_TIME_MIN, REACTION_TIME_MAX + 1, game_model_skippers_every)) if game_model_skippers else None
+
+        game_model_agent = GameModelAgent(
+            game_model,
+            steps_n=steps_n
+        )
 
     else:
         game_model_agent = None

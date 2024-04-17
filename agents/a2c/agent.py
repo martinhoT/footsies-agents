@@ -71,7 +71,7 @@ class A2CAgent(FootsiesAgentTorch):
         self.cumulative_qtable_error_n = 0
         self._test_observations = None
 
-    def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int = None, deterministic: bool = False) -> "any":
+    def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> "any":
         # If we can't perform an action, don't even attempt one.
         if not info["p1_is_actionable"]:
             return 0

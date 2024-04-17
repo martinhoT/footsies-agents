@@ -179,7 +179,10 @@ class GameModel:
         return action
 
     def predict(self, obs: torch.Tensor, p1_action: torch.Tensor | int | None, p2_action: torch.Tensor | int | None) -> torch.Tensor:
-        """Predict the next observation given the current observation and each player's action (either as a probability distribution or as the action ID). The result is detached from the computational graph."""
+        """
+        Predict the next observation given the current observation and each player's action (either as a probability distribution or as the action ID).
+        The result is detached from the computational graph.
+        """
         obs = self.preprocess_observation(obs)
         
         p1_action = self._action_to_tensor(p1_action, self._network.p1_action_dim)

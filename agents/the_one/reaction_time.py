@@ -7,6 +7,7 @@ from itertools import islice
 from math import log
 from agents.action import ActionMap
 from agents.a2c.a2c import ActorNetwork
+from agents.game_model.agent import GameModelAgent
 from agents.game_model.game_model import GameModel
 from agents.mimic.mimic import PlayerModel
 from functools import cached_property
@@ -58,8 +59,8 @@ class ReactionTimeEmulator:
             raise ValueError(f"the maximum value cannot be equal to or greater than the defined history size ({maximum} >= {self._history_size})")
         
         maximum_entropy = self.maximum_decision_entropy(agent_n_actions)
-        b = (maximum - minimum) / (maximum_entropy - self._inaction_entropy)
-        c = minimum - b * self._inaction_entropy
+        b = (maximum - minimum) / maximum_entropy
+        c = minimum
 
         self._multiplier = b
         self._additive = c
@@ -93,12 +94,15 @@ class ReactionTimeEmulator:
             self._predictor.append_info(info["p1_simple"], info["p2_is_actionable"])
         
         # Make the react() method calculate a new observation again.
-        del self.react
+        if hasattr(self, "react"):
+            del self.react
 
     def perceive(self, reaction_time: int, previous_reaction_time: int | None = None) -> tuple[torch.Tensor, list[torch.Tensor], dict, list[dict]]:
         """Get an observation according to the provided reaction time, and all the observations that were skipped according to the previous reaction time. For a reaction time of 0, return the observation at the current instant."""
         if previous_reaction_time is None:
-            previous_reaction_time = self._history_size - 1
+            # ... why? For instance, imagine the agent starts in the environment (the obs and info buffers filled) but perceives faster than the initial prev_reaction_time (which is None).
+            # Then there will be some skipped observations and infos, which doesn't make sense.
+            previous_reaction_time = reaction_time
 
         observation = self._states[-1 - reaction_time]
         info = self._infos[-1 - reaction_time]
@@ -109,6 +113,7 @@ class ReactionTimeEmulator:
 
     # Having this "cache" stuff allows the "_prev" variables to not be updated everytime react is called, and only after new registrations.
     @cached_property
+    @torch.no_grad
     def react(self) -> tuple[torch.Tensor, int, torch.Tensor]:
         """
         Perform a reaction, receiving a delayed observation (or a corrected one if a multi-step predictor is used) according to the current reaction time.
@@ -124,7 +129,7 @@ class ReactionTimeEmulator:
         - `opponent_hidden_state`: the hidden state of the opponent model at `observation`, useful for further inference with the opponent model
         """
         # Calculate the decision distribution.
-        opp_probs, hs = self._opponent.probabilities(self._prev_obs, self._opp_hs)
+        opp_probs, hs = self._opponent.network.probabilities(self._prev_obs, self._opp_hs)
         self._opp_hs = hs
         d = self._actor.decision_distribution(self._prev_obs, opp_probs, detached=True)
 
@@ -150,14 +155,17 @@ class ReactionTimeEmulator:
 
         return obs, reaction_time, opp_hs
 
-    def reset(self, state: torch.Tensor):
+    def reset(self, state: torch.Tensor, info: dict):
         """Reset the internal state of the reaction time emulator, which should be done at the start of every episode."""
         self._states.clear()
+        self._infos.clear()
         self._states.extend([state] * self._history_size)
+        self._infos.extend([info] * self._history_size)
         self._prev_reaction_time = None
         self._prev_obs = state
         self._prev_obs_delayed = state
-        del self.react
+        if hasattr(self, "react"):
+            del self.react
 
         if self._predictor is not None:
             self._predictor.reset()
@@ -194,15 +202,13 @@ class ReactionTimeEmulator:
 class MultiStepPredictor:
     def __init__(self,
         reaction_time_emulator: ReactionTimeEmulator,
-        game_model: GameModel,
+        game_model_agent: GameModelAgent,
         assumed_opponent_action_on_nonactionable: Literal["last", "none", "stand"] = "last",
-        method: Literal["multi-step", "skip-step"] = "skip-step",
     ):
         self._actor = reaction_time_emulator._actor
         self._opponent = reaction_time_emulator._opponent
-        self._game_model = game_model
+        self._game_model_agent = game_model_agent
         self._assumed_opponent_action_on_nonactionable = assumed_opponent_action_on_nonactionable
-        self._method = method
 
         # The hidden state of the opponent model (only matters if recurrent).
         # This version of the hidden state is the one calculated after advancing the opponent model up to predicted observation.
@@ -232,37 +238,15 @@ class MultiStepPredictor:
                 self._current_opp_hs = self._opponent.network.compute_hidden_state(skipped_state, self._current_opp_hs)
                 if self._opponent.should_reset_context(prev_obs, skipped_state, False):
                     self._current_opp_hs = None
-                prev_obs = skipped_state
+            prev_obs = skipped_state
 
-        if self._opponent.should_reset_context(skipped_state, obs, False):
+        if self._opponent.should_reset_context(prev_obs, obs, False):
             self._current_opp_hs = None
 
         # Correct perceived observation.
-        if self._method == "skip-step":
-            obs, opponent_model_hidden_state = self.skip_step_prediction(obs, n, self._current_opp_hs, info["p2_simple"], info["p2_is_actionable"])
-        elif self._method == "multi-step":
-            obs, opponent_model_hidden_state = self.multi_step_prediction(obs, n, self._current_opp_hs, info["p2_simple"])
-        else:
-            raise RuntimeError(f"the value of 'method' ('{self._method}') is misconfigured! Should be either 'skip-step' or 'multi-step'")
+        obs, opponent_model_hidden_state = self.multi_step_prediction(obs, n, self._current_opp_hs, info["p2_simple"])
         
         return obs, opponent_model_hidden_state
-
-    def skip_step_prediction(self, obs: torch.Tensor, n: int, opp_hs: torch.Tensor, last_valid_opp_action: torch.Tensor | int, p2_actionable: bool) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Predict the observation `n` time steps into the future, using the agent's past executed actions, opponent model and game model.
-        
-        Uses a game model that already predicts `n` time steps into the future.
-        """
-        p1_action = self._past_agent_actions[-n]
-        if p2_actionable:
-            p2_action, opp_hs = self._opponent.network.probabilities(obs, opp_hs)
-        else:
-            p2_action = self._resolve_opponent_action(last_valid_opp_action)
-
-        game_model = self._select_apt_game_model(n)
-        obs = game_model.predict(obs, p1_action, p2_action)
-
-        return obs
 
     def multi_step_prediction(self, obs: torch.Tensor, n: int, opp_hs: torch.Tensor, last_valid_opp_action: torch.Tensor | int) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -274,7 +258,9 @@ class MultiStepPredictor:
         o = obs
         p2_action = last_valid_opp_action
 
-        for t in reversed(range(n)):
+        t = n
+        min_resolution = self._game_model_agent.min_resolution
+        while t >= min_resolution:
             p2_actionable = ActionMap.is_state_actionable_torch(o, p1=False)
 
             if p2_actionable:
@@ -287,10 +273,11 @@ class MultiStepPredictor:
             else:
                 p2_action = self._resolve_opponent_action(p2_action)
 
-            p1_action = self._past_agent_actions[-1 - t]
+            p1_action = self._past_agent_actions[-t]
             
             o_prev = o
-            o = self._game_model.predict(o, p1_action, p2_action).detach()
+            o, timeskip = self._game_model_agent.predict(o, p1_action, p2_action, n)
+            t -= timeskip
         
         return o, opp_hs
 
@@ -304,10 +291,6 @@ class MultiStepPredictor:
         else:
             raise RuntimeError("the value of 'assumed_opponent_action_on_nonactionable' is misconfigured! Should be either 'last', 'stand' or 'none'")
 
-    def _select_apt_game_model(self, n: int) -> GameModel:
-        raise NotImplementedError
-        return self._game_model
-
     def append_info(self, p1_action: int, p2_actionable: bool):
         """Append an action that player 1 (the agent) performed."""
         self._past_agent_actions.append(p1_action)
@@ -319,9 +302,14 @@ class MultiStepPredictor:
         self._past_agent_actions.extend([0] * self._past_agent_actions.maxlen)
         self._past_p2_actionables.clear()
         self._past_p2_actionables.extend([0] * self._past_p2_actionables.maxlen)
+        self._current_opp_hs = None
 
     @property
     def assumed_opponent_action_on_nonactionable(self) -> Literal["str", "none", "stand"]:
         """The action that is assumed of the opponent when they can'torch.Tensor act."""
         return self._assumed_opponent_action_on_nonactionable
+    
+    @assumed_opponent_action_on_nonactionable.setter
+    def assumed_opponent_action_on_nonactionable(self, value: str):
+        self._assumed_opponent_action_on_nonactionable = value
 

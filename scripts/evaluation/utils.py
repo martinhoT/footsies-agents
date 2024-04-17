@@ -130,7 +130,7 @@ def quick_env_args(**kwargs) -> EnvArgs:
     )
 
 
-def quick_train_args(seed: int, agent_args: AgentArgs, env_args: EnvArgs, episodes: int | None = None, timesteps: int | None = 2500000, self_play_args: SelfPlayArgs | None = None) -> MainArgs:
+def quick_train_args(seed: int, agent_args: AgentArgs, env_args: EnvArgs, episodes: int | None = None, timesteps: int | None = 2500000, self_play_args: SelfPlayArgs | None = None, **kwargs) -> MainArgs:
     misc_args = MiscArgs(
         save=True,
         load=False,
@@ -151,6 +151,14 @@ def quick_train_args(seed: int, agent_args: AgentArgs, env_args: EnvArgs, episod
     
     self_play_args = self_play_args if self_play_args is not None else SelfPlayArgs()
 
+    main_kwargs = {
+        "penalize_truncation": None,
+        "curriculum": False,
+        "intrinsic_reward_scheme_": None,
+        "skip_freeze": True,
+    }
+    main_kwargs.update(kwargs)
+
     return MainArgs(
         misc=misc_args,
         agent=agent_args,
@@ -158,30 +166,27 @@ def quick_train_args(seed: int, agent_args: AgentArgs, env_args: EnvArgs, episod
         self_play=self_play_args,
         episodes=episodes,
         time_steps=timesteps,
-        penalize_truncation=None,
-        curriculum=False,
-        intrinsic_reward_scheme_=None,
-        skip_freeze=True,
         seed=seed,
         progress_bar_kwargs={
             "desc": agent_args.name,
         },
         post_process_init=True,
+        **main_kwargs,
     )
 
 
-def get_data(data: str, agents: tuple[str, dict, dict], seeds: int = 10, timesteps: int = 2500000) -> dict[str, pd.DataFrame]:
+def get_data(data: str, agents: tuple[str, dict, dict, dict], seeds: int = 10, timesteps: int = 2500000) -> dict[str, pd.DataFrame]:
     missing = []
     for agent in agents:
-        name, agent_kwargs, env_kwargs = agent
+        name, agent_kwargs, env_kwargs, main_kwargs = agent
         for seed in range(seeds):
             full_name = f"eval_{name}_S{seed}"
             data_path = path.join("runs", full_name)
             if not path.exists(data_path):
-                missing.append((full_name, agent_kwargs, env_kwargs))
+                missing.append((full_name, agent_kwargs, env_kwargs, main_kwargs))
 
     if missing:
-        names_list = [f"- {full_name}" for full_name, _, _ in missing]
+        names_list = [f"- {full_name}" for full_name, _, _, _ in missing]
         print("The following runs are missing:", *names_list, sep="\n")
         ans = input("Do you want to run them now? [y/N] ")
         if ans.upper() != "Y":
@@ -189,7 +194,7 @@ def get_data(data: str, agents: tuple[str, dict, dict], seeds: int = 10, timeste
             return None
         
         # Try to avoid oversubscription, since each agent will have at least 2 processes running: itself, and the game
-        with mp.Pool(processes=6) as pool:
+        with mp.Pool(processes=4) as pool:
             args = [
                 quick_train_args(
                     seed=seed,
@@ -204,14 +209,15 @@ def get_data(data: str, agents: tuple[str, dict, dict], seeds: int = 10, timeste
                     episodes=None,
                     timesteps=timesteps,
                     self_play_args=None,
+                    **main_kwargs,
                 )
-                for i, (full_name, agent_kwargs, env_kwargs) in enumerate(missing)
+                for i, (full_name, agent_kwargs, env_kwargs, main_kwargs) in enumerate(missing)
             ]
             
             pool.map(main, args)
     
     dfs: dict[str, pd.DataFrame] = {}
-    for name, _, _ in agents:
+    for name, _, _, _ in agents:
         df = pd.DataFrame([], columns=["Idx", "ValMean", "ValStd"])
         seed_columns = [f"Val{seed}" for seed in range(seeds)]
 

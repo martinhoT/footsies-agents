@@ -7,6 +7,7 @@ from torch import nn
 from agents.base import FootsiesAgentTorch, FootsiesAgentOpponent
 from gymnasium import Env
 from agents.the_one.model import FullModel
+from agents.base import FootsiesAgentBase
 from agents.the_one.reaction_time import ReactionTimeEmulator, MultiStepPredictor
 from agents.a2c.agent import A2CAgent
 from agents.mimic.agent import MimicAgent
@@ -16,7 +17,7 @@ from agents.wrappers import FootsiesSimpleActions
 LOGGER = logging.getLogger("main.the_one")
 
 
-class TheOneAgent(FootsiesAgentTorch):
+class TheOneAgent(FootsiesAgentBase):
     def __init__(
         self,
         # Dimensions
@@ -66,7 +67,7 @@ class TheOneAgent(FootsiesAgentTorch):
         if reaction_time_emulator is not None:
             reaction_time_emulator.predictor = MultiStepPredictor(
                 reaction_time_emulator,
-                game_model.game_model if game_model is not None else None,
+                game_model if game_model is not None else None,
             )
 
         # Store required values
@@ -83,13 +84,6 @@ class TheOneAgent(FootsiesAgentTorch):
         self._remove_agent_special_moves = remove_special_moves
         self._rollback_as_opponent_model = rollback_as_opponent_model
         self._learn = learn
-
-        # To report in the `model` property
-        self._full_model = FullModel(
-            game_model=None if self.gm is None else self.gm.game_model.network,
-            opponent_model=None if self.opp is None else self.opp.p2_model.network,
-            actor_critic=self.a2c.model,
-        )
 
         # We set the previous opponent action to 0, which should correspond to a no-op (STAND).
         # This is only used for the rollback opponent prediction method.
@@ -120,7 +114,7 @@ class TheOneAgent(FootsiesAgentTorch):
         # Update the reaction time emulator and substitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
             if self._reaction_time_emulator_should_reset:
-                self.reaction_time_emulator.reset(obs)
+                self.reaction_time_emulator.reset(obs, info)
                 self._reaction_time_emulator_should_reset = False
             
             self.reaction_time_emulator.register(obs, info)
@@ -135,11 +129,14 @@ class TheOneAgent(FootsiesAgentTorch):
         # Correct the observation if needed.
         # Note that we need to have the up-to-date opponent model hidden state.
         if self.reaction_time_emulator is not None:
-            obs, reaction_time, opponent_model_hidden_state = self.reaction_time_emulator.react
+            predicted_obs, reaction_time, opponent_model_hidden_state = self.reaction_time_emulator.react
             self._cumulative_reaction_time += reaction_time
             self._cumulative_reaction_time_n += 1
+            
+            obs = predicted_obs
 
         # Predict an action for the opponent.
+        # NOTE: this doesn't take into account whether the opponent is actually able to act or not
         if self.opp is not None:
             predicted_opponent_distribution, _ = self.opp.p2_model.network.distribution(obs, opponent_model_hidden_state)
             predicted_opponent_action = predicted_opponent_distribution.sample()
@@ -210,10 +207,6 @@ class TheOneAgent(FootsiesAgentTorch):
             env=env,
         )
 
-    @property
-    def model(self) -> nn.Module:
-        return self._full_model
-    
     # Only the actor-critic modules are shared in Hogwild!, not the game model or opponent model
     @property
     def shareable_model(self) -> nn.Module:
