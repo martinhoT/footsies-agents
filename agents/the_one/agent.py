@@ -32,7 +32,9 @@ class TheOneAgent(FootsiesAgentBase):
         # Modifiers
         remove_special_moves: bool = False,
         rollback_as_opponent_model: bool = False,
-        learn: bool = True,
+        learn_a2c: bool = True,
+        learn_opponent_model: bool = True,
+        learn_game_model: bool = True,
     ):
         """
         FOOTSIES agent that integrates an opponent-aware reinforcement learning algorithm with an opponent model, along with reaction time.
@@ -53,7 +55,11 @@ class TheOneAgent(FootsiesAgentBase):
         - `rollback_as_opponent_model`: whether to use rollback-based prediction as a stand-in for the opponent model.
         Only makes sense to be used if the opponent model is `None`
         - `game_model_learning_rate`: the learning rate of the player model
-        - `learn`: whether to learn at `update`. If `False`, then will only perform some necessary updates for acting (such as resetting state after episode termination/truncation)
+        - `learn_a2c`: whether to learn the A2C component at `update`
+        - `learn_opponent_model`: whether to learn the opponent model component at `update`
+        - `learn_game_model`: whether to learn the game model component at `update`
+        
+        Even if all of the `learn_...` arguments are `False`, `update` will still perform some necessary updates for acting (such as resetting state after episode termination/truncation)
         """
         # Validate arguments
         if rollback_as_opponent_model and opponent_model is not None:
@@ -83,7 +89,9 @@ class TheOneAgent(FootsiesAgentBase):
         #  Modifiers
         self._remove_agent_special_moves = remove_special_moves
         self._rollback_as_opponent_model = rollback_as_opponent_model
-        self._learn = learn
+        self._learn_a2c = learn_a2c
+        self._learn_opponent_model = learn_opponent_model
+        self._learn_game_model = learn_game_model
 
         # We set the previous opponent action to 0, which should correspond to a no-op (STAND).
         # This is only used for the rollback opponent prediction method.
@@ -158,17 +166,18 @@ class TheOneAgent(FootsiesAgentBase):
     #       it's unlikely that these privileged updates are going to make a difference. In turn, the code is simpler.
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
         # Update the different models
-        if self._learn:
+        if self._learn_a2c or self._learn_game_model or self._learn_opponent_model:
             if self.opp is not None:
                 if "next_opponent_policy" in next_info:
                     warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
                 next_opponent_policy, _ = self.opp.p2_model.network.probabilities(next_obs, "auto")
                 next_info["next_opponent_policy"] = next_opponent_policy.detach().squeeze()
 
-            self.a2c.update(obs, next_obs, reward, terminated, truncated, info, next_info)
-            if self.gm is not None:
+            if self._learn_a2c:
+                self.a2c.update(obs, next_obs, reward, terminated, truncated, info, next_info)
+            if self._learn_game_model and self.gm is not None:
                 self.gm.update(obs, next_obs, reward, terminated, truncated, info, next_info)
-            if self.opp is not None:
+            if self._learn_opponent_model and self.opp is not None:
                 self.opp.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
         # The reaction time emulator needs to know when an episode terminated/truncated, so we reset (which includes resetting the reaction time emulator).
@@ -218,13 +227,31 @@ class TheOneAgent(FootsiesAgentBase):
         return self._recently_predicted_opponent_action
 
     @property
-    def learn(self) -> bool:
-        """Whether the agent is learning at `update`."""
+    def learn_a2c(self) -> bool:
+        """Whether the agent is learning the A2C component at `update`."""
         return self._learn
 
-    @learn.setter
-    def learn(self, value: bool):
+    @learn_a2c.setter
+    def learn_a2c(self, value: bool):
         self._learn = value
+
+    @property
+    def learn_opponent_model(self) -> bool:
+        """Whether the agent is learning the opponent model at `update`."""
+        return self._learn_opponent_model
+
+    @learn_opponent_model.setter
+    def learn_opponent_model(self, value: bool):
+        self._learn_opponent_model = value
+
+    @property
+    def learn_game_model(self) -> bool:
+        """Whether the agent is learning the game model at `update`."""
+        return self._learn_game_model
+    
+    @learn_game_model.setter
+    def learn_game_model(self, value: bool):
+        self._learn_game_model = value
 
     def load(self, folder_path: str):
         # Load actor-critic

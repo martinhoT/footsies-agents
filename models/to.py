@@ -22,9 +22,12 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     # Important modifiers
     remove_special_moves: bool = True,
     use_reaction_time: bool = False,
-    use_game_model: bool = False,
+    use_game_model: bool = True,
     game_model_skippers: bool = True,
     
+    # Learn?
+    learn: Literal["gm", "no-gm", "none", "all"] = "all",
+
     # Opponent modifiers
     rollback: bool = False,
     use_opponent_model: bool = True,
@@ -59,7 +62,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
-    learn: bool = True,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -216,6 +218,17 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     else:
         game_model_agent = None
 
+    if learn == "all":
+        learn_a2c, learn_game_model, learn_opponent_model = True, True, True
+    elif learn == "none":
+        learn_a2c, learn_game_model, learn_opponent_model = False, False, False
+    elif learn == "gm":
+        learn_a2c, learn_game_model, learn_opponent_model = False, True, False
+    elif learn == "no-gm":
+        learn_a2c, learn_game_model, learn_opponent_model = True, False, True
+    else:
+        raise ValueError(f"wrong value for 'learn' ('{learn}'), should be one of ('all', 'none', 'gm', 'no-gm')")
+
     agent = TheOneAgent(
         obs_dim=obs_dim,
         action_dim=action_dim,
@@ -226,7 +239,10 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         reaction_time_emulator=reaction_time_emulator,
         remove_special_moves=remove_special_moves,
         rollback_as_opponent_model=rollback,
-        learn=learn,
+        # Learn?
+        learn_a2c=learn_a2c,
+        learn_game_model=learn_game_model,
+        learn_opponent_model=learn_opponent_model,
     )
 
     loggables = get_loggables(agent)
