@@ -25,13 +25,13 @@ from scripts.evaluation.utils import get_data
 
 neededs = [
     ("discount_1_0", {"critic_discount": 1.0, "policy_cumulative_discount": False}, {}, {}),
-    ("discount_0_999", {"critic_discount": 0.999, "policy_cumulative_discount": False}, {}, {}),
+    # ("discount_0_999", {"critic_discount": 0.999, "policy_cumulative_discount": False}, {}, {}),
     ("discount_0_99", {"critic_discount": 0.99, "policy_cumulative_discount": False}, {}, {}),
     ("discount_0_9", {"critic_discount": 0.9, "policy_cumulative_discount": False}, {}, {}),
-    # ("discount_1_0_correct", {"critic_discount": 1.0, "policy_cumulative_discount": True}, {}, {}),
+    ("discount_1_0_correct", {"critic_discount": 1.0, "policy_cumulative_discount": True}, {}, {}),
     # ("discount_0_999_correct", {"critic_discount": 0.999, "policy_cumulative_discount": True}, {}, {}),
-    # ("discount_0_99_correct", {"critic_discount": 0.99, "policy_cumulative_discount": True}, {}, {}),
-    # ("discount_0_9_correct", {"critic_discount": 0.9, "policy_cumulative_discount": True}, {}, {}),
+    ("discount_0_99_correct", {"critic_discount": 0.99, "policy_cumulative_discount": True}, {}, {}),
+    ("discount_0_9_correct", {"critic_discount": 0.9, "policy_cumulative_discount": True}, {}, {}),
 ]
 
 dfs = get_data("win_rate", neededs, seeds=10, timesteps=1000000)

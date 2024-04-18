@@ -17,6 +17,9 @@ class GameModelAnalyserManager:
     def __init__(self, agent: GameModelAgent):
         self.agent = agent
 
+        self._complete_prediction_group = None
+        self._specific_prediction_group = None
+
     p1_guard_predicted = editable_dpg_value("p1_guard_predicted")
     p2_guard_predicted = editable_dpg_value("p2_guard_predicted")
     p1_position_predicted = editable_dpg_value("p1_position_predicted")
@@ -41,6 +44,12 @@ class GameModelAnalyserManager:
         fset=lambda self, value: dpg.set_value("opponent_action", value.name)
     )
 
+    complete_prediction_method = editable_dpg_value("complete_prediction_method")
+    selected_game_model: tuple[int, GameModel] = property(
+        fget=lambda self: eval(dpg.get_value("selected_game_model")),
+        fset=lambda self, value: dpg.set_value("selected_game_model", repr(value))
+    )
+    predict_time_steps_ahead = editable_dpg_value("predict_time_steps_ahead")
     predicted_time_steps_ahead = editable_dpg_value("predicted_time_steps_ahead")
 
     def load_predicted_battle_state(self, analyser: Analyser):
@@ -85,21 +94,51 @@ class GameModelAnalyserManager:
         
         with dpg.group(horizontal=True):
             dpg.add_text("Agent action performed on previous state")
-            dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="agent_action", callback=lambda: self.predict_next_state(analyser))
+            dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="agent_action", callback=lambda: self.on_state_update(analyser))
         
         with dpg.group(horizontal=True):
             dpg.add_text("Opponent action performed on previous state")
-            dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="opponent_action", callback=lambda: self.predict_next_state(analyser))
+            dpg.add_combo([m.name for m in ActionMap.SIMPLE_ACTIONS], tag="opponent_action", callback=lambda: self.on_state_update(analyser))
+
+        dpg.add_checkbox(label="Complete prediction", default_value=True, tag="complete_prediction_method", callback=self._toggle_prediction_method)
+
+        with dpg.group() as self._complete_prediction_group:
+            with dpg.group(horizontal=True):
+                dpg.add_text("Predict time steps ahead:")
+                dpg.add_input_int(tag="predict_time_steps_ahead", min_value=self.agent.min_resolution, callback=lambda: self.on_state_update(analyser))
+
+        with dpg.group() as self._specific_prediction_group:
+            with dpg.group(horizontal=True):
+                dpg.add_text("Game model (in terms of steps predicted):")
+                dpg.add_radio_button([repr(t) for t in self.agent.game_models], tag="selected_game_model", indent=4, callback=lambda: self.on_state_update(analyser))
+
+        dpg.hide_item(self._specific_prediction_group)
 
         with dpg.group(horizontal=True):
             dpg.add_text("Predicted time steps ahead:")
-            dpg.add_input_float(tag="predicted_time_steps_ahead", enabled=False)
+            dpg.add_input_int(tag="predicted_time_steps_ahead", enabled=False)
 
         with dpg.group(horizontal=True):
             dpg.add_button(label="Apply", callback=lambda: self.load_predicted_battle_state(analyser=analyser))
 
-    def update_prediction(self, observation: torch.Tensor, agent_action: int, opponent_action: int):
-        next_obs, steps = self.agent.predict(observation, agent_action, opponent_action, 15)
+    def _toggle_prediction_method(self):
+        if self.complete_prediction_method:
+            dpg.hide_item(self._complete_prediction_group)
+            dpg.show_item(self._specific_prediction_group)
+        else:
+            dpg.show_item(self._complete_prediction_group)
+            dpg.hide_item(self._specific_prediction_group)
+
+    def predict_next_state(self, observation: torch.Tensor, agent_action: int | None = None, opponent_action: int | None = None):
+        # Note: we need to consider the current information when determining the players' moves, but the previous observation!
+        agent_action = ActionMap.simple_from_move(self.agent_action) if agent_action is None else agent_action
+        opponent_action = ActionMap.simple_from_move(self.opponent_action) if opponent_action is None else opponent_action
+        
+        if self.complete_prediction_method:
+            next_obs, steps = self.agent.predict(observation, agent_action, opponent_action, self.predict_time_steps_ahead)
+        else:
+            steps, game_model = self.selected_game_model
+            next_obs = game_model.predict(observation, agent_action ,opponent_action)
         next_obs = next_obs.squeeze(0)
 
         p1_move = ActionMap.move_from_move_index(next_obs[2:17].argmax().item())
@@ -117,13 +156,6 @@ class GameModelAnalyserManager:
         self.agent_action = ActionMap.SIMPLE_ACTIONS[agent_action]
         self.opponent_action = ActionMap.SIMPLE_ACTIONS[opponent_action]
         self.predicted_time_steps_ahead = steps
-
-    def predict_next_state(self, observation: torch.Tensor, agent_action: int | None = None, opponent_action: int | None = None):
-        # Note: we need to consider the current information when determining the players' moves, but the previous observation!
-        agent_action = ActionMap.simple_from_move(self.agent_action) if agent_action is None else agent_action
-        opponent_action = ActionMap.simple_from_move(self.opponent_action) if opponent_action is None else opponent_action
-        
-        self.update_prediction(observation, agent_action, opponent_action)
 
     def on_state_update(self, analyser: Analyser):
         if analyser.most_recent_transition is not None:

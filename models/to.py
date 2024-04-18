@@ -24,6 +24,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     use_reaction_time: bool = False,
     use_game_model: bool = True,
     game_model_skippers: bool = True,
+    game_model_method: Literal["residual", "differences", "normal"] = "differences",
     
     # Learn?
     learn: Literal["gm", "no-gm", "none", "all"] = "all",
@@ -191,6 +192,15 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         reaction_time_emulator = None
 
     if use_game_model:
+        residual = False
+        by_differences = False
+        if game_model_method == "differences":
+            by_differences = True
+        elif game_model_method == "normal":
+            pass
+        elif game_model_method == "residual":
+            residual = True
+
         game_model = GameModel(
             game_model_network=GameModelNetwork(
                 obs_dim=obs_dim,
@@ -198,12 +208,12 @@ def model_init(observation_space_size: int, action_space_size: int, *,
                 p2_action_dim=opponent_action_dim,
                 hidden_layer_sizes=[64, 64],
                 hidden_layer_activation=nn.LeakyReLU,
-                residual=False,
+                residual=residual,
             ),
             learning_rate=1e-2,
             discrete_conversion=False,
             discrete_guard=False,
-            by_differences=True,
+            by_differences=by_differences,
         )
 
         steps_n = list(range(REACTION_TIME_MIN, REACTION_TIME_MAX + 1, game_model_skippers_every)) if game_model_skippers else None
