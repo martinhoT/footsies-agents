@@ -1,38 +1,103 @@
 import torch
 import dearpygui.dearpygui as dpg
-import numpy as np
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
-from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from footsies_gym.moves import FootsiesMove
 from scripts.analysis.analysis import Analyser
 from agents.action import ActionMap
 from main import load_agent
 from scripts.analysis.analyse_a2c_qlearner import QLearnerAnalyserManager
 from scripts.analysis.analyse_opponent_model import MimicAnalyserManager
+from scripts.analysis.analyse_game_model import GameModelAnalyserManager
 from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger, load_agent, load_agent_parameters, import_agent
-from opponents.curriculum import WhiffPunisher, Backer, UnsafePunisher, NSpammer, CurriculumOpponent
-from agents.wrappers import FootsiesPhasicMoveProgress, FootsiesSimpleActions
+from opponents.curriculum import WhiffPunisher, CurriculumOpponent
+from agents.wrappers import FootsiesSimpleActions
 from agents.logger import TrainingLoggerWrapper
+from agents.the_one.agent import TheOneAgent
+from typing import Literal
+import tyro
 import logging
 import warnings
 
 
-CUSTOM = False
-MODEL = "to"
-NAME = "f_opp_recurrent_no_mask"
-LOAD = True
-LOG = False
-ROLLBACK_IF_POSSIBLE = True
+class TheOneAnalyserManager:
+    def __init__(self,
+        agent: TheOneAgent,
+        qlearner_manager: QLearnerAnalyserManager,
+        mimic_manager: MimicAnalyserManager | None,
+        game_model_manager: GameModelAnalyserManager | None,
+        custom_opponent: CurriculumOpponent | None = None,
+    ):
+        self.agent = agent,
+        self.qlearner_manager = qlearner_manager
+        self.mimic_manager = mimic_manager
+        self.game_model_manager = game_model_manager
 
-if __name__ == "__main__":
+        self.custom_opponent = custom_opponent
 
+        self.r = 0
+    
+    def add_custom_elements(self, analyser: Analyser):
+        with dpg.group(horizontal=True):
+            dpg.add_text("Predicted opponent action:")
+            dpg.add_text("X", tag="predicted_opponent_action")
+        
+        dpg.add_checkbox(label="Online learning", default_value=False, tag="the_one_online_learning")
+
+        self.qlearner_manager.add_custom_elements(analyser)
+
+        dpg.add_separator()
+
+        if self.mimic_manager is not None:
+            self.mimic_manager.add_custom_elements(analyser)
+        
+        dpg.add_separator()
+
+        if self.game_model_manager is not None:
+            self.game_model_manager.add_custom_elements(analyser)
+
+    def on_state_update(self, analyser: Analyser):
+        self.qlearner_manager.on_state_update(analyser)
+        if self.mimic_manager is not None:
+            self.mimic_manager.on_state_update(analyser)
+        if self.game_model_manager is not None:
+            self.game_model_manager.on_state_update(analyser)
+
+        if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
+            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
+            self.r += reward
+            
+            # Ignore hitstop/freeze
+            in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
+            if not (in_hitstop and obs.isclose(next_obs).all()):
+                if self.custom_opponent is not None:
+                    next_info["next_opponent_policy"] = self.custom_opponent.peek(next_info)
+                self.agent.update(obs, next_obs, self.r, terminated, truncated, info, next_info)
+                self.r = 0
+
+
+def main(
+    custom: bool = False,
+    model: str = "to",
+    name: str = "f_opp_recurrent_no_mask",
+    load: bool = True,
+    log: bool = False,
+    rollback_if_possible: bool = True,
+    opponent: Literal["human", "bot", "custom"] = "human",
+):
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
-    custom_opponent = WhiffPunisher()
+    env_kwargs = {}
+    custom_opponent = None
+    if opponent == "human":
+        env_kwargs["vs_player"] = True
+    elif opponent == "bot":
+        pass
+    elif opponent == "custom":
+        custom_opponent = WhiffPunisher()
+        env_kwargs["opponent"] = custom_opponent.act
 
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
@@ -45,25 +110,21 @@ if __name__ == "__main__":
         dense_reward=False,
         log_file="out.log",
         log_file_overwrite=True,
-        # vs_player=True,
-        opponent=custom_opponent.act,
+        **env_kwargs,
     )
 
     env = TransformObservation(
         FootsiesSimpleActions(
             FlattenObservation(
-                # FootsiesPhasicMoveProgress(
-                    FootsiesNormalized(
-                        footsies_env,
-                        # normalize_guard=False,
-                    )
-                # )
+                FootsiesNormalized(
+                    footsies_env,
+                )
             )
         ),
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
 
-    if CUSTOM:
+    if custom:
         agent, loggables = to_(
             env.observation_space.shape[0],
             env.action_space.n,
@@ -77,11 +138,11 @@ if __name__ == "__main__":
         )
     
     else:
-        parameters = load_agent_parameters(NAME)
-        parameters["rollback"] = ROLLBACK_IF_POSSIBLE and not parameters.get("use_opponent_model", False)
-        agent, loggables = import_agent(MODEL, env, parameters)
+        parameters = load_agent_parameters(name)
+        parameters["rollback"] = rollback_if_possible and not parameters.get("use_opponent_model", False)
+        agent, loggables = import_agent(model, env, parameters)
 
-    if LOG:
+    if log:
         logged_agent = TrainingLoggerWrapper(
             agent,
             10000,
@@ -100,28 +161,11 @@ if __name__ == "__main__":
     else:
         logged_agent = agent
 
-    # idle_distribution = torch.tensor([0.0] * ActionMap.n_simple()).float().unsqueeze(0)
-    # idle_distribution[0, 0] = 1.0
-
     if agent.opp.p2_model.network.is_recurrent:
         warnings.warn("Since the agent is recurrent, it needs to have 'online learning' enabled in order to have the recurrent state updated. Additionally, loading and saving states is discouraged for the same reason.")
 
-    if LOAD:
-        load_agent(agent, NAME)
-
-    def spammer():
-        from itertools import cycle
-        for action in cycle((
-            ActionMap.simple_to_discrete(ActionMap.SIMPLE_ACTIONS.index(FootsiesMove.N_ATTACK))[0],
-            ActionMap.simple_to_discrete(ActionMap.SIMPLE_ACTIONS.index(FootsiesMove.STAND))[0]
-        )):
-            yield action
-
-    def idle():
-        while True:
-            yield 0
-
-    p1 = idle()
+    if load:
+        load_agent(agent, name)
 
     qlearner_manager = QLearnerAnalyserManager(
         agent.a2c,
@@ -141,39 +185,13 @@ if __name__ == "__main__":
     else:
         mimic_manager = None
 
-    def custom_elements_callback(analyser: Analyser):
-        with dpg.group(horizontal=True):
-            dpg.add_text("Predicted opponent action:")
-            dpg.add_text("X", tag="predicted_opponent_action")
-        
-        dpg.add_checkbox(label="Online learning", default_value=False, tag="the_one_online_learning")
-
-        qlearner_manager.add_custom_elements(analyser)
-
-        dpg.add_separator()
-
-        if mimic_manager is not None:
-            mimic_manager.include_mimic_dpg_elements(analyser)
-
-    r = 0
-    def custom_state_update_callback(analyser: Analyser):
-        global r
-
-        qlearner_manager.on_state_update(analyser)
-        if mimic_manager is not None:
-            mimic_manager.predict_next_move(analyser)
-        
-        if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
-            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
-            r += reward
-            
-            # Ignore hitstop/freeze
-            in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
-            if not (in_hitstop and obs.isclose(next_obs).all()):
-                if custom_opponent is not None:
-                    next_info["next_opponent_policy"] = custom_opponent.peek(next_info)
-                logged_agent.update(obs, next_obs, r, terminated, truncated, info, next_info)
-                r = 0
+    if agent.gm is not None:
+        game_model_manager = GameModelAnalyserManager(
+            agent=agent.gm
+        )
+    
+    else:
+        game_model_manager = None
 
     def act(obs, info):
         if isinstance(custom_opponent, CurriculumOpponent):
@@ -189,11 +207,22 @@ if __name__ == "__main__":
 
         return action
 
+    manager = TheOneAnalyserManager(
+        agent=logged_agent,
+        qlearner_manager=qlearner_manager,
+        mimic_manager=mimic_manager,
+        game_model_manager=game_model_manager,
+        custom_opponent=custom_opponent,
+    )
+
     analyser = Analyser(
         env=env,
-        # p1_action_source=lambda o, i: next(p1),
         p1_action_source=act,
-        custom_elements_callback=custom_elements_callback,
-        custom_state_update_callback=custom_state_update_callback,
+        custom_elements_callback=manager.add_custom_elements,
+        custom_state_update_callback=manager.on_state_update,
     )
     analyser.start(state_change_apply_immediately=True)
+
+
+if __name__ == "__main__":
+    tyro.cli(main)

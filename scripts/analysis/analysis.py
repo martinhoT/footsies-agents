@@ -467,7 +467,7 @@ class Analyser:
             
             with dpg.group(horizontal=True):
                 dpg.add_text("Action:")
-                if self.action_type in ("primitive" or "discrete"):
+                if self.action_type in ("primitive", "discrete"):
                     # Disabled by default, will simply display what the agent outputs
                     dpg.add_checkbox(label="Left", tag="action_left")
                     dpg.add_checkbox(label="Right", tag="action_right")

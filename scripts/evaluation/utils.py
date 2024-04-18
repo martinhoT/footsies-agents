@@ -190,7 +190,6 @@ def get_data(data: str, agents: tuple[str, dict, dict, dict], seeds: int = 10, t
         print("The following runs are missing:", *names_list, sep="\n")
         ans = input("Do you want to run them now? [y/N] ")
         if ans.upper() != "Y":
-            print("Did not accept to get missing data, quitting")
             return None
         
         # Try to avoid oversubscription, since each agent will have at least 2 processes running: itself, and the game

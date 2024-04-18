@@ -236,7 +236,7 @@ class MimicAnalyserManager:
     def toggle_p1_mirror_p2(self):
         self._p1_mirror_p2 = not self._p1_mirror_p2
 
-    def include_mimic_dpg_elements(self, analyser: Analyser):
+    def add_custom_elements(self, analyser: Analyser):
         with dpg.group(horizontal=True):
             if self._include_online_learning:
                 if self.p1_model is not None:
@@ -311,7 +311,7 @@ class MimicAnalyserManager:
                 if self.p2_model is not None:
                     self.p2_gradient_plot.setup("Player 2 learning gradients", 525)
         
-    def predict_next_move(self, analyser: Analyser):
+    def on_state_update(self, analyser: Analyser):
         next_obs = analyser.current_observation
 
         # Anything regarding a transition
@@ -481,7 +481,7 @@ if __name__ == "__main__":
         env=env,
         # p1_action_source=mimic_analyser_manager.p2_prediction_discrete,
         p1_action_source=lambda o, i: next(p1),
-        custom_elements_callback=mimic_analyser_manager.include_mimic_dpg_elements,
-        custom_state_update_callback=mimic_analyser_manager.predict_next_move,
+        custom_elements_callback=mimic_analyser_manager.add_custom_elements,
+        custom_state_update_callback=mimic_analyser_manager.on_state_update,
     )
     analyser.start(state_change_apply_immediately=True)
