@@ -16,7 +16,7 @@ LOGGER = logging.getLogger("main.curriculum")
 class CurriculumManager(OpponentManager):
     def __init__(
         self,
-        win_rate_threshold: float = 0.7,
+        win_rate_threshold: float = 0.9,
         win_rate_over_episodes: int = 100,
         log_dir: str = None,
     ):
@@ -69,6 +69,7 @@ class CurriculumManager(OpponentManager):
         self._current_episodes += 1
 
         opponent_change = False
+        win_rate = self.current_recent_win_rate
 
         if self._is_next_opponent_ready():
             previous_opponent = self.current_opponent
@@ -80,11 +81,14 @@ class CurriculumManager(OpponentManager):
             LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} episodes after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
             opponent_change = True
 
+            # Reset the wins against current opponent
+            self._agent_wins.clear()
+
         # Logging
         if self._summary_writer is not None:
             self._summary_writer.add_scalar(
                 "Performance/Win rate against current curriculum opponent",
-                self.current_recent_win_rate,
+                win_rate,
                 self._episode,
             )
 

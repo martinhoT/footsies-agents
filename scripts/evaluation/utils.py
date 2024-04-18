@@ -1,6 +1,7 @@
 import torch
 import pandas as pd
 import multiprocessing as mp
+import matplotlib.pyplot as plt
 from os import path
 from typing import Callable, TypeVar
 from agents.base import FootsiesAgentBase
@@ -232,3 +233,60 @@ def get_data(data: str, agents: tuple[str, dict, dict, dict], seeds: int = 10, t
         dfs[name] = df
     
     return dfs
+
+
+def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str, exp_factor: float = 0.9, xlabel: str | None = None, ylabel: str | None = None, run_name_mapping: dict[str, str] | None = None):
+    # Smooth the values (make exponential moving average) and plot them
+    alpha = 1 - exp_factor
+    for df in dfs.values():
+        df["ValMeanExp"] = df["ValMean"].ewm(alpha=alpha).mean()
+        df["ValStdExp"] = df["ValStd"].ewm(alpha=alpha).mean()
+        plt.plot(df.Idx, df.ValMeanExp)
+
+    for df in dfs.values():
+        plt.fill_between(df.Idx, df.ValMeanExp - df.ValStdExp, df.ValMeanExp + df.ValStdExp, alpha=0.2)
+
+    if run_name_mapping is None:
+        plt.legend(list(dfs.keys()))
+    else:
+        plt.legend([run_name_mapping[name] for name in dfs.keys()])
+    plt.title(title)
+    if xlabel is not None:
+        plt.xlabel(xlabel)
+    if ylabel is not None:
+        plt.ylabel(ylabel)
+    plt.savefig(fig_path)
+
+
+def get_and_plot_data(
+    data: str,
+    agents: tuple[str, dict, dict, dict],
+    title: str,
+    fig_path: str,
+    seeds: int = 10,
+    timesteps: int = 2500000,
+    exp_factor: float = 0.9,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    run_name_mapping: dict[str, str] | None = None
+):
+    dfs = get_data(
+        data=data,
+        agents=agents,
+        seeds=seeds,
+        timesteps=timesteps
+    )
+
+    if dfs is None:
+        print("Did not get the data, quitting")
+        exit(0)
+
+    plot_data(
+        dfs=dfs,
+        title=title,
+        fig_path=fig_path,
+        exp_factor=exp_factor,
+        xlabel=xlabel,
+        ylabel=ylabel,
+        run_name_mapping=run_name_mapping
+    )

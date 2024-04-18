@@ -1,9 +1,3 @@
-# %% [markdown]
-
-# **Setup**: main agent with different reward schemes
-# - `eval_sparse_reward`
-# - `eval_dense_reward`
-
 # %% Make sure we are running in the project's root
 
 from os import chdir
@@ -13,30 +7,27 @@ chdir("/home/martinho/projects/footsies-agents")
 # %% Imports
 
 from os import path
-from scripts.evaluation.utils import get_data
+from scripts.evaluation.utils import get_and_plot_data
 
 # %% Check if all necessary runs have been made
 
-neededs = [
+agents = [
     ("sparse_reward", {}, {"dense_reward", False}, {}),
     ("dense_reward", {}, {"dense_reward", True}, {}),
 ]
 
-dfs = get_data("win_rate", neededs, seeds=10, timesteps=2500000)
-
-# %% Plot the data
-
-import matplotlib.pyplot as plt
-
-result_path, _ = path.splitext(__file__)
-
-# Smooth the values (make exponential moving average) and plot them
-for name, df in dfs:
-    plt.fill_between(df.Idx, df.ValMean - df.ValStd, df.ValMean + df.ValStd)
-    df.plot.line(x="Idx", y="ValueMean")
-
-plt.legend([name for name, _, _ in neededs])
-plt.title("Win rate over the last 100 episodes against the in-game bot")
-plt.xlabel("Episode")
-plt.ylabel("Win rate")
-plt.savefig(result_path)
+get_and_plot_data(
+    data="win_rate",
+    agents=agents,
+    title="Win rate over the last 100 episodes against the in-game bot",
+    fig_path=path.splitext(__file__)[0],
+    seeds=10,
+    timesteps=1000000,
+    exp_factor=0.9,
+    xlabel="Time step",
+    ylabel="Win rate",
+    run_name_mapping={
+        "sparse_reward":    "Sparse reward",
+        "dense_reward":     "Dense reward",
+    }
+)

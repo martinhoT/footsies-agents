@@ -12,14 +12,14 @@ from scripts.evaluation.utils import get_and_plot_data
 # %% Check if all necessary runs have been made
 
 agents = [
-    ("no_specials", {"remove_special_moves": True}, {}, {}),
-    ("yes_specials", {"remove_special_moves": False}, {}, {}),
+    ("sparse_reward", {}, {"dense_reward", False}, {"curriculum": True}),
+    ("dense_reward", {}, {"dense_reward", True}, {"curriculum": True}),
 ]
 
 get_and_plot_data(
-    data="win_rate",
+    data="performancewin_rate_against_current_curriculum_opponent",
     agents=agents,
-    title="Win rate over the last 100 episodes against the in-game bot",
+    title="Win rate over the last 100 episodes against the curriculum",
     fig_path=path.splitext(__file__)[0],
     seeds=10,
     timesteps=1000000,
@@ -27,7 +27,7 @@ get_and_plot_data(
     xlabel="Time step",
     ylabel="Win rate",
     run_name_mapping={
-        "no_specials":  "Without special moves",
-        "yes_specials": "With special moves",
+        "sparse_reward":    "Sparse reward",
+        "dense_reward":     "Dense reward",
     }
 )

@@ -521,7 +521,7 @@ def main(args: MainArgs):
 
     elif args.curriculum:
         opponent_manager = CurriculumManager(
-            win_rate_threshold=0.7,
+            win_rate_threshold=0.9,
             win_rate_over_episodes=100,
             log_dir=log_dir,
         )
