@@ -88,7 +88,7 @@ class MiscArgs:
     """Whether the agent is logged (Tensorboard logs)"""
     log_file: bool = True
     """Whether to write standard logs to a file"""
-    log_frequency: int = 10000
+    log_frequency: int = 2000
     """Number of time steps between each Tensorboard log"""
     log_test_states_number: int = 5000
     """Number of test states to use when evaluating some metrics for Tensorboard logging"""

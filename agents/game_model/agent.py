@@ -93,7 +93,7 @@ class GameModelAgent(FootsiesAgentBase):
             self.cumulative_loss_move += move_loss
             self.cumulative_loss_move_progress += move_progress_loss
             self.cumulative_loss_position += position_loss
-            self.cumulative_loss = guard_loss + move_loss + move_progress_loss + position_loss
+            self.cumulative_loss += guard_loss + move_loss + move_progress_loss + position_loss
             self.cumulative_loss_n += 1
 
     def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):

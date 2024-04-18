@@ -255,15 +255,24 @@ class TheOneAgent(FootsiesAgentBase):
 
     def load(self, folder_path: str):
         # Load actor-critic
-        self.a2c.load(folder_path)
+        try:
+            self.a2c.load(folder_path)
+        except FileNotFoundError:
+            LOGGER.warning("Could not find the A2C model to load, will use one from scratch")
 
         # Load game model
         if self.gm is not None:
-            self.gm.load(folder_path)
+            try:
+                self.gm.load(folder_path)
+            except FileNotFoundError:
+                LOGGER.warning("Could not find game model to load, will use one from scratch")
 
         # Load opponent model (even though this is meant to be discardable)
         if self.opp is not None:
-            self.opp.load(folder_path)
+            try:
+                self.opp.load(folder_path)
+            except FileNotFoundError:
+                LOGGER.warning("Could not find opponent model to load, will use one from scratch")
 
     def save(self, folder_path: str):
         # Save actor-critic
