@@ -102,6 +102,7 @@ class GameModel:
         learning_rate: float = 1e-2,
         discrete_conversion: bool = False,
         discrete_guard: bool = False,
+        by_differences: bool = False,
         epoch_timesteps: int = 1,
         epoch_epochs: int = 1,
         epoch_minibatch_size: int = 1,
@@ -117,6 +118,7 @@ class GameModel:
         ----------
         - `discrete_conversion`: whether to convert the discrete components of the observation (i.e. the moves) to logits before feeding them to the network
         - `discrete_guard`: whether the guard variable is discrete, and should be treated as such
+        - `by_differences`: whether to have the game model learn to predict the difference in state rather than the absolute state values
         - `epoch_timesteps`: the number of total timesteps (i.e. update calls) to accumulate before updating
         - `epoch_epochs`: the number of epochs over which to train in a single update
         - `epoch_minibatch_size`: the minibatch size for the accumulated data at each epoch
@@ -124,6 +126,7 @@ class GameModel:
         self._network = game_model_network
         self._discrete_conversion = discrete_conversion
         self._discrete_guard = discrete_guard
+        self._by_differences = by_differences
 
         self._epoch_timesteps = epoch_timesteps
         self._epoch_epochs = epoch_epochs
@@ -190,6 +193,13 @@ class GameModel:
 
         next_obs = self._network(obs, p1_action, p2_action).detach()
         
+        if self._by_differences:
+            if not self._discrete_guard:
+                next_obs[:, self._guard_p1_slice] = next_obs[:, self._guard_p1_slice] + obs[:, self._guard_p1_slice]
+                next_obs[:, self._guard_p2_slice] = next_obs[:, self._guard_p2_slice] + obs[:, self._guard_p2_slice]
+            next_obs[:, self._move_progress_slice] = next_obs[:, self._move_progress_slice] + obs[:, self._move_progress_slice]
+            next_obs[:, self._position_slice] = next_obs[:, self._position_slice] + obs[:, self._position_slice]
+
         next_obs = self.postprocess_prediction(next_obs)
 
         return next_obs
@@ -249,6 +259,14 @@ class GameModel:
 
         move_progress_target = next_obs[:, self._move_progress_slice]
         position_target = next_obs[:, self._position_slice]
+
+        if self._by_differences:
+            if not self._discrete_guard:
+                guard_p1_target = guard_p1_target - obs[:, self._guard_p1_slice]
+                guard_p2_target = guard_p2_target - obs[:, self._guard_p2_slice]
+            
+            move_progress_target = move_progress_target - obs[:, self._move_progress_slice]
+            position_target = position_target - obs[:, self._position_slice]
 
         # Calculate the loss
         if self._discrete_guard:

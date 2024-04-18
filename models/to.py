@@ -198,14 +198,12 @@ def model_init(observation_space_size: int, action_space_size: int, *,
                 p2_action_dim=opponent_action_dim,
                 hidden_layer_sizes=[64, 64],
                 hidden_layer_activation=nn.LeakyReLU,
-                residual=True,
+                residual=False,
             ),
             learning_rate=1e-2,
             discrete_conversion=False,
             discrete_guard=False,
-            epoch_timesteps=1,
-            epoch_epochs=1,
-            epoch_minibatch_size=1,
+            by_differences=True,
         )
 
         steps_n = list(range(REACTION_TIME_MIN, REACTION_TIME_MAX + 1, game_model_skippers_every)) if game_model_skippers else None
