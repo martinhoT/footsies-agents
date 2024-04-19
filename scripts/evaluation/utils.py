@@ -125,7 +125,7 @@ def test(agent: TheOneAgent, label: str, id_: int, observer_type: type[T], oppon
     return observer
 
 
-def get_data_custom_loop(result_path: str, agents: list[tuple[str, FootsiesAgentBase]], observer_type: type[T], opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None, seeds: int = 10, timesteps: int = 1000000) -> dict[str, pd.DataFrame] | None:
+def get_data_custom_loop(result_path: str, agents: list[tuple[str, FootsiesAgentBase, Callable[[dict, dict], tuple[bool, bool, bool]] | None]], observer_type: type[T], seeds: int = 10, timesteps: int = 1000000) -> dict[str, pd.DataFrame] | None:
     dfs = {}
     for name, _ in agents:
         df_path = f"{result_path}_{name}"
@@ -147,8 +147,8 @@ def get_data_custom_loop(result_path: str, agents: list[tuple[str, FootsiesAgent
         with mp.Pool(processes=4) as pool:
             test_partial = partial(test, timesteps=timesteps)
             runs = [
-                (agent, name, i, observer_type, opponent.act, seed)
-                for i, (name, agent) in enumerate(agents)
+                (agent, name, i, observer_type, opponent.act if opponent is not None else opponent, seed)
+                for i, (name, agent, opponent) in enumerate(agents)
                 for seed in range(seeds)
             ]
             observers: list[Observer] = pool.starmap(test_partial, runs)

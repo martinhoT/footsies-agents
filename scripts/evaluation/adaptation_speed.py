@@ -7,14 +7,30 @@ chdir("/home/martinho/projects/footsies-agents")
 # %% Imports
 
 from os import path
-from scripts.evaluation.utils import get_data
+from scripts.evaluation.utils import get_data_custom_loop, create_env
+
+# %% Instantiate a blank agent
+
+from models import to_
+
+dummy_env, _  = create_env()
+
+agent, _ = to_(
+    observation_space_size=dummy_env.observation_space.shape[0],
+    action_space_size=dummy_env.action_space.n,
+)
 
 # %% Check if all necessary runs have been made
 
-opponents = ["blank", "idle", "backer", "n_spammer", "b_spammer", "n_special_spammer", "b_special_spammer", "whiff_punisher", "bot"]
+from itertools import combinations
+from copy import deepcopy
+from opponents.curriculum import Idle, Backer, NSpammer, BSpammer, NSpecialSpammer, BSpecialSpammer, WhiffPunisher
+
+agent_labels = ["blank", "idle", "backer", "n_spammer", "b_spammer", "n_special_spammer", "b_special_spammer", "whiff_punisher", "bot"]
 
 agents = [
-    ("idle_to_backer", {"critic_discount": 1.0, "policy_cumulative_discount": False}, {}, {}),
+    (f"{training_opponent}_to_{evaluation_opponent}", deepcopy(agent), )
+    for training_opponent, evaluation_opponent in combinations(opponent_labels)
 ]
 
 get_data(
@@ -22,7 +38,7 @@ get_data(
     agents=agents,
     title="Win rate over the last 100 episodes against the in-game bot",
     fig_path=path.splitext(__file__)[0],
-    seeds=10,
+    seeds=1 # 10, # use less seeds for now
     timesteps=1000000,
     exp_factor=0.9,
     xlabel="Time step",
