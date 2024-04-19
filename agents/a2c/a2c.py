@@ -414,6 +414,10 @@ class A2CQLearner(A2CLearnerBase):
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
         
+        # Optional learning
+        self._learn_actor = True
+        self._learn_critic = True
+
         # Track values
         self.delta = 0.0
         self.extrinsic_td_error = 0.0
@@ -701,54 +705,56 @@ class A2CQLearner(A2CLearnerBase):
             total_reward: torch.Tensor = sum(update[1] for update in self.frameskipped_critic_updates)
             total_intrinsic_reward = sum(update[8] for update in self.frameskipped_critic_updates)
 
-            if self._accumulate_at_frameskip:
+            if self._learn_critic:
+                if self._accumulate_at_frameskip:
+                    obs_ = self.frameskipped_critic_updates[0][0]
+                    next_obs_ = self.frameskipped_critic_updates[-1][2]
+                    obs_agent_action_ = self.frameskipped_critic_updates[0][4]
+                    obs_opponent_action_ = self.frameskipped_critic_updates[0][5] # we assume the first opponent action, as it's technically the last one we see
+                    next_obs_agent_policy_ = self.frameskipped_critic_updates[-1][6]
+                    next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
+
+                    # This will detach the reward from the computational graph, we only care about that for the actor update
+                    total_reward_ = total_reward.item()
+                    self.extrinsic_td_error, self.intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, total_reward_, total_intrinsic_reward, terminated)
+
+                else:
+                    # They were None previously. They have None only when an update doesn't occur,
+                    # but now that we are going to perform accumulations here we set them to an appropriate start value.
+                    self.extrinsic_td_error = 0.0
+                    self.intrinsic_td_error = 0.0
+                    # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
+                    previous_discount = self._critic.discount
+                    self._critic.discount = 1.0
+
+                    # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
+                    for frameskipped_update in reversed(self.frameskipped_critic_updates):
+                        obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
+
+                        reward_ = reward_.item() if isinstance(reward_, torch.Tensor) else reward_
+                        extrinsic_td_error, intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, reward_, intrinsic_reward_, terminated_)
+                        self.extrinsic_td_error += extrinsic_td_error
+                        self.intrinsic_td_error += intrinsic_td_error
+
+                    self._critic.discount = previous_discount
+
+            # The agent only performed an action at the beginning of frameskipping. It doesn't make sense to update at any other observation.
+            if self._learn_actor:
                 obs_ = self.frameskipped_critic_updates[0][0]
                 next_obs_ = self.frameskipped_critic_updates[-1][2]
                 obs_agent_action_ = self.frameskipped_critic_updates[0][4]
-                obs_opponent_action_ = self.frameskipped_critic_updates[0][5] # we assume the first opponent action, as it's technically the last one we see
-                next_obs_agent_policy_ = self.frameskipped_critic_updates[-1][6]
+                obs_opponent_action_ = self.frameskipped_critic_updates[0][5]
                 next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
+                if not self._maxent_gradient_flow:
+                    total_reward = total_reward.detach()
 
-                # This will detach the reward from the computational graph, we only care about that for the actor update
-                total_reward_ = total_reward.item()
-                self.extrinsic_td_error, self.intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, total_reward_, total_intrinsic_reward, terminated)
+                extrinsic_advantage = self.advantage(obs_, next_obs_, total_reward, terminated, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_, critic=self.critic)
+                if self.intrinsic_critic is not None:
+                    intrinsic_advantage = self.advantage(obs_, next_obs_, total_intrinsic_reward, False, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_, critic=self.intrinsic_critic)
+                else:
+                    intrinsic_advantage = 0.0
 
-            else:
-                # They were None previously. They have None only when an update doesn't occur,
-                # but now that we are going to perform accumulations here we set them to an appropriate start value.
-                self.extrinsic_td_error = 0.0
-                self.intrinsic_td_error = 0.0
-                # Perform the frameskipped updates assuming no discounting (that's pretty much what's special about frameskipped updates)
-                previous_discount = self._critic.discount
-                self._critic.discount = 1.0
-
-                # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
-                for frameskipped_update in reversed(self.frameskipped_critic_updates):
-                    obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
-
-                    reward_ = reward_.item() if isinstance(reward_, torch.Tensor) else reward_
-                    extrinsic_td_error, intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, reward_, intrinsic_reward_, terminated_)
-                    self.extrinsic_td_error += extrinsic_td_error
-                    self.intrinsic_td_error += intrinsic_td_error
-
-                self._critic.discount = previous_discount
-
-            # The agent only performed an action at the beginning of frameskipping. It doesn't make sense to update at any other observation.
-            obs_ = self.frameskipped_critic_updates[0][0]
-            next_obs_ = self.frameskipped_critic_updates[-1][2]
-            obs_agent_action_ = self.frameskipped_critic_updates[0][4]
-            obs_opponent_action_ = self.frameskipped_critic_updates[0][5]
-            next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
-            if not self._maxent_gradient_flow:
-                total_reward = total_reward.detach()
-
-            extrinsic_advantage = self.advantage(obs_, next_obs_, total_reward, terminated, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_, critic=self.critic)
-            if self.intrinsic_critic is not None:
-                intrinsic_advantage = self.advantage(obs_, next_obs_, total_intrinsic_reward, False, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_, critic=self.intrinsic_critic)
-            else:
-                intrinsic_advantage = 0.0
-
-            self._update_actor(obs_, obs_opponent_action_, obs_agent_action_, extrinsic_advantage + intrinsic_advantage)
+                self._update_actor(obs_, obs_opponent_action_, obs_agent_action_, extrinsic_advantage + intrinsic_advantage)
 
             self.frameskipped_critic_updates.clear()
 
@@ -805,3 +811,21 @@ class A2CQLearner(A2CLearnerBase):
     @maxent_gradient_flow.setter
     def maxent_gradient_flow(self, value: bool):
         self._maxent_gradient_flow = value
+
+    @property
+    def learn_actor(self) -> bool:
+        """Whether the actor is being learnt."""
+        return self._learn_actor
+
+    @learn_actor.setter
+    def learn_actor(self, value: bool):
+        self._learn_actor = value
+    
+    @property
+    def learn_critic(self) -> bool:
+        """Whether the critic is being learnt."""
+        return self._learn_critic
+    
+    @learn_critic.setter
+    def learn_critic(self, value: bool):
+        self._learn_critic = value

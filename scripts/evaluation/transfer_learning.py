@@ -5,16 +5,12 @@ chdir("/home/martinho/projects/footsies-agents")
 
 # %% Imports
 
-import torch
-import multiprocessing as mp
-from collections import deque
-from agents.base import FootsiesAgentBase
 from main import load_agent, load_agent_parameters
 from agents.ql.ql import QFunctionNetwork
 from models import to_
 from copy import deepcopy
-from functools import partial
-from scripts.evaluation.utils import create_env, Observer, test
+from os import path
+from scripts.evaluation.utils import create_env, WinRateObserver, plot_data, get_data_custom_loop
 
 # %% Prepare environment
 
@@ -50,54 +46,33 @@ agent_1 = deepcopy(agent_0)
 agent_1_critic: QFunctionNetwork = agent_1.a2c.learner.critic
 agent_1_critic.q_network.load_state_dict(critic.q_network.state_dict())
 
-# %% Extract opponent
+agents = [
+    ("control", agent_0),
+    ("initted", agent_1),
+]
 
 opponent = agent.extract_opponent(dummy_env)
 
-# %% Create an observer class for extracting results from the main loop
+# %% Get data, if possible
 
-class WinRateObserver(Observer):
-    def __init__(self, last: int = 100):
-        self._wins = deque([], maxlen=last)
-        self._win_rates = []
+result_path = path.splitext(__file__)[0] 
 
-    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
-        if terminated or truncated:
-            won = (reward > 0) if terminated else (next_info["guard"][0] > next_info["guard"][1])
-            self._wins.append(won)
-            self._win_rates.append(sum(self._wins) / len(self._wins))
-
-    @property
-    def win_rates(self) -> list[float]:
-        return self._win_rates
-
-# %% Test the agents
-
-with mp.Pool(2) as pool:
-    test_1000 = partial(test, episodes=10000)
-    observers: list[WinRateObserver] = pool.starmap(test_1000, (
-        (agent_0, "control", 0, WinRateObserver, opponent.act),
-        (agent_1, "initted", 1, WinRateObserver, opponent.act),
-    ))
+dfs = get_data_custom_loop(result_path, agents, WinRateObserver, opponent, seeds=10, episodes=1000)
+if dfs is None:
+    print("Could not get data, quitting")
+    exit(0)
 
 # %% Plot results
 
-from os import path
-import matplotlib.pyplot as plt
-
-result_path, _ = path.splitext(__file__)
-
-plt.plot(observers[0].win_rates)
-plt.plot(observers[1].win_rates)
-plt.legend(["No learned Q-function", "With learned Q-function"])
-plt.title("Win rate over the last 100 episodes")
-plt.xlabel("Episode")
-plt.ylabel("Win rate")
-plt.savefig(result_path)
-
-# %% Save the data for posterity
-
-import numpy as np
-
-data = np.array([observers[0].win_rates, observers[1].win_rates])
-np.save(result_path, data)
+plot_data(
+    dfs=dfs,
+    title="Win rate over the last 100 episodes",
+    fig_path=result_path,
+    exp_factor=0.9,
+    xlabel="Episode",
+    ylabel="Win rate",
+    run_name_mapping={
+        "control": "No learned Q-function",
+        "initted": "With learned Q-function",
+    },
+)

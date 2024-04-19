@@ -20,7 +20,7 @@ class QFunction(ABC):
         """Update the Q-value for the given state-action pair considering the provided TD error."""
 
     @abstractmethod
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> torch.Tensor:
+    def q(self, obs: torch.Tensor, action: int | None = None, opponent_action: int | None = None) -> torch.Tensor:
         """Get the Q-value for the given action and observation. If an action is `None`, then return Q-values considering all actions."""
 
     @abstractmethod
@@ -159,14 +159,14 @@ class QFunction(ABC):
 
         return td_error
 
-    def sample_action_best(self, obs: torch.Tensor, opponent_action: int = None) -> int:
+    def sample_action_best(self, obs: torch.Tensor, opponent_action: int | None = None) -> int:
         """Sample the best action for the given observation."""
         if opponent_action is None and self.considering_opponent:
             raise ValueError("opponent_action must be provided when explicitly considering the opponent's actions")
         
         return np.argmax(self.q(obs, opponent_action=opponent_action)) if self.considering_opponent else np.argmax(self.q(obs))
 
-    def sample_action_random(self, obs: torch.Tensor, opponent_action: int = None) -> int:
+    def sample_action_random(self, obs: torch.Tensor, opponent_action: int | None = None) -> int:
         """Sample a random action for the given observation, with action probabilities proportional to their Q-values."""
         if opponent_action is None and self.considering_opponent:
             raise ValueError("opponent_action must be provided when explicitly considering the opponent's actions")
@@ -177,7 +177,7 @@ class QFunction(ABC):
         probs = torch.exp(qs) / torch.sum(torch.exp(qs))
         return np.random.choice(self.action_dim, p=probs)
 
-    def sample_action_epsilon_greedy(self, obs: torch.Tensor, epsilon: float, opponent_action: int = None) -> int:
+    def sample_action_epsilon_greedy(self, obs: torch.Tensor, epsilon: float, opponent_action: int | None = None) -> int:
         """Sample an action following an epsilon-greedy policy."""
         if torch.rand() < epsilon:
             return torch.randint(self.action_size)

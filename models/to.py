@@ -27,7 +27,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     game_model_method: Literal["residual", "differences", "normal"] = "differences",
     
     # Learn?
-    learn: Literal["gm", "no-gm", "none", "all"] = "all",
+    learn: Literal["gm", "no-gm", "none", "all"] = "no-gm",
 
     # Opponent modifiers
     rollback: bool = False,

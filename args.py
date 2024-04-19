@@ -51,7 +51,7 @@ class MainArgs:
             raise ValueError("can't use both self-play and curriculum learning at the same time")
         
         if self.self_play.enabled or self.curriculum:
-            self.env.kwargs["opponent"] = lambda o: (False, False, False)
+            self.env.kwargs["opponent"] = self._dummy_opponent
         
         if self.env.is_footsies:
             if "game_path" not in self.env.kwargs:
@@ -64,6 +64,11 @@ class MainArgs:
         if self.skip_freeze and not self.env.torch:
             raise ValueError("skipping environment freezes is not supported on observations that aren't PyTorch tensors")
     
+    # NOTE: this is to allow pickle serialization when we perform multiprocessing, as we can't use a lambda function
+    @staticmethod
+    def _dummy_opponent(obs: dict, info: dict) -> tuple[bool, bool, bool]:
+        return (False, False, False)
+
     @property
     def intrinsic_reward_scheme(self) -> IntrinsicRewardScheme | None:
         """The type of intrinsic reward to use"""

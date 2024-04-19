@@ -2,8 +2,11 @@ import torch
 import pandas as pd
 import multiprocessing as mp
 import matplotlib.pyplot as plt
+from functools import partial
 from os import path
-from typing import Callable, TypeVar
+from collections import deque
+from itertools import count, islice
+from typing import Callable, Iterable, TypeVar
 from agents.base import FootsiesAgentBase
 from gymnasium import Env
 from gymnasium.wrappers.transform_observation import TransformObservation
@@ -17,6 +20,13 @@ from tqdm import trange
 from args import AgentArgs, DIAYNArgs, EnvArgs, MainArgs, MiscArgs, SelfPlayArgs
 from main import main
 
+
+def batched(iterable: Iterable, n: int):
+    if n < 1:
+        raise ValueError('n must be at least one')
+    it = iter(iterable)
+    while batch := tuple(islice(it, n)):
+        yield batch
 
 def dummy_opponent(o: dict, i: dict) -> tuple[bool, bool, bool]:
     return (False, False, False)
@@ -54,42 +64,115 @@ def create_env(
 
 
 class Observer:
-    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
+    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
         pass
+
+    @property
+    def data(self) -> tuple[list[int], list[float]]:
+        raise NotImplementedError("this observer didn't implement the 'data' property")
+
+
+class WinRateObserver(Observer):
+    def __init__(self, last: int = 100):
+        self._wins = deque([], maxlen=last)
+        self._win_rates = []
+
+    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
+        if terminated or truncated:
+            won = (reward > 0) if terminated else (next_info["guard"][0] > next_info["guard"][1])
+            self._wins.append(won)
+            self._win_rates.append(sum(self._wins) / len(self._wins))
+
+    @property
+    def data(self) -> tuple[list[int], list[float]]:
+        return list(range(len(self._win_rates))), self._win_rates
 
 
 T = TypeVar("T", bound=Observer)
 
-def test(agent: TheOneAgent, label: str, id_: int, observer_type: type[T], opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None, episodes: int = 1000) -> T:
-    port_start = 11000 + 100 * id_
-    port_stop = 11000 + (100) * (id_ + 1)
+def test(agent: TheOneAgent, label: str, id_: int, observer_type: type[T], opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None, initial_seed: int | None = 0, timesteps: int = 1000000) -> list[T]:
+    port_start = 11000 + 1000 * id_
+    port_stop = 11000 + (1000) * (id_ + 1)
     env, footsies_env = create_env(port_start=port_start, port_stop=port_stop)
 
     footsies_env.set_opponent(opponent)
 
     observer = observer_type()
 
-    for _ in trange(episodes, desc=label, unit="ep", position=id_, dynamic_ncols=True, colour="#80e4ed"):
-        obs, info = env.reset()
-        terminated, truncated = False, False
+    seed = initial_seed
+    terminated, truncated = True, True
+    for step in trange(timesteps, desc=label, unit="step", position=id_, dynamic_ncols=True, colour="#80e4ed"):
+        if (terminated or truncated):
+            obs, info = env.reset(seed=seed)
+            terminated, truncated = False, False
+            seed = None
 
-        while not (terminated or truncated):
+        action = agent.act(obs, info)
+        next_obs, reward, terminated, truncated, next_info = env.step(action)
+
+        # Skip hitstop freeze
+        in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
+        while in_hitstop and obs.isclose(next_obs).all():
             action = agent.act(obs, info)
-            next_obs, reward, terminated, truncated, next_info = env.step(action)
+            next_obs, r, terminated, truncated, next_info = env.step(action)
+            reward += r
 
-            # Skip hitstop freeze
-            in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
-            while in_hitstop and obs.isclose(next_obs).all():
-                action = agent.act(obs, info)
-                next_obs, r, terminated, truncated, next_info = env.step(action)
-                reward += r
+        agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
+        observer.update(step, obs, next_obs, reward, terminated, truncated, info, next_info, agent)
 
-            agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
-            observer.update(obs, next_obs, reward, terminated, truncated, info, next_info, agent)
-
-            obs, info = next_obs, next_info
+        obs, info = next_obs, next_info
     
     return observer
+
+
+def get_data_custom_loop(result_path: str, agents: list[tuple[str, FootsiesAgentBase]], observer_type: type[T], opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None, seeds: int = 10, timesteps: int = 1000000) -> dict[str, pd.DataFrame] | None:
+    dfs = {}
+    for name, _ in agents:
+        df_path = f"{result_path}_{name}"
+        if path.exists(df_path):
+            dfs[name] = pd.read_csv(df_path)
+        else:
+            break
+
+    require_collection = len(dfs) != len(agents)
+
+    if require_collection:
+        ans = input("Will require collection of data, proceed? [y/N] ")
+        if ans.upper() != "Y":
+            return None
+
+        # Collect the data
+
+        seeds = 10
+        with mp.Pool(processes=4) as pool:
+            test_partial = partial(test, timesteps=timesteps)
+            runs = [
+                (agent, name, i, observer_type, opponent.act, seed)
+                for i, (name, agent) in enumerate(agents)
+                for seed in range(seeds)
+            ]
+            observers: list[Observer] = pool.starmap(test_partial, runs)
+        
+        observers: list[list[Observer]] = list(batched(observers, seeds))
+
+        # Create dataframes with the data
+
+        seed_columns = [f"Val{seed}" for seed in range(seeds)]
+        dfs: dict[str, pd.DataFrame] = {
+            name: pd.DataFrame(
+                data=[agent_observers[0].data[0]] + [o.data[1] for o in agent_observers],
+                columns=["Idx"] + seed_columns
+            ) for (name, _), agent_observers in zip(agents, observers)
+        }
+
+        for _, df in dfs.items():
+            df["ValMean"] = df[seed_columns].mean(axis=1)
+            df["ValStd"] = df[seed_columns].std(axis=1)
+        
+        # Save the data for posterity
+
+        for name, df in dfs.items():
+            df.to_csv(f"{result_path}_{name}")
 
 
 def quick_agent_args(name: str, **kwargs) -> AgentArgs:
@@ -176,7 +259,7 @@ def quick_train_args(seed: int, agent_args: AgentArgs, env_args: EnvArgs, episod
     )
 
 
-def get_data(data: str, agents: tuple[str, dict, dict, dict], seeds: int = 10, timesteps: int = 2500000) -> dict[str, pd.DataFrame]:
+def get_data(data: str, agents: list[tuple[str, dict, dict, dict]], seeds: int = 10, timesteps: int | None = 2500000) -> dict[str, pd.DataFrame] | None:
     missing = []
     for agent in agents:
         name, agent_kwargs, env_kwargs, main_kwargs = agent
@@ -246,9 +329,7 @@ def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str, exp_facto
     for df in dfs.values():
         plt.fill_between(df.Idx, df.ValMeanExp - df.ValStdExp, df.ValMeanExp + df.ValStdExp, alpha=0.2)
 
-    if run_name_mapping is None:
-        plt.legend(list(dfs.keys()))
-    else:
+    if run_name_mapping is not None:
         plt.legend([run_name_mapping[name] for name in dfs.keys()])
     plt.title(title)
     if xlabel is not None:
@@ -264,7 +345,7 @@ def get_and_plot_data(
     title: str,
     fig_path: str,
     seeds: int = 10,
-    timesteps: int = 2500000,
+    timesteps: int | None = 2500000,
     exp_factor: float = 0.9,
     xlabel: str | None = None,
     ylabel: str | None = None,
