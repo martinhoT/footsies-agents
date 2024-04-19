@@ -12,8 +12,8 @@ from scripts.evaluation.utils import get_and_plot_data
 # %% Check if all necessary runs have been made
 
 agents = [
-    ("sparse_reward_curriculum", {}, {"dense_reward": False}, {"curriculum": True}),
-    ("dense_reward_curriculum", {}, {"dense_reward": True}, {"curriculum": True}),
+    ("sparse_reward_curriculum", {}, {"dense_reward": False}, {"curriculum": True, "curriculum_threshold": 1000}),
+    ("dense_reward_curriculum", {}, {"dense_reward": True}, {"curriculum": True, "curriculum_threshold": 1000}),
 ]
 
 get_and_plot_data(

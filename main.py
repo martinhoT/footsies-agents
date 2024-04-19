@@ -523,6 +523,7 @@ def main(args: MainArgs):
         opponent_manager = CurriculumManager(
             win_rate_threshold=0.9,
             win_rate_over_episodes=100,
+            episode_threshold=None,
             log_dir=log_dir,
         )
 

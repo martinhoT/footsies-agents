@@ -28,6 +28,8 @@ class MainArgs:
     """How much to penalize the agent in case the environment is truncated, useful when a time limit is defined for instance. No penalization by default"""
     curriculum: bool = False
     """Perform curriculum learning on FOOTSIES with pre-made rule-based opponents"""
+    curriculum_threshold: int | None = None
+    """The maximum number of episodes allowed for the agent to beat the current curriculum opponent before passing on to the next"""
     intrinsic_reward_scheme_: Literal["count", "icm", "rnd", None] = None
     """The type of intrinsic reward to use (string specification)"""
     skip_freeze: bool = True

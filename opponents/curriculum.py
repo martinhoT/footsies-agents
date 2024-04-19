@@ -1,13 +1,12 @@
 import torch
 import logging
 from torch import nn
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import deque
 from footsies_gym.moves import FootsiesMove
 from itertools import cycle
 from agents.action import ActionMap
 from opponents.base import Opponent, OpponentManager
-from typing import Callable
 from torch.utils.tensorboard import SummaryWriter
 
 LOGGER = logging.getLogger("main.curriculum")
@@ -18,10 +17,12 @@ class CurriculumManager(OpponentManager):
         self,
         win_rate_threshold: float = 0.9,
         win_rate_over_episodes: int = 100,
+        episode_threshold: int | None = None,
         log_dir: str = None,
     ):
         self._win_rate_threshold = win_rate_threshold
-    
+        self._episode_threshold = episode_threshold
+
         self._current_opponent_idx = 0
         self._opponents = sorted([
             Idle(),
@@ -44,10 +45,14 @@ class CurriculumManager(OpponentManager):
 
         self._summary_writer = SummaryWriter(log_dir=log_dir) if log_dir is not None else None
     
-    def _is_next_opponent_ready(self):
+    def _agent_surpassed_opponent(self) -> bool:
         """Check whether the agent has surpassed the current opponent enough."""
-        return len(self._agent_wins) == self._agent_wins.maxlen and self.current_recent_win_rate > self._win_rate_threshold
-            
+        return len(self._agent_wins) == self._agent_wins.maxlen and self.current_recent_win_rate >= self._win_rate_threshold
+
+    def _agent_took_too_long(self) -> bool:
+        """Check whether the agent took too long to beat the current opponent."""
+        return self._episode_threshold is not None and self._current_episodes > self._episode_threshold
+
     def _advance(self) -> "CurriculumOpponent":
         """Advance to the next opponent. The next opponent to which this method advances is returned. If the returned opponent is `None`, then the curriculum is complete."""
         self._agent_wins.clear()
@@ -71,14 +76,19 @@ class CurriculumManager(OpponentManager):
         opponent_change = False
         win_rate = self.current_recent_win_rate
 
-        if self._is_next_opponent_ready():
+        agent_surpassed_opponent = self._agent_surpassed_opponent()
+        agent_took_too_long = self._agent_took_too_long()
+        if agent_surpassed_opponent or agent_took_too_long:
             previous_opponent = self.current_opponent
             previous_wins = sum(self._agent_wins)
             previous_episodes = self._current_episodes
 
             new_opponent = self._advance()
 
-            LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:%} over the recent {self._agent_wins.maxlen} episodes after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
+            if agent_surpassed_opponent:
+                LOGGER.info(f"Agent has surpassed opponent {previous_opponent.__class__.__name__} with a win rate of {previous_wins / self._agent_wins.maxlen:.0%} over the recent {self._agent_wins.maxlen} episodes after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
+            elif agent_took_too_long:
+                LOGGER.info(f"Agent took too long to beat {previous_opponent.__class__.__name__}, having a win rate of {previous_wins / self._agent_wins.maxlen:.0%} over the recent {self._agent_wins.maxlen} episodes after {previous_episodes} episodes. Switched to {new_opponent.__class__.__name__}")
             opponent_change = True
 
             # Reset the wins against current opponent
