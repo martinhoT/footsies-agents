@@ -70,10 +70,10 @@ class TheOneAgent(FootsiesAgentBase):
         LOGGER.info("Agent was setup with opponent prediction strategy: %s", "rollback" if rollback_as_opponent_model else "opponent model" if opponent_model is not None else "random (unless doing curriculum learning)")
 
         # If we have both a reaction time emulator and a game model, add a predictor to correct delayed observations.
-        if reaction_time_emulator is not None:
+        if reaction_time_emulator is not None and game_model is not None:
             reaction_time_emulator.predictor = MultiStepPredictor(
                 reaction_time_emulator,
-                game_model if game_model is not None else None,
+                game_model,
             )
 
         # Store required values
@@ -119,6 +119,8 @@ class TheOneAgent(FootsiesAgentBase):
         # that originated the temporal action in the first place.
         self._previous_valid_opponent_action = info["p2_simple"] if info["p2_was_actionable"] else self._previous_valid_opponent_action
 
+        opponent_model_hidden_state = "auto"
+
         # Update the reaction time emulator and substitute obs with a perceived observation, which is delayed.
         if self.reaction_time_emulator is not None:
             if self._reaction_time_emulator_should_reset:
@@ -126,9 +128,6 @@ class TheOneAgent(FootsiesAgentBase):
                 self._reaction_time_emulator_should_reset = False
             
             self.reaction_time_emulator.register(obs, info)
-        
-        else:
-            opponent_model_hidden_state = "auto"
         
         # Act, if that makes sense.
         if not info["p1_is_actionable"]:
@@ -147,7 +146,7 @@ class TheOneAgent(FootsiesAgentBase):
         # NOTE: this doesn't take into account whether the opponent is actually able to act or not
         if self.opp is not None:
             predicted_opponent_distribution, _ = self.opp.p2_model.network.distribution(obs, opponent_model_hidden_state)
-            predicted_opponent_action = predicted_opponent_distribution.sample()
+            predicted_opponent_action = int(predicted_opponent_distribution.sample().item())
         elif self._rollback_as_opponent_model:
             predicted_opponent_action = self._previous_valid_opponent_action
         else:
@@ -193,12 +192,12 @@ class TheOneAgent(FootsiesAgentBase):
             if isinstance(e, FootsiesSimpleActions):
                 assumed_opponent_action_on_nonactionable = e.assumed_opponent_action_on_nonactionable
                 break
-            e = e.env
+            e = e.env # type: ignore
         
         if assumed_opponent_action_on_nonactionable is None:
             raise ValueError("expected environment to have the `FootsiesSimpleActions` wrapper with `assumed_opponent_action_on_nonactionable` property set, but that's not the case")
     
-        if self.reaction_time_emulator is not None:
+        if self.reaction_time_emulator is not None and self.reaction_time_emulator.predictor is not None:
             self.reaction_time_emulator.predictor.assumed_opponent_action_on_nonactionable = assumed_opponent_action_on_nonactionable
 
     def reset(self):
@@ -209,7 +208,9 @@ class TheOneAgent(FootsiesAgentBase):
     #       As long as the opponent doesn't learn, and no other component uses that information, there should be no problem.
     def extract_opponent(self, env: Env) -> FootsiesAgentOpponent:
         opponent = deepcopy(self)
-        opponent.learn = False
+        opponent.learn_a2c = False
+        opponent.learn_opponent_model = False
+        opponent.learn_game_model = False
 
         return FootsiesAgentOpponent(
             agent=opponent,
@@ -222,7 +223,7 @@ class TheOneAgent(FootsiesAgentBase):
         return self.a2c.model
 
     @property
-    def recently_predicted_opponent_action(self) -> int:
+    def recently_predicted_opponent_action(self) -> int | None:
         """The most recent prediction for the opponent's action done in the last `act` call."""
         return self._recently_predicted_opponent_action
 

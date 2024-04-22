@@ -35,7 +35,7 @@ from agents.action import ActionMap
 from dataclasses import asdict
 from stable_baselines3.common.callbacks import BaseCallback
 from collections import deque
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter # type: ignore
 
 LOGGER = logging.getLogger("main")
 

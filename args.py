@@ -53,7 +53,7 @@ class MainArgs:
             raise ValueError("can't use both self-play and curriculum learning at the same time")
         
         if self.self_play.enabled or self.curriculum:
-            self.env.kwargs["opponent"] = self._dummy_opponent
+            self.env.kwargs["opponent"] = self._dummy_opponent # type: ignore
         
         if self.env.is_footsies:
             if "game_path" not in self.env.kwargs:
@@ -72,7 +72,7 @@ class MainArgs:
         return (False, False, False)
 
     @property
-    def intrinsic_reward_scheme(self) -> IntrinsicRewardScheme | None:
+    def intrinsic_reward_scheme(self) -> type[IntrinsicRewardScheme] | None:
         """The type of intrinsic reward to use"""
         if self.intrinsic_reward_scheme_ == "count":
             return CountBasedScheme
@@ -132,9 +132,9 @@ class AgentArgs:
     """Name of the agent initializer/class to use, either from the 'models' folder or from Stable-Baselines3"""
     kwargs: tyro.conf.UseAppendAction[Dict[str, int | float | bool | str]] = field(default_factory=dict)
     """Keyword arguments to pass to the agent initializer/constructor"""
-    name: str | None = None
+    name_: Annotated[str | None, tyro.conf.arg(name="name")] = None
     """The name of the agent, for saving, loading and logging. If `None`, will use `model` as the name"""
-    is_sb3: bool = False
+    is_sb3: tyro.conf.Suppress[bool] = False
     """Whether the agent is a Stable-Baselines3 agent"""
 
     post_process_init: tyro.conf.Suppress[bool] = True
@@ -144,10 +144,15 @@ class AgentArgs:
         if not self.post_process_init:
             return
         
-        self.name = self.name if self.name is not None else self.model
+        self._name = self.name_ if self.name_ is not None else self.model
         self.is_sb3 = "sb3." == self.model[:4]
         if self.is_sb3:
             self.model = self.model[4:]
+
+    @property
+    def name(self) -> str:
+        """The name of the agent, for saving, loading and logging"""
+        return self._name
 
 
 @dataclass
@@ -169,7 +174,7 @@ class EnvArgs:
     footsies_wrapper_acd: bool = False
     """Use the Action Combinations Discretized wrapper for FOOTSIES"""
     footsies_wrapper_simple: tuple[bool, bool, str, str] = (True, False, "last", "last")
-    """Use the Simple Actions wrapper for FOOTSIES (tuple of `(enabled, remove_agent_special_moves, assumed_agent_action_on_nonactionable, assumed_opponent_action_on_nonactionable)`)"""
+    """Use the Simple Actions wrapper for FOOTSIES (tuple of `(enabled, allow_agent_special_moves, assumed_agent_action_on_nonactionable, assumed_opponent_action_on_nonactionable)`)"""
     footsies_wrapper_fs: bool = False
     """Use the Frame Skipped wrapper for FOOTSIES"""
     footsies_wrapper_adv: bool = False
@@ -207,7 +212,7 @@ class DIAYNArgs:
 
     def discriminator_hidden_layer_activation(self) -> nn.Module:
         """Hidden layer activation for the discriminator network in DIAYN"""
-        return getattr(nn, self.discriminator_hidden_layer_activation_str)()
+        return getattr(nn, self.discriminator_hidden_layer_activation_)()
 
 
 @dataclass
@@ -230,14 +235,18 @@ class SelfPlayArgs:
 class ExperimentArgs:
     agent: "AgentArgs"
     """Agent arguments"""
-    episodes: int = 15000
-    """Number of episodes"""
-    study_name: str = "test-experiment"
-    """Name of the study (should be the same among processes on the same study)"""
+    env: "EnvArgs"
+    """Environment arguments"""
+    time_steps: int = 100000
+    """Number of time steps"""
+    study_name: str | None = None
+    """Name of the study (should be the same among processes on the same study). If `None`, will use the agent's name as the study name and save it in the `tuning` scripts folder"""
     maximize: bool = False
     """Whether to maximize or minimize the objective value"""
     n_trials: int = 10
     """The number of trials to attempt"""
+    time_steps_before_eval: int = 5000
+    """The number of time steps to train on before evaluating the current model"""
 
 
 def parse_args() -> MainArgs:
