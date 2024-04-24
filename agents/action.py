@@ -117,14 +117,15 @@ class ActionMap:
     @staticmethod
     def invert_simple(simple: int) -> int:
         """Invert the given simple action, done in one player's perspective, into the other player's. It's recommended to use the other inversion methods rather than this one."""
-        if simple == FootsiesMove.FORWARD:
-            return FootsiesMove.BACKWARD
-        if simple == FootsiesMove.BACKWARD:
-            return FootsiesMove.FORWARD
-        if simple == FootsiesMove.DASH_FORWARD:
-            return FootsiesMove.DASH_BACKWARD
-        if simple == FootsiesMove.DASH_BACKWARD:
-            return FootsiesMove.DASH_FORWARD
+        simple_move = ActionMap.simple_as_move(simple)
+        if simple_move == FootsiesMove.FORWARD:
+            simple = ActionMap.simple_from_move(FootsiesMove.BACKWARD)
+        elif simple_move == FootsiesMove.BACKWARD:
+            simple = ActionMap.simple_from_move(FootsiesMove.FORWARD)
+        elif simple_move == FootsiesMove.DASH_FORWARD:
+            simple = ActionMap.simple_from_move(FootsiesMove.DASH_BACKWARD)
+        elif simple_move == FootsiesMove.DASH_BACKWARD:
+            simple = ActionMap.simple_from_move(FootsiesMove.DASH_FORWARD)
         return simple
 
     @staticmethod

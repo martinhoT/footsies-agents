@@ -1,13 +1,14 @@
 import logging
 from collections import deque
-from typing import Any, Literal
-from gymnasium import ObservationWrapper, Wrapper
-from gymnasium import spaces
+from typing import Any, Literal, SupportsFloat, cast
+from gymnasium import ObservationWrapper, Wrapper, spaces
 from agents.action import ActionMap
 from footsies_gym.moves import FootsiesMove
 from footsies_gym.envs.footsies import FootsiesEnv
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter # type: ignore
 from footsies_gym.wrappers.normalization import FootsiesNormalized
+from opponents.base import OpponentManager
+from opponents.curriculum import CurriculumManager, CurriculumOpponent
 
 
 class AppendSimpleHistoryWrapper(Wrapper):
@@ -164,7 +165,7 @@ class FootsiesSimpleActionExecutor:
 
     LOGGER = logging.getLogger("main.wrapper.simple-action-executor")
 
-    def __init__(self, allow_special_moves):
+    def __init__(self, allow_special_moves: bool):
         self._allow_special_moves = allow_special_moves
         self._simple_action = None
         self._simple_action_queue = deque([])
@@ -208,7 +209,7 @@ class FootsiesSimpleActionExtractor:
 
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0
-        self._current_info = None
+        self._current_info = {}
     
     def update(self, info: dict) -> dict:
         info = info.copy()
@@ -318,8 +319,8 @@ class FootsiesSimpleActions(Wrapper):
         )
         
         self._agent_allow_special_moves = agent_allow_special_moves
-        self._assumed_agent_action_on_nonactionable = assumed_agent_action_on_nonactionable
-        self._assumed_opponent_action_on_nonactionable = assumed_opponent_action_on_nonactionable
+        self._assumed_agent_action_on_nonactionable: Literal["last", "none", "stand"] = assumed_agent_action_on_nonactionable
+        self._assumed_opponent_action_on_nonactionable: Literal["last", "none", "stand"] = assumed_opponent_action_on_nonactionable
         
         n_simple = ActionMap.n_simple()
 
@@ -336,7 +337,7 @@ class FootsiesSimpleActions(Wrapper):
 
         return obs, info
 
-    def step(self, simple_action: int) -> tuple[dict, float, bool, bool, dict[str, Any]]:
+    def step(self, simple_action: int) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
         primitive_action = self._executor.act(simple_action)
 
         obs, reward, terminated, truncated, info = self.env.step(primitive_action)
@@ -370,3 +371,57 @@ class FootsiesSimpleActions(Wrapper):
     def agent_allow_special_moves(self) -> bool:
         """Whether to allow the agent the ability to perform special moves."""
         return self._agent_allow_special_moves
+
+
+class OpponentManagerWrapper(Wrapper):
+    """
+    Wrapper that includes an opponent manager into the environment interaction.
+    Mainly used for applying opponent managers, such as the curriculum, to SB3 algorithms.
+    May only be applied to FOOTSIES (`FootsiesEnv`).
+    """
+
+    def __init__(self, env, opponent_manager: OpponentManager):
+        super().__init__(env)
+
+        self.env = env
+        self.footsies_env: FootsiesEnv = cast(FootsiesEnv, env.unwrapped)
+        self.opponent_manager = opponent_manager
+    
+    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict]:
+        if self.opponent_manager.current_opponent is not None:
+            self.opponent_manager.current_opponent.reset()
+
+        # This makes sure the environment and the curriculum manager are in sync
+        opponent = self.opponent_manager.current_opponent.act if self.opponent_manager.current_opponent is not None else None
+        self.footsies_env.set_opponent(opponent)
+
+        obs, info = self.env.reset(seed=seed, options=options)
+
+        return obs, info
+
+    def step(self, action: int) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
+        obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # Whether to notify the agent of the opponent's next action distribution
+        if isinstance(self.opponent_manager.current_opponent, CurriculumOpponent):
+            info["next_opponent_policy"] = self.opponent_manager.current_opponent.peek(info)
+
+        if terminated or truncated:
+            # Determine the final game result, to provide to the self-play manager
+            result = 0.5
+            if terminated and (reward != 0.0):
+                result = 1 if float(reward) > 0.0 else 0
+            elif truncated and (info["guard"][0] != info["guard"][1]):
+                result = 1 if info["guard"][0] > info["guard"][1] else 0
+
+            # Set a new opponent from the opponent pool
+            should_change = self.opponent_manager.update_at_episode(result)
+
+            if should_change:
+                opponent = self.opponent_manager.current_opponent.act if self.opponent_manager.current_opponent is not None else None
+                self.footsies_env.set_opponent(opponent)
+
+        return obs, reward, terminated, truncated, info
+
+    def close(self):
+        self.opponent_manager.close()

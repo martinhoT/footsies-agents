@@ -335,10 +335,10 @@ class A2CQLearner(A2CLearnerBase):
         actor_entropy_loss_coef: float = 0.0,
         actor_learning_rate: float = 1e-4,
         policy_cumulative_discount: bool = False,
-        actor_gradient_clipping: float = None,
+        actor_gradient_clipping: float | None = None,
         agent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
         opponent_update_style: UpdateStyle = UpdateStyle.EXPECTED_SARSA,
-        intrinsic_critic: QFunction = None,
+        intrinsic_critic: QFunction | None = None,
         maxent: float = 0.0,
         maxent_gradient_flow: bool = False,
         ppo_objective: bool = False,
@@ -536,7 +536,7 @@ class A2CQLearner(A2CLearnerBase):
         
         The value is computed as a function of both the Q-function and agent policy:
         - original: `A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi(. | s, o).T Q(s, o, .)`
-        - alternative: `... = R + pi(. | s', o).T Q(s', o, .) - pi(. | s, o).T Q(s, o, .)`
+        - alternative: `... = R + omega(. | s') pi(. | s', .).T Q(s', ., .) - pi(. | s, o).T Q(s, o, .)`
         """
         if self._alternative_advantage:
             if terminated:

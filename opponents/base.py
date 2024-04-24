@@ -27,3 +27,6 @@ class OpponentManager(ABC):
     @abstractmethod
     def exhausted(self) -> bool:
         """Whether the opponent pool has been exhausted and there is no opponent to play against."""
+    
+    def close(self):
+        """Close any resources in use."""

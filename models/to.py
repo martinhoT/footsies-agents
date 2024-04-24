@@ -1,3 +1,4 @@
+from tyro import conf
 from torch import nn
 from copy import deepcopy
 from typing import Literal
@@ -43,13 +44,13 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_lr: float = 1e-2,
     actor_entropy_coef: float = 0.04,
     actor_gradient_clipping: float = 0.5,
-    critic_discount: float = 0.9,
+    critic_discount: float = 1.0,
 
     # Miscellaneous, but should be scrutinized
     accumulate_at_frameskip: bool = True,
     alternative_advantage: bool = True,
     reaction_time_constant: bool = False,
-    action_masking: bool = True,
+    action_masking: bool = False,
     game_model_skippers_every: int = 5,
 
     # Probably should be kept as-is
@@ -63,6 +64,16 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
+
+    # Can only be specified programatically
+    critic_arch_hs: conf.Suppress[list[int]] = [128, 128],
+    critic_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
+    actor_arch_hs: conf.Suppress[list[int]] = [64, 64],
+    actor_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
+    opponent_model_arch_hs: conf.Suppress[list[int]] = [64, 64],
+    opponent_model_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
+    game_model_arch_hs: conf.Suppress[list[int]] = [64, 64],
+    game_model_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
@@ -72,8 +83,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     actor = ActorNetwork(
         obs_dim=obs_dim,
         action_dim=action_dim,
-        hidden_layer_sizes=[64, 64],
-        hidden_layer_activation=nn.LeakyReLU,
+        hidden_layer_sizes=actor_arch_hs,
+        hidden_layer_activation=actor_arch_activation,
         opponent_action_dim=opponent_action_dim,
         footsies_masking=action_masking,
         p1=True,
@@ -93,8 +104,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         critic_network = QNetwork(
             obs_dim=obs_dim,
             action_dim=action_dim,
-            hidden_layer_sizes=[128, 128],
-            hidden_layer_activation=nn.LeakyReLU,
+            hidden_layer_sizes=critic_arch_hs,
+            hidden_layer_activation=critic_arch_activation,
             # Will setup Tanh with appropriate range
             is_footsies=critic_tanh,
             use_dense_reward=False,
@@ -148,8 +159,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
                 use_sigmoid_output=False,
                 input_clip=False,
                 input_clip_leaky_coef=0.02,
-                hidden_layer_sizes=[64, 64],
-                hidden_layer_activation=nn.LeakyReLU,
+                hidden_layer_sizes=opponent_model_arch_hs,
+                hidden_layer_activation=opponent_model_arch_activation,
                 recurrent=opponent_model_recurrent,
             ),
             scar_store=ScarStore(
@@ -175,6 +186,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         opponent_model = None
 
     if use_reaction_time:
+        assert opponent_model is not None
+        
         reaction_time_emulator = ReactionTimeEmulator(
             actor=actor,
             opponent=opponent_model.p2_model,
@@ -206,8 +219,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
                 obs_dim=obs_dim,
                 p1_action_dim=action_dim,
                 p2_action_dim=opponent_action_dim,
-                hidden_layer_sizes=[64, 64],
-                hidden_layer_activation=nn.LeakyReLU,
+                hidden_layer_sizes=game_model_arch_hs,
+                hidden_layer_activation=game_model_arch_activation,
                 residual=residual,
             ),
             learning_rate=1e-2,

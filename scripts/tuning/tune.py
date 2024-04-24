@@ -1,14 +1,16 @@
 import importlib
 import optuna
 import os
-from typing import Callable
+from typing import Callable, cast
 from gymnasium import Env
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
 from args import parse_args_experiment, ExperimentArgs
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.monitor import Monitor
-from main import create_env, save_agent
+from main import create_env, save_agent, setup_logger
+from opponents.curriculum import CurriculumManager
+from agents.wrappers import OpponentManagerWrapper
 
 
 DefineModelFunction = Callable[[optuna.Trial, Env], FootsiesAgentBase | BaseAlgorithm]
@@ -20,19 +22,35 @@ class TrialManager:
         agent_name: str,
         env: Env,
         define_model_function: DefineModelFunction,
-        objective_function: ObjectiveFunction,
+        objective_function: ObjectiveFunction | None,
         time_steps: int = 1000000,
         time_steps_before_eval: int = 5000,
+        curriculum: CurriculumManager | None = None,
     ):
+        if objective_function is None and curriculum is None:
+            raise ValueError("if not using the curriculum, a custom objective function has to be passed")
+        if curriculum is not None and curriculum.episode_threshold is None:
+            raise ValueError("the curriculum should have an episode threshold set, or else the objective cannot be properly calculated")
+
         self.agent_name = agent_name
         self.env = env
+        self.footsies_env: FootsiesEnv = cast(FootsiesEnv, env.unwrapped)
         self.define_model = staticmethod(define_model_function)
-        self.objective = staticmethod(objective_function)
+        self.objective = staticmethod(objective_function) if objective_function is not None else self.curriculum_objective
         self.time_steps = time_steps
         self.time_steps_before_eval = time_steps_before_eval
+        
+        # Curriculum
+        self._curriculum_episode_threshold: int = curriculum.episode_threshold if curriculum is not None and curriculum.episode_threshold is not None else 0
+        self.curriculum = curriculum
 
     def run(self, trial: optuna.Trial) -> float:
+        if self.curriculum is not None:
+            self.curriculum.reset()
+
         agent = self.define_model(trial, self.env)
+        if isinstance(agent, FootsiesAgentBase):
+            agent.preprocess(self.env)
 
         for step in range(0, self.time_steps, self.time_steps_before_eval):
             if isinstance(agent, BaseAlgorithm):
@@ -55,6 +73,9 @@ class TrialManager:
 
             if trial.should_prune():
                 raise optuna.exceptions.TrialPruned()
+            
+            if self.curriculum is not None and self.curriculum.exhausted:
+                break
     
         print(f"Finished trial {trial.number}")
         self.save(agent, trial.number)
@@ -65,6 +86,29 @@ class TrialManager:
         folder = os.path.join("scripts", "tuning", self.agent_name)
         name = f"tuning_{number}"
         save_agent(agent, name=name, folder=folder)
+    
+    def _curriculum_objective_compute(self, opponent_idx: int, episodes_taken: int, episode_threshold: int) -> float:
+        significance = 10 ** opponent_idx
+        return significance * (1.0 - episodes_taken / episode_threshold)
+
+    def curriculum_objective(self, agent: FootsiesAgentBase | BaseAlgorithm, env: Env) -> float:
+        if self.curriculum is None:
+            raise RuntimeError("this method cannot be called if the curriculum is not set")
+        
+        past_objectives = sum(self._curriculum_objective_compute(
+            opponent_idx=i,
+            episodes_taken=self.curriculum.episodes_taken_for_opponent(i),
+            episode_threshold=self._curriculum_episode_threshold,
+        ) for i in range(self.curriculum.current_opponent_idx))
+
+        # Current opponent assessment is incomplete, so we compute it separately
+        current_opponent_objective = self._curriculum_objective_compute(
+            opponent_idx=self.curriculum.current_opponent_idx,
+            episodes_taken=self.curriculum.current_opponent_episodes,
+            episode_threshold=self._curriculum_episode_threshold,
+        )
+
+        return past_objectives + current_opponent_objective
 
 
 # NOTE: limitation, the different processes running this script should not be finding ports for FOOTSIES at the same time. As such, the processes should start up sequentially
@@ -74,8 +118,15 @@ def main(args: ExperimentArgs):
     optimize_module_str = ".".join(("scripts", "tuning", module_name))
     optimize_module = importlib.import_module(optimize_module_str)
     
+    setup_logger(module_name, log_to_file=False, multiprocessing=False)
+    
     define_model_function: DefineModelFunction = optimize_module.define_model
-    objective_function: ObjectiveFunction = optimize_module.objective
+    # If we are training using the curriculum, then our objective is completely different
+    objective_function: ObjectiveFunction | None
+    if args.curriculum and args.curriculum_objective:
+        objective_function = None
+    else:
+        objective_function = optimize_module.objective
 
     ports = FootsiesEnv.find_ports(start=20000)
     args.env.kwargs.setdefault("game_port", ports["game_port"])
@@ -83,11 +134,28 @@ def main(args: ExperimentArgs):
     args.env.kwargs.setdefault("remote_control_port", ports["remote_control_port"])
     
     args.env.kwargs.setdefault("game_path", "../Footsies-Gym/Build/FOOTSIES.x86_64")
+    if args.curriculum:
+        args.env.kwargs.setdefault("opponent", lambda o, i: (False, False, False)) # type: ignore
 
     env = create_env(args.env)
 
+    if args.curriculum:
+        curriculum = CurriculumManager(
+            win_rate_threshold=0.8,
+            win_rate_over_episodes=20,
+            episode_threshold=1000,
+            log_dir=None,
+            csv_save=False,
+        )
+
+        env = OpponentManagerWrapper(env, opponent_manager=curriculum)
+
+    else:
+        curriculum = None
+
     # Wrap with a Monitor wrapper if using an SB3 agent, or else they may complain on evaluation
-    env = Monitor(env)
+    if args.agent.is_sb3:
+        env = Monitor(env)
 
     trialManager = TrialManager(
         agent_name=module_name,
@@ -96,6 +164,7 @@ def main(args: ExperimentArgs):
         objective_function=objective_function,
         time_steps=args.time_steps,
         time_steps_before_eval=args.time_steps_before_eval,
+        curriculum=curriculum,
     )
 
     study_name = args.study_name if args.study_name is not None else module_name
@@ -129,6 +198,7 @@ def main(args: ExperimentArgs):
     print("  Params:")
     for key, value in trial.params.items():
         print("    {}: {}".format(key, value))
+
 
 if __name__ == "__main__":
     main(parse_args_experiment())

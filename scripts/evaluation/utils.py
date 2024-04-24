@@ -20,7 +20,6 @@ from tqdm import trange
 from args import AgentArgs, DIAYNArgs, EnvArgs, MainArgs, MiscArgs, SelfPlayArgs
 from main import main
 
-
 def batched(iterable: Iterable, n: int):
     if n < 1:
         raise ValueError('n must be at least one')
@@ -37,7 +36,7 @@ def obs_to_torch(o) -> torch.Tensor:
 def create_env(
     port_start: int = 5000,
     port_stop: int | None = None,
-) -> tuple[Env, FootsiesEnv]:
+) -> tuple[Env[torch.Tensor, int], FootsiesEnv]:
     
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
@@ -46,7 +45,7 @@ def create_env(
         fast_forward=True,
         dense_reward=False,
         opponent=dummy_opponent,
-        **FootsiesEnv.find_ports(start=port_start, stop=port_stop),
+        **FootsiesEnv.find_ports(start=port_start, stop=port_stop), # type: ignore
     )
 
     env = TransformObservation(
@@ -90,7 +89,7 @@ class WinRateObserver(Observer):
 
 T = TypeVar("T", bound=Observer)
 
-def test(agent: TheOneAgent, label: str, id_: int, observer_type: type[T], opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None, initial_seed: int | None = 0, timesteps: int = 1000000) -> list[T]:
+def test(agent: FootsiesAgentBase, label: str, id_: int, observer_type: type[T], opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None, initial_seed: int | None = 0, timesteps: int = 1000000) -> list[T]:
     port_start = 11000 + 1000 * id_
     port_stop = 11000 + (1000) * (id_ + 1)
     env, footsies_env = create_env(port_start=port_start, port_stop=port_stop)
@@ -179,7 +178,7 @@ def quick_agent_args(name: str, **kwargs) -> AgentArgs:
     return AgentArgs(
         model="to",
         kwargs=kwargs,
-        name=name,
+        name_=name,
         is_sb3=False,
         post_process_init=True,
     )
@@ -341,7 +340,7 @@ def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str, exp_facto
 
 def get_and_plot_data(
     data: str,
-    agents: tuple[str, dict, dict, dict],
+    agents: list[tuple[str, dict, dict, dict]],
     title: str,
     fig_path: str,
     seeds: int = 10,

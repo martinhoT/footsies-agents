@@ -1,6 +1,6 @@
 import random
 import logging
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter # type: ignore
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable
@@ -41,9 +41,9 @@ class SelfPlayManager(OpponentManager):
         mix_bot: int = 1,
         win_rate_threshold: float = 0.8,
         log_elo: bool = False,
-        log_dir: str = None,
+        log_dir: str | None = None,
         log_interval: int = 1,
-        starter_opponent: FootsiesAgentOpponent = None,
+        starter_opponent: FootsiesAgentOpponent | None = None,
     ):
         """
         Instance of an opponent pool manager for self-play.

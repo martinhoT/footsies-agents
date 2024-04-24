@@ -7,7 +7,7 @@ from agents.wrappers import FootsiesSimpleActions, FootsiesSimpleActionExecutor
 
 def wrap_policy(
     env: Env, internal_policy: Callable
-) -> Callable[[dict], tuple[bool, bool, bool]]:
+) -> Callable[[dict, dict], tuple[bool, bool, bool]]:
     observation_wrappers = []
     action_wrappers = []
 
@@ -26,9 +26,9 @@ def wrap_policy(
         elif isinstance(current_env, FootsiesSimpleActions):
             using_simple_actions_wrapper = True
 
-        current_env = current_env.env
+        current_env = current_env.env # type: ignore
 
-    simple_action_executor = FootsiesSimpleActionExecutor() if using_simple_actions_wrapper else None
+    simple_action_executor = FootsiesSimpleActionExecutor(True) if using_simple_actions_wrapper else None
 
     def policy(obs: dict, info: dict) -> tuple[bool, bool, bool]:
         for observation_wrapper in reversed(observation_wrappers):
@@ -36,7 +36,8 @@ def wrap_policy(
 
         action = internal_policy(obs, info)
 
-        action = simple_action_executor.act(action)
+        if simple_action_executor is not None:
+            action = simple_action_executor.act(action)
 
         for action_wrapper in action_wrappers:
             action = action_wrapper.action(action)
@@ -56,7 +57,7 @@ def snapshot_sb3_policy(agent: BaseAlgorithm, deterministic: bool = False):
     return wrapper
 
 
-def extract_sub_kwargs(kwargs: dict, subkeys: tuple[str], strict: bool = True) -> tuple[dict[str, Any]]:
+def extract_sub_kwargs(kwargs: dict, subkeys: tuple[str], strict: bool = True) -> list[dict[str, Any]]:
     """
     Extract keyword arguments from `kwargs` with the provided `subkeys`. If `strict`, will raise an error in case not all keys in `kwargs` were exhausted
     

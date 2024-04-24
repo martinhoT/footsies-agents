@@ -439,12 +439,12 @@ class QNetwork(nn.Module):
         self,
         obs_dim: int,
         action_dim: int,
-        hidden_layer_sizes: list[int] = None,
-        hidden_layer_activation: nn.Module = nn.Identity,
-        representation: nn.Module = None,
+        hidden_layer_sizes: list[int] | None = None,
+        hidden_layer_activation: type[nn.Module] = nn.Identity,
+        representation: nn.Module | None = None,
         is_footsies: bool = False,
         use_dense_reward: bool = True, # Dictates the range of possible output values
-        opponent_action_dim: int = None,
+        opponent_action_dim: int | None = None,
     ):
         super().__init__()
 

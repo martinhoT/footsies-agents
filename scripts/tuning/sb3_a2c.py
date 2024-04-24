@@ -1,7 +1,7 @@
 import optuna
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3 import PPO
+from stable_baselines3 import A2C
 from gymnasium import Env
 from torch import nn
 
@@ -19,7 +19,7 @@ def define_model(trial: optuna.Trial, env: Env) -> BaseAlgorithm:
         "[64, 64, 64]",
     ]))
 
-    return PPO(
+    return A2C(
         # Base
         policy="MlpPolicy",
         env=env,

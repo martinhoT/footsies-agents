@@ -271,6 +271,10 @@ def train(
 
     except Exception as e:
         LOGGER.exception("Training stopped due to %s: '%s', ignoring and quitting training", type(e).__name__, e)
+    
+    finally:
+        if opponent_manager is not None:
+            opponent_manager.close()
 
 
 def create_env(args: EnvArgs) -> Env:
@@ -378,7 +382,7 @@ def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: 
     logger.addHandler(ch)
 
     if log_to_file:
-        rfh = RotatingFileHandler(f"logs/{agent_name}.log", maxBytes=1e7, backupCount=9)
+        rfh = RotatingFileHandler(f"logs/{agent_name}.log", maxBytes=int(1e7), backupCount=9)
         rfh.setFormatter(formatter)
         rfh.setLevel(file_level)
 
@@ -459,7 +463,7 @@ def main(args: MainArgs):
     using_wrappers = "Using wrappers:"
     while not isinstance(e, FootsiesEnv):
         using_wrappers += f"\n {e.__class__.__name__}"
-        e = e.env
+        e = e.env # type: ignore
     LOGGER.info(using_wrappers)
 
     # Prepare agent
@@ -523,7 +527,7 @@ def main(args: MainArgs):
         opponent_manager = CurriculumManager(
             win_rate_threshold=0.9,
             win_rate_over_episodes=100,
-            episode_threshold=None,
+            episode_threshold=args.curriculum_threshold,
             log_dir=log_dir,
         )
 

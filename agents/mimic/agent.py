@@ -20,8 +20,8 @@ class MimicAgent(FootsiesAgentBase):
         self,
         action_dim: int,
         by_primitive_actions: bool = False,
-        p1_model: PlayerModel = None,
-        p2_model: PlayerModel = None,
+        p1_model: PlayerModel | None = None,
+        p2_model: PlayerModel | None = None,
     ):
         """
         FOOTSIES agent that builds a player model of either one of or both players.
@@ -101,22 +101,22 @@ class MimicAgent(FootsiesAgentBase):
         return dist.entropy()
 
     def load(self, folder_path: str):
-        if self.p1_model is not None:
+        if self._p1_model is not None:
             p1_path = os.path.join(folder_path, "p1")
             self._p1_model.load(p1_path)
-        if self.p2_model is not None:
+        if self._p2_model is not None:
             p2_path = os.path.join(folder_path, "p2")
             self._p2_model.load(p2_path)
 
     def save(self, folder_path: str):
-        if self.p1_model is not None:
+        if self._p1_model is not None:
             p1_path = os.path.join(folder_path, "p1")
             self._p1_model.save(p1_path)
-        if self.p2_model is not None:
+        if self._p2_model is not None:
             p2_path = os.path.join(folder_path, "p2")
             self._p2_model.save(p2_path)
 
-    def evaluate_p1_average_loss_and_clear(self) -> float:
+    def evaluate_p1_average_loss_and_clear(self) -> float | None:
         res = (
             (self._p1_cumulative_loss / self._p1_cumulative_loss_n)
             if self._p1_cumulative_loss_n != 0
@@ -127,7 +127,7 @@ class MimicAgent(FootsiesAgentBase):
         self._p1_cumulative_loss_n = 0
         return res
 
-    def evaluate_p2_average_loss_and_clear(self) -> float:
+    def evaluate_p2_average_loss_and_clear(self) -> float | None:
         res = (
             (self._p2_cumulative_loss / self._p2_cumulative_loss_n)
             if self._p2_cumulative_loss_n != 0
@@ -179,7 +179,7 @@ class MimicAgent(FootsiesAgentBase):
             p2_probs = self.p2_model.network.log_probabilities(self._test_observations)[0].detach()
             divergence = nn.functional.kl_div(p2_probs, p1_probs, reduction="batchmean", log_target=True)
 
-        return divergence
+        return divergence.item()
 
     def evaluate_decision_entropy(self, test_states: List[TestState], p1: bool) -> float:
         """Evaluate the entropy of the predicted probability distribution at the given test states."""
@@ -223,12 +223,12 @@ class MimicAgent(FootsiesAgentBase):
         return super()._extract_opponent(env, internal_policy)
 
     @property
-    def p1_model(self) -> PlayerModel:
+    def p1_model(self) -> PlayerModel | None:
         """Player 1's model."""
         return self._p1_model
 
     @property
-    def p2_model(self) -> PlayerModel:
+    def p2_model(self) -> PlayerModel | None:
         """Player 2's model."""
         return self._p2_model
 

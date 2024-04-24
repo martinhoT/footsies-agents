@@ -111,6 +111,7 @@ class TheOneAgent(FootsiesAgentBase):
         self.reset()
 
     # It's in this function that the current observation and representation variables are updated.
+    # NOTE: during hitstop, the agent is acting in the first frame of hitstop; that means it does not matter how long the hitstop is, the agent won't be able to react to it
     @torch.no_grad
     def act(self, obs: torch.Tensor, info: dict) -> int:
         # Do some pre-processing.
