@@ -1,14 +1,15 @@
 from torch import nn
-from copy import deepcopy
 from agents.action import ActionMap
 from agents.game_model.agent import GameModelAgent
 from agents.game_model.game_model import GameModel, GameModelNetwork
 from agents.game_model.loggables import get_loggables
+from typing import Any
 
 
 def model_init(observation_space_size: int, action_space_size: int, *,
     # Important modifiers
     residual: bool = True,
+    by_differences: bool = False,
     discrete_conversion: bool = False,
     
     # Highly-tunable hyperparameters
@@ -17,7 +18,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     # Probably should be kept as-is
     discrete_guard: bool = False,
     remove_special_moves: bool = False,
-) -> tuple[GameModelAgent, dict[str, list]]:
+) -> tuple[GameModelAgent, dict[str, list[Any]]]:
 
     obs_dim = observation_space_size
     action_dim = ActionMap.n_simple() - (2 if remove_special_moves else 0)
@@ -35,6 +36,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         learning_rate=learning_rate,
         discrete_conversion=discrete_conversion,
         discrete_guard=discrete_guard,
+        by_differences=by_differences,
         epoch_timesteps=1,
         epoch_epochs=1,
         epoch_minibatch_size=1,

@@ -119,4 +119,4 @@ def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneA
 
 
 def objective(agent: TrainingLoggerWrapper[TheOneAgent], env: Env) -> float:
-    return  agent.win_rate
+    return agent.win_rate

@@ -11,7 +11,6 @@ from io import TextIOBase
 import logging
 import csv
 import string
-from _csv import _writer
 
 
 LOGGER = logging.getLogger("main.tensorboard")
@@ -120,7 +119,10 @@ class TrainingLoggerWrapper(FootsiesAgentBase, Generic[T]):
         self.test_states: list[TestState] = []
         self.test_states_number = test_states_number
 
-        self.summary_writer = SummaryWriter(log_dir=log_dir)
+        if log_dir is not None:
+            self.summary_writer = SummaryWriter(log_dir=log_dir)
+        else:
+            self.summary_writer = None
         self.current_step = step_start_value
         self.current_episode = episode_start_value
         self.episode_reward = 0
@@ -131,7 +133,7 @@ class TrainingLoggerWrapper(FootsiesAgentBase, Generic[T]):
 
         self._simplify_tag_translation_table = str.maketrans(string.whitespace, "_" * len(string.whitespace), string.punctuation)
         self.csv_save = False
-        self.csv_files: dict[str, tuple[_writer, TextIOBase]] = {}
+        self.csv_files: dict[str, tuple[Any, TextIOBase]] = {}
         if csv_save and log_dir is not None:
             self.csv_save = True
             if self.episode_reward_enabled:
@@ -186,30 +188,33 @@ class TrainingLoggerWrapper(FootsiesAgentBase, Generic[T]):
             self.current_episode += 1
             
             if self.episode_reward_enabled:
-                self.summary_writer.add_scalar(
-                    "Performance/Episode reward",
-                    self.episode_reward,
-                    self.current_episode,
-                )
+                if self.summary_writer:
+                    self.summary_writer.add_scalar(
+                        "Performance/Episode reward",
+                        self.episode_reward,
+                        self.current_episode,
+                    )
                 if self.csv_save:
                     self.csv_files["episode_reward"][0].writerow((self.current_episode, self.episode_reward))
 
             if self.episode_length_enabled:
-                self.summary_writer.add_scalar(
-                    "Training/Episode length",
-                    self.episode_length,
-                    self.current_episode,
-                )
+                if self.summary_writer:
+                    self.summary_writer.add_scalar(
+                        "Training/Episode length",
+                        self.episode_length,
+                        self.current_episode,
+                    )
                 if self.csv_save:
                     self.csv_files["episode_length"][0].writerow((self.current_episode, self.episode_length))
             
             if self.truncation_enabled:
                 truncation = 1 if truncated else 0
-                self.summary_writer.add_scalar(
-                    "Training/Episode truncations",
-                    truncation,
-                    self.current_episode,
-                )
+                if self.summary_writer:
+                    self.summary_writer.add_scalar(
+                        "Training/Episode truncations",
+                        truncation,
+                        self.current_episode,
+                    )
                 if self.csv_save:
                     self.csv_files["episode_truncations"][0].writerow((self.current_episode, truncation))
 
@@ -219,58 +224,62 @@ class TrainingLoggerWrapper(FootsiesAgentBase, Generic[T]):
         # Write logs (at the time step level)
         if self.current_step % self.log_frequency == 0:
             if self.average_reward_enabled:
-                self.summary_writer.add_scalar(
-                    "Performance/Average reward",
-                    self.average_reward,
-                    self.current_step,
-                )
+                if self.summary_writer:
+                    self.summary_writer.add_scalar(
+                        "Performance/Average reward",
+                        self.average_reward,
+                        self.current_step,
+                    )
                 if self.csv_save:
                     self.csv_files["average_reward"][0].writerow((self.current_step, self.average_reward))
 
                 # Let's avoid writing 0s, which will happen if we are not even using intrinsic rewards
                 if self.average_intrinsic_reward != 0.0:
-                    self.summary_writer.add_scalar(
-                        "Performance/Average intrinsic reward",
-                        self.average_intrinsic_reward,
-                        self.current_step,
-                    )
+                    if self.summary_writer:
+                        self.summary_writer.add_scalar(
+                            "Performance/Average intrinsic reward",
+                            self.average_intrinsic_reward,
+                            self.current_step,
+                        )
                     if self.csv_save:
                         self.csv_files["average_intrinsic_reward"][0].writerow((self.current_step, self.average_intrinsic_reward))
 
             if self.win_rate_enabled:
-                self.summary_writer.add_scalar(
-                    f"Performance/Win rate over the last {self.recent_wins.maxlen} games",
-                    self.win_rate,
-                    self.current_step,
-                )
+                if self.summary_writer:
+                    self.summary_writer.add_scalar(
+                        f"Performance/Win rate over the last {self.recent_wins.maxlen} games",
+                        self.win_rate,
+                        self.current_step,
+                    )
                 if self.csv_save:
                     self.csv_files["win_rate"][0].writerow((self.current_step, self.win_rate))
 
             for network in self.network_histograms:
                 for layer_name, layer in network.named_parameters():
-                    try:
-                        self.summary_writer.add_histogram(
-                            layer_name, layer, self.current_step
-                        )
-                        # NOTE: don't be deluded by the plotted gradients, these are effectively the gradients of the *last* update, no aggregate.
-                        #       As such, a lot of information is lost/not presented.
-                        # if layer.grad is not None:
-                        #     self.summary_writer.add_histogram(
-                        #         layer_name + " [grad]", layer.grad, self.current_step
-                        #     )
-                    except ValueError as e:
-                        raise RuntimeError(f"Oops, exception happened when adding network histogram: '%s', here are the parameters: %s", e, layer) from e
+                    if self.summary_writer:
+                        try:
+                            self.summary_writer.add_histogram(
+                                layer_name, layer, self.current_step
+                            )
+                            # NOTE: don't be deluded by the plotted gradients, these are effectively the gradients of the *last* update, no aggregate.
+                            #       As such, a lot of information is lost/not presented.
+                            # if layer.grad is not None:
+                            #     self.summary_writer.add_histogram(
+                            #         layer_name + " [grad]", layer.grad, self.current_step
+                            #     )
+                        except ValueError as e:
+                            raise RuntimeError(f"Oops, exception happened when adding network histogram: '%s', here are the parameters: %s", e, layer) from e
 
             for tag, evaluator in self.custom_evaluators:
                 scalar = evaluator()
-                if scalar is not None:
+                if scalar is not None and self.summary_writer:
                     self.summary_writer.add_scalar(tag, scalar, self.current_step)
                     if self.csv_save:
                         self.csv_files[self._simplify_tag(tag)][0].writerow((self.current_step, scalar))
 
             for tag, evaluator in self.custom_evaluators_over_test_states:
                 scalar = evaluator(self.test_states)
-                if scalar is not None:
+                if scalar is not None and self.summary_writer:
                     self.summary_writer.add_scalar(
                         tag, scalar, self.current_step
                     )
@@ -325,7 +334,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase, Generic[T]):
         return self.agent.extract_opponent(env)
 
     def close(self):
-        self.summary_writer.close()
+        if self.summary_writer:
+            self.summary_writer.close()
         for _, file in self.csv_files.values():
             file.close()
 

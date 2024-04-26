@@ -26,6 +26,7 @@ class TrialManager:
         time_steps: int = 1000000,
         time_steps_before_eval: int = 5000,
         curriculum: CurriculumManager | None = None,
+        pruning: bool = True,
     ):
         if objective_function is None and curriculum is None:
             raise ValueError("if not using the curriculum, a custom objective function has to be passed")
@@ -43,6 +44,7 @@ class TrialManager:
         # Curriculum
         self._curriculum_episode_threshold: int = curriculum.episode_threshold if curriculum is not None and curriculum.episode_threshold is not None else 0
         self.curriculum = curriculum
+        self.pruning = pruning
 
     def run(self, trial: optuna.Trial) -> float:
         if self.curriculum is not None:
@@ -67,12 +69,13 @@ class TrialManager:
                     
                     agent.update(obs, next_obs, reward, terminated, truncated, info, next_info) # type: ignore
 
-            loss = self.objective(agent, self.env)
+            if self.pruning:
+                loss = self.objective(agent, self.env)
 
-            trial.report(loss, step + self.time_steps_before_eval)
+                trial.report(loss, step + self.time_steps_before_eval)
 
-            if trial.should_prune():
-                raise optuna.exceptions.TrialPruned()
+                if trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
             
             if self.curriculum is not None and self.curriculum.exhausted:
                 break
@@ -165,6 +168,7 @@ def main(args: ExperimentArgs):
         time_steps=args.time_steps,
         time_steps_before_eval=args.time_steps_before_eval,
         curriculum=curriculum,
+        pruning=args.pruning,
     )
 
     study_name = args.study_name if args.study_name is not None else module_name

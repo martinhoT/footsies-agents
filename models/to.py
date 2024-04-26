@@ -27,7 +27,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     game_model_skippers: bool = True,
     game_model_method: Literal["residual", "differences", "normal"] = "differences",
     
-    # Learn?
+    # Learn what?
     learn: Literal["gm", "no-gm", "none", "all"] = "no-gm",
 
     # Opponent modifiers
@@ -187,6 +187,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
 
     if use_reaction_time:
         assert opponent_model is not None
+        assert opponent_model.p2_model is not None
         
         reaction_time_emulator = ReactionTimeEmulator(
             actor=actor,

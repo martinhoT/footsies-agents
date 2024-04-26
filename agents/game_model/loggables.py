@@ -7,7 +7,7 @@ def get_loggables(agent: GameModelAgent):
             *[g[1].network for g in agent.game_models],
         ],
         "custom_evaluators": [
-            ("Learning/Game model loss (position)", agent.evaluate_average_loss_guard),
+            ("Learning/Game model loss (guard)", agent.evaluate_average_loss_guard),
             ("Learning/Game model loss (move)", agent.evaluate_average_loss_move),
             ("Learning/Game model loss (move progress)", agent.evaluate_average_loss_move_progress),
             ("Learning/Game model loss (position)", agent.evaluate_average_loss_position),

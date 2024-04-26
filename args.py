@@ -154,6 +154,10 @@ class AgentArgs:
         """The name of the agent, for saving, loading and logging"""
         return self._name
 
+    @name.setter
+    def name(self, value: str):
+        self._name = value
+
 
 @dataclass
 class EnvArgs:
@@ -237,20 +241,22 @@ class ExperimentArgs:
     """Agent arguments"""
     env: "EnvArgs"
     """Environment arguments"""
-    time_steps: int = 100000
+    time_steps: int = 200000
     """Number of time steps"""
     study_name: str | None = None
     """Name of the study (should be the same among processes on the same study). If `None`, will use the agent's name as the study name and save it in the `tuning` scripts folder"""
-    maximize: bool = False
+    maximize: bool = True
     """Whether to maximize or minimize the objective value"""
-    n_trials: int = 10
-    """The number of trials to attempt"""
-    time_steps_before_eval: int = 5000
+    n_trials: int | None = None
+    """The number of trials to attempt. If `None`, will run indefinitely (may send SIGTERM to finish the study)"""
+    time_steps_before_eval: int = 50000
     """The number of time steps to train on before evaluating the current model"""
     curriculum: bool = False
     """Whether to evaluate the agent's performance on the curriculum"""
     curriculum_objective: bool = True
     """If using the curriculum, whether to use the objective function designed specifically for it, instead of any custom one"""
+    pruning: bool = True
+    """Whether to enable pruning of unpromising trials (early-stopping)."""
 
 
 def parse_args() -> MainArgs:
