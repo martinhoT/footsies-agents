@@ -86,7 +86,19 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
                     for attribute, value in zip(observer.attributes(), values):
                         data[f"{attribute}{seed}"] = value
 
-                df = pd.DataFrame(data)
+                try:
+                    df = pd.DataFrame(data)
+                except ValueError as e:
+                    import pickle
+                    import datetime
+                    dump = result_path + datetime.datetime.now().isoformat()
+                    with open(dump, "wb") as f:
+                        pickle.dump((observers, data), f)
+                    
+                    print("WARNING: something has gone wrong when creating the dataframe, pickled temporary data to disk.")
+                    print("         Error:", str(e))
+                    exit(1)
+
                 dfs[run_name] = df
 
             # Otherwise, populate existing dataframe

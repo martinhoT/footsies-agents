@@ -45,6 +45,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     actor_entropy_coef: float = 0.04,
     actor_gradient_clipping: float = 0.5,
     critic_discount: float = 1.0,
+    opponent_model_entropy_coef: float = 0.3,
+    opponent_model_lr: float = 1e-2,
 
     # Miscellaneous, but should be scrutinized
     accumulate_at_frameskip: bool = True,
@@ -168,10 +170,10 @@ def model_init(observation_space_size: int, action_space_size: int, *,
                 max_size=1,
                 min_loss=float("+inf"),
             ),
-            learning_rate=1e-2,
+            learning_rate=opponent_model_lr,
             loss_dynamic_weights=opponent_model_dynamic_loss_weights,
             loss_dynamic_weights_max=10.0,
-            entropy_coef=0.3,
+            entropy_coef=opponent_model_entropy_coef,
             reset_context_at=opponent_model_reset_context_at,
         )
 

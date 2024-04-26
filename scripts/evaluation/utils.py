@@ -47,7 +47,7 @@ def create_env(
     return env, footsies_env
 
 
-def quick_agent_args(name: str, model: str = "to", kwargs: dict | None = None) -> AgentArgs:
+def quick_agent_args(name: str, model: str = "to", kwargs: dict[str, Any] | None = None) -> AgentArgs:
     if kwargs is None:
         kwargs = {}
     

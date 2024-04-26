@@ -15,8 +15,8 @@ def test_non_recurrent(il_dataset: Iterator):
         learning_rate=1e-2,
         scar_size=1,
         scar_min_loss=float("+inf"),
-        p1_model=True,
-        p2_model=True,
+        use_p1_model=True,
+        use_p2_model=True,
         recurrent=False,
     )
 
@@ -93,8 +93,8 @@ def test_recurrent(il_dataset: Callable[[], Iterator]):
         learning_rate=1e-2,
         scar_size=1,
         scar_min_loss=float("+inf"),
-        p1_model=True,
-        p2_model=True,
+        use_p1_model=True,
+        use_p2_model=True,
         recurrent=True,
     )
     
@@ -114,8 +114,8 @@ def test_recurrent_dynamic_loss(il_dataset: Callable[[], Iterator]):
         learning_rate=1e-2,
         scar_size=1,
         scar_min_loss=float("+inf"),
-        p1_model=True,
-        p2_model=True,
+        use_p1_model=True,
+        use_p2_model=True,
         recurrent=True,
     )
     

@@ -388,7 +388,7 @@ class PlayerModel:
 
             predicted, _ = self._network(obs, None)
             distribution = torch.distributions.Categorical(logits=predicted)
-            loss = (self.loss_function(predicted, action) * (1 - self._entropy_coef) + -distribution.entropy() * self._entropy_coef) * multiplier
+            loss = (self.loss_function(predicted, action) - self._entropy_coef + distribution.entropy()) * multiplier
             # We need to manually perform the mean accoding to how many effective examples we have.
             # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended.
             loss_agg = loss.sum() / num_examples

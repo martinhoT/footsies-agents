@@ -14,8 +14,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     learning_rate: float = 1e-2,
     scar_size: int = 1,
     scar_min_loss: float = float("+inf"),
-    p1_model: bool = True,
-    p2_model: bool = True,
+    use_p1_model: bool = True,
+    use_p2_model: bool = True,
     recurrent: bool = False,
     reset_context_at: Literal["hit", "neutral", "end"] = "end",
 ) -> tuple[MimicAgent, dict[str, list]]:
@@ -23,7 +23,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     obs_dim = observation_space_size
     action_dim = ActionMap.n_simple()
 
-    p1_model = PlayerModel(
+    player_model = PlayerModel(
         player_model_network=PlayerModelNetwork(
             obs_dim=obs_dim,
             action_dim=action_dim,
@@ -46,7 +46,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         reset_context_at=reset_context_at,
     )
 
-    p2_model = deepcopy(p1_model)
+    p1_model = deepcopy(player_model) if use_p1_model else None
+    p2_model = deepcopy(player_model) if use_p2_model else None
 
     agent = MimicAgent(
         action_dim=action_dim,

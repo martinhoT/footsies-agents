@@ -63,8 +63,8 @@ def main(
         learning_rate=1e-2,
         scar_size=scar_size,
         scar_min_loss=scar_min_loss,
-        p1_model=True,
-        p2_model=True,
+        use_p1_model=True,
+        use_p2_model=True,
         recurrent=recurrent,
         reset_context_at=reset_context_at,
     )
