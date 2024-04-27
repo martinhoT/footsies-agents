@@ -26,19 +26,25 @@ class Observer:
 
 
 class WinRateObserver(Observer):
-    def __init__(self, last: int = 100):
+    def __init__(self, log_frequency: int = 1000, last: int = 100):
+        self._log_frequency = log_frequency
         self._wins = deque([], maxlen=last)
-        self._win_rates = []
+        self._idxs = []
+        self._values = []
 
     def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
         if terminated or truncated:
             won = (reward > 0) if terminated else (next_info["guard"][0] > next_info["guard"][1])
             self._wins.append(won)
-            self._win_rates.append(sum(self._wins) / len(self._wins))
+
+        if step % self._log_frequency == 0:
+            self._idxs.append(step)
+            win_rate = sum(self._wins) / len(self._wins) if self._wins else 0.5
+            self._values.append(win_rate)
 
     @property
     def data(self) -> tuple[list[int], tuple[list[float], ...]]:
-        return list(range(len(self._win_rates))), (self._win_rates,)
+        return self._idxs, (self._values,)
 
     @staticmethod
     def attributes() -> tuple[str, ...]:
