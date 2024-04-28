@@ -16,7 +16,8 @@ from opponents.curriculum import WhiffPunisher, CurriculumOpponent
 from agents.wrappers import FootsiesSimpleActions
 from agents.logger import TrainingLoggerWrapper
 from agents.the_one.agent import TheOneAgent
-from typing import Literal
+from typing import Literal, cast
+from gymnasium.spaces import Discrete
 import tyro
 import logging
 import warnings
@@ -24,13 +25,13 @@ import warnings
 
 class TheOneAnalyserManager:
     def __init__(self,
-        agent: TheOneAgent,
+        agent: TheOneAgent | TrainingLoggerWrapper[TheOneAgent],
         qlearner_manager: QLearnerAnalyserManager,
         mimic_manager: MimicAnalyserManager | None,
         game_model_manager: GameModelAnalyserManager | None,
         custom_opponent: CurriculumOpponent | None = None,
     ):
-        self.agent = agent,
+        self.agent = agent
         self.qlearner_manager = qlearner_manager
         self.mimic_manager = mimic_manager
         self.game_model_manager = game_model_manager
@@ -84,8 +85,8 @@ def main(
     name: str = "f_opp_recurrent_no_mask",
     load: bool = True,
     log: bool = False,
-    rollback_if_possible: bool = True,
     opponent: Literal["human", "bot", "custom"] = "human",
+    include_gm: bool = True,
 ):
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
@@ -119,15 +120,18 @@ def main(
                 FootsiesNormalized(
                     footsies_env,
                 )
-            )
+            ),
+            agent_allow_special_moves=True,
         ),
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
+    assert env.observation_space.shape
+    assert isinstance(env.action_space, Discrete)
 
     if custom:
         agent, loggables = to_(
             env.observation_space.shape[0],
-            env.action_space.n,
+            int(env.action_space.n),
 
             actor_entropy_coef=0.0,
             critic_agent_update="expected_sarsa",
@@ -139,8 +143,8 @@ def main(
     
     else:
         parameters = load_agent_parameters(name)
-        parameters["rollback"] = rollback_if_possible and not parameters.get("use_opponent_model", False)
         agent, loggables = import_agent(model, env, parameters)
+        agent = cast(TheOneAgent, agent)
 
     if log:
         logged_agent = TrainingLoggerWrapper(
@@ -153,7 +157,7 @@ def main(
             truncation=True,
             episode_length=True,
             test_states_number=1,
-            **loggables,
+            **loggables, # type: ignore
         )
 
         logged_agent.preprocess(env)
@@ -161,7 +165,7 @@ def main(
     else:
         logged_agent = agent
 
-    if agent.opp.p2_model.network.is_recurrent:
+    if agent.opp is not None and agent.opp.p2_model is not None and agent.opp.p2_model.network.is_recurrent:
         warnings.warn("Since the agent is recurrent, it needs to have 'online learning' enabled in order to have the recurrent state updated. Additionally, loading and saving states is discouraged for the same reason.")
 
     if load:
@@ -185,7 +189,7 @@ def main(
     else:
         mimic_manager = None
 
-    if agent.gm is not None:
+    if agent.gm is not None and include_gm:
         game_model_manager = GameModelAnalyserManager(
             agent=agent.gm
         )

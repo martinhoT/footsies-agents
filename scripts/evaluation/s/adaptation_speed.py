@@ -1,6 +1,6 @@
 import multiprocessing as mp
 from os import path
-from scripts.evaluation.utils import get_data_custom_loop, create_env
+from scripts.evaluation.utils import create_env
 from models import to_
 from itertools import combinations
 from copy import deepcopy

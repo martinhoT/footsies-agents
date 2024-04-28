@@ -50,12 +50,8 @@ class CurriculumManager(OpponentManager):
 
         self._summary_writer = SummaryWriter(log_dir=log_dir) if log_dir is not None else None
         if csv_save and log_dir is not None:
-            self._csv_file = open(path.join(log_dir, "performancewin_rate_against_current_curriculum_opponent"))
-            self._csv_file_writer = csv.writer(
-                csvfile=self._csv_file,
-                dialect="unix",
-                quoting=csv.QUOTE_MINIMAL,
-            )
+            self._csv_file = open(path.join(log_dir, "performancewin_rate_against_current_curriculum_opponent.csv"), mode="wt")
+            self._csv_file_writer = csv.writer(self._csv_file, "unix", quoting=csv.QUOTE_MINIMAL)
         else:
             self._csv_file = None
             self._csv_file_writer = None

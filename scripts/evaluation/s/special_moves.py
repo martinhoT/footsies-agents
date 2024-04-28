@@ -10,8 +10,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
     }
 
     runs = {k: quick_train_args(
-        agent_args=quick_agent_args(k),
-        env_args=quick_env_args(**v),
+        agent_args=quick_agent_args(k, model="to", kwargs=v),
+        env_args=quick_env_args(footsies_wrapper_simple=(True, not v["remove_special_moves"], "last", "last")),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
 

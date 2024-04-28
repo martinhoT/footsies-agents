@@ -35,6 +35,8 @@ from agents.action import ActionMap
 from dataclasses import asdict
 from stable_baselines3.common.callbacks import BaseCallback
 from collections import deque
+from gymnasium.spaces import Discrete
+from models import ModelInit
 from torch.utils.tensorboard import SummaryWriter # type: ignore
 
 LOGGER = logging.getLogger("main")
@@ -51,12 +53,15 @@ def import_sb3(model: str, env: Env, parameters: dict) -> BaseAlgorithm:
 
 
 def import_agent(model: str, env: Env, parameters: dict) -> tuple[FootsiesAgentBase, dict[str, list]]:
-    model_init_module_str = ".".join(("models", model))
-    model_init_module = importlib.import_module(model_init_module_str)
+    models = importlib.import_module("models")
+    model_init: ModelInit = getattr(models, model + "_")
 
-    agent, loggables = model_init_module.model_init(
+    assert env.observation_space.shape
+    assert isinstance(env.action_space, Discrete)
+
+    agent, loggables = model_init(
         observation_space_size=env.observation_space.shape[0],
-        action_space_size=env.action_space.n,
+        action_space_size=int(env.action_space.n),
         **parameters
     )
 
@@ -217,6 +222,7 @@ def train(
                     reward = penalize_truncation
                 
                 if intrinsic_reward_scheme is not None:
+                    # BUG: probably not info, maybe it's next_info
                     intrinsic_reward = intrinsic_reward_scheme.update_and_reward(obs, next_obs, reward, terminated, truncated, info)
                     # It's not great to use the `info` dict as the storage for intrinsic reward, but this allows the addition of such without breaking the current API.
                     # I could change it but I won't bother. Whathever agent wants to use intrinsic reward can just check if the key is present.
@@ -227,7 +233,7 @@ def train(
                 if tell_agent_of_opponent:
                     # Notify the agent of the opponent's next action distribution, using the same storage method for the intrinsic reward.
                     # Note that this info dict will be kept for the next iteration, which means the agent's `act` method also has access to this information.
-                    info["next_opponent_policy"] = opponent_manager.current_opponent.peek(info)
+                    next_info["next_opponent_policy"] = opponent_manager.current_opponent.peek(next_info)
 
                 agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
                 obs = next_obs
@@ -525,7 +531,7 @@ def main(args: MainArgs):
 
     elif args.curriculum:
         opponent_manager = CurriculumManager(
-            win_rate_threshold=0.9,
+            win_rate_threshold=0.7,
             win_rate_over_episodes=100,
             episode_threshold=args.curriculum_threshold,
             log_dir=log_dir,

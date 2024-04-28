@@ -26,9 +26,9 @@ def define_model(trial: optuna.Trial, env: Env) -> BaseAlgorithm:
             "activation_fn": activation_fn,
             "net_arch": net_arch
         },
+        gamma=trial.suggest_float("gamma", 0.0, 1.0),
 
         # Always the same
-        gamma=trial.suggest_float("gamma", 0.0, 1.0), # we already know that gamma=1.0 is the most successful, at least for our implementation
         max_grad_norm=0.5,
     )
 

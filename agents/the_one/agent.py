@@ -30,7 +30,6 @@ class TheOneAgent(FootsiesAgentBase):
         game_model: GameModelAgent | None = None,
         reaction_time_emulator: ReactionTimeEmulator | None = None,
         # Modifiers
-        remove_special_moves: bool = False,
         rollback_as_opponent_model: bool = False,
         learn_a2c: bool = True,
         learn_opponent_model: bool = True,
@@ -51,7 +50,6 @@ class TheOneAgent(FootsiesAgentBase):
         - `opponent_model`: the opponent model, or `None` if one is not to be used
         - `game_model`: the game model, or `None` if one is not to be used
         - `reaction_time_emulator`: the reaction time emulator, or `None` if one is not to be used
-        - `remove_special_moves`: whether to explicitly not consider special moves as part of the agent's action space
         - `rollback_as_opponent_model`: whether to use rollback-based prediction as a stand-in for the opponent model.
         Only makes sense to be used if the opponent model is `None`
         - `game_model_learning_rate`: the learning rate of the player model
@@ -87,7 +85,6 @@ class TheOneAgent(FootsiesAgentBase):
         self.opp = opponent_model
         self.reaction_time_emulator = reaction_time_emulator
         #  Modifiers
-        self._remove_agent_special_moves = remove_special_moves
         self._rollback_as_opponent_model = rollback_as_opponent_model
         self._learn_a2c = learn_a2c
         self._learn_opponent_model = learn_opponent_model
@@ -172,6 +169,11 @@ class TheOneAgent(FootsiesAgentBase):
                     warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
                 next_opponent_policy, _ = self.opp.p2_model.network.probabilities(next_obs, "auto")
                 next_info["next_opponent_policy"] = next_opponent_policy.detach().squeeze()
+
+            # Cap the opponent's action in case the action dimensionality we consider is smaller
+            # (for instance, if it's 1 which is as if we did not consider them at all)
+            info["p2_simple"] = min(info["p2_simple"], self.opponent_action_dim - 1)
+            next_info["p2_simple"] = min(next_info["p2_simple"], self.opponent_action_dim - 1)
 
             if self._learn_a2c:
                 self.a2c.update(obs, next_obs, reward, terminated, truncated, info, next_info)

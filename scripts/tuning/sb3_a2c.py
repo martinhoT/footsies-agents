@@ -35,9 +35,9 @@ def define_model(trial: optuna.Trial, env: Env) -> BaseAlgorithm:
                 "vf": vf_arch,
             }
         },
+        gamma=trial.suggest_float("gamma", 0.0, 1.0),
 
         # Always the same
-        gamma=1.0, # we already know that gamma=1.0 is the most successful, at least for our implementation
         normalize_advantage=True,
         max_grad_norm=0.5,
         use_sde=False,

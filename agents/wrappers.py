@@ -202,10 +202,10 @@ class FootsiesSimpleActionExtractor:
 
     def __init__(self,
             assumed_agent_action_on_nonactionable: Literal["last", "none", "stand"],
-            assumed_opponent_action_on_nonactionable: Literal["last", "none", "stand"], 
+            assumed_opponent_action_on_nonactionable: Literal["last", "none", "stand"],
         ):
-        self._assumed_agent_action_on_nonactionable = assumed_agent_action_on_nonactionable
-        self._assumed_opponent_action_on_nonactionable = assumed_opponent_action_on_nonactionable
+        self._assumed_agent_action_on_nonactionable: Literal["last", "none", "stand"] = assumed_agent_action_on_nonactionable
+        self._assumed_opponent_action_on_nonactionable: Literal["last", "none", "stand"] = assumed_opponent_action_on_nonactionable
 
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0

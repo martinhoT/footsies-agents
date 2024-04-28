@@ -25,12 +25,13 @@ def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneA
 
     critic_arch_activation, critic_arch_hs = create_arch_suggestions(trial, "critic")
     actor_arch_activation, actor_arch_hs = create_arch_suggestions(trial, "actor")
-    opponent_model_arch_activation, opponent_model_arch_hs = create_arch_suggestions(trial, "opponent_model")
+    # opponent_model_arch_activation, opponent_model_arch_hs = create_arch_suggestions(trial, "opponent_model")
+    opponent_model_arch_activation, opponent_model_arch_hs = nn.LeakyReLU, [64, 64]
     # game_model_arch_activation, game_model_arch_hs = create_arch_suggestions(trial, "game_model")
     game_model_arch_activation, game_model_arch_hs = nn.LeakyReLU, [64, 64]
 
-    actor_lr = trial.suggest_float("actor_lr", 1e-5, 1e-2, log=True)
-    critic_lr = trial.suggest_float("critic_lr", 1e-5, 1e-2, log=True)
+    actor_lr = trial.suggest_float("actor_lr", 1e-5, 1e-1)
+    critic_lr = trial.suggest_float("critic_lr", 1e-5, 1e-1)
 
     actor_entropy_coef = trial.suggest_float("actor_entropy_coef", 0.0, 0.3)
     # actor_gradient_clipping = trial.suggest_float("actor_gradient_clipping", 0.0, 1.0)
@@ -53,7 +54,7 @@ def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneA
         learn="no-gm",
 
         # Opponent modifiers
-        use_opponent_model=True,
+        use_opponent_model=False,
         critic_opponent_update="expected_sarsa",
         consider_explicit_opponent_policy=True,
         opponent_model_dynamic_loss_weights=True,

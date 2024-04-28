@@ -21,7 +21,6 @@ REACTION_TIME_MAX = 29
 
 def model_init(observation_space_size: int, action_space_size: int, *,
     # Important modifiers
-    remove_special_moves: bool = True,
     use_reaction_time: bool = False,
     use_game_model: bool = True,
     game_model_skippers: bool = True,
@@ -45,8 +44,9 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     actor_entropy_coef: float = 0.04,
     actor_gradient_clipping: float = 0.5,
     critic_discount: float = 1.0,
-    opponent_model_entropy_coef: float = 0.3,
-    opponent_model_lr: float = 1e-2,
+    # NOTE: these values are weird because I reformulated the opponent model loss for simplicity
+    opponent_model_entropy_coef: float = 0.43,
+    opponent_model_lr: float = 7e-3,
 
     # Miscellaneous, but should be scrutinized
     accumulate_at_frameskip: bool = True,
@@ -54,6 +54,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     reaction_time_constant: bool = False,
     action_masking: bool = False,
     game_model_skippers_every: int = 5,
+    consider_opponent_at_all: bool = True,
 
     # Probably should be kept as-is
     ppo: bool = False,
@@ -79,8 +80,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
     obs_dim = observation_space_size
-    action_dim = ActionMap.n_simple() - (2 if remove_special_moves else 0)
-    opponent_action_dim = ActionMap.n_simple()
+    action_dim = action_space_size
+    opponent_action_dim = ActionMap.n_simple() if consider_opponent_at_all else 1
 
     actor = ActorNetwork(
         obs_dim=obs_dim,
@@ -148,7 +149,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     a2c = A2CAgent(
         learner=learner,
         opponent_action_dim=opponent_action_dim,
-        use_opponents_perspective=False,
         consider_explicit_opponent_policy=consider_explicit_opponent_policy,
         act_with_qvalues=act_with_qvalues,
     )
@@ -261,7 +261,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         opponent_model=opponent_model,
         game_model=game_model_agent,
         reaction_time_emulator=reaction_time_emulator,
-        remove_special_moves=remove_special_moves,
         rollback_as_opponent_model=rollback,
         # Learn?
         learn_a2c=learn_a2c,

@@ -23,7 +23,6 @@ class A2CAgent(FootsiesAgentTorch):
         self,
         learner: A2CQLearner,
         opponent_action_dim: int,
-        use_opponents_perspective: bool = False,
         consider_explicit_opponent_policy: bool = False,
         act_with_qvalues: bool = False,
     ):
@@ -35,18 +34,12 @@ class A2CAgent(FootsiesAgentTorch):
         ----------
         - `opponent_action_dim`: the number of opponent actions
         - `learner`: the A2C algorithm class to use. If `None`, one will be created
-        - `use_opponents_perspective`: whether to use the opponent's perspective for learning.
         Only valid for FOOTSIES, since it's an environment with 2 players on the same conditions (characters, more specifically)
         - `consider_explicit_opponent_policy`: whether to calculate critic values assuming an explicit opponent policy.
         The opponent policy is specified in the `next_opponent_policy` key of the `info` dictionary in `update`.
         - `act_with_qvalues`: whether to act according to a softmax over Q-values, instead of using the actor's policy.
         """
-        # NOTE: we could (?) use the opponent's perspective if we use the opponent model as the policy, but that makes this whole thing more iffy than it already is
-        if use_opponents_perspective:
-            raise NotImplementedError("using the opponent's perspective for learning is not supported, mainly because it has not been figured out if it's valid or not")
-
         self.opponent_action_dim = opponent_action_dim
-        self.use_opponents_perspective = use_opponents_perspective
         self.consider_explicit_opponent_policy = consider_explicit_opponent_policy
         self._act_with_qvalues = act_with_qvalues
 
