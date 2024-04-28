@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from agents.action import ActionMap
 from typing import Literal
+from collections import deque, namedtuple
 
 LOGGER = logging.getLogger("main.a2c")
 
@@ -126,12 +127,12 @@ class ActorNetwork(nn.Module):
         distribution = Categorical(probs=probs)
         return distribution
 
-    def sample_action(self, obs: torch.Tensor, next_opponent_action: int) -> torch.Tensor:
+    def sample_action(self, obs: torch.Tensor, next_opponent_action: int) -> int:
         """Randomly sample an action. This should be essentially the same as sampling from the `decision_distribution`, if `next_opponent_action` was sampled from `next_opponent_policy`."""
         action_probabilities = self.probabilities(obs, next_opponent_action)
         action_distribution = Categorical(probs=action_probabilities)
         action = action_distribution.sample()
-        return action
+        return int(action.item())
 
     def clone(self, p1: bool = True) -> "ActorNetwork":
         """Create a clone of this actor network, useful for extracting a policy."""
@@ -327,7 +328,9 @@ class A2CQLearner(A2CLearnerBase):
         Q_LEARNING = 2
         # Considers the player to be acting uniformly randomly in the next observation
         UNIFORM = 3
-    
+
+    LearnUpdate = namedtuple("LearnUpdate", ("obs", "next_obs", "reward", "terminated", "truncated", "obs_agent_action", "obs_opponent_action", "agent_will_frameskip", "opponent_will_frameskip", "next_obs_opponent_policy", "intrinsic_reward"))
+
     def __init__(
         self,
         actor: ActorNetwork,
@@ -380,8 +383,6 @@ class A2CQLearner(A2CLearnerBase):
             LOGGER.warning("Considering the agent to be following a uniform random policy doesn't make much sense, and is not recommended")
         if agent_update_style == self.UpdateStyle.SARSA:
             raise NotImplementedError("SARSA updates are not supported for the agent")
-        if opponent_update_style == self.UpdateStyle.SARSA:
-            raise NotImplementedError("SARSA updates are not supported for the opponent")
         if maxent != 0.0 and actor_entropy_loss_coef != 0.0:
             LOGGER.warning("Using both the MaxEnt RL objective and the actor entropy loss coefficient is not recommended. If an effect similar to the entropy loss is meant to be used, activate the `maxent_gradient_flow` argument")
         if maxent != 0.0 and maxent_gradient_flow and not alternative_advantage:
@@ -407,9 +408,12 @@ class A2CQLearner(A2CLearnerBase):
         self.opponent_action_dim = self._critic.opponent_action_dim
 
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients' sign unchanged)
-        self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), lr=actor_learning_rate, maximize=True)
+        self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), lr=actor_learning_rate, maximize=True) # type: ignore
 
         self.frameskipped_critic_updates = []
+
+        # Needed for Sarsa-like updates
+        self._delayed_updates: deque[A2CQLearner.LearnUpdate] = deque([], maxlen=2)
 
         # Discount throughout a single episode
         self.cumulative_discount = 1.0
@@ -425,7 +429,7 @@ class A2CQLearner(A2CLearnerBase):
 
     def sample_action(self, obs: torch.Tensor, *, next_opponent_action: int, **kwargs) -> int:
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
-        return self.actor.sample_action(obs, next_opponent_action=next_opponent_action).item()
+        return self.actor.sample_action(obs, next_opponent_action=next_opponent_action)
 
     def maxent_reward(self, policy: torch.Tensor) -> torch.Tensor:
         """Compute the entropy term of the MaxEnt RL objective according to the agent's policy."""
@@ -529,7 +533,7 @@ class A2CQLearner(A2CLearnerBase):
         # This Einstein summation equation computes the diagonal of a >2D tensor by considering the last two dimensions as matrices.
         return torch.einsum("...ii->...i", pi @ q_so.transpose(-2, -1))
 
-    def advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: torch.Tensor, terminated: bool, agent_action: int, opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, critic: QFunction = None) -> torch.Tensor:
+    def advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: torch.Tensor, terminated: bool, agent_action: int, opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, critic: QFunction | None = None) -> torch.Tensor:
         """
         Compute the advantage. May consider intrinsic reward if an intrinsic critic was provided.
         The returned tensor is a leaf tensor.
@@ -538,6 +542,9 @@ class A2CQLearner(A2CLearnerBase):
         - original: `A(s, o, a) = Q(s, o, a) - V(s, o) = Q(s, o, a) - pi(. | s, o).T Q(s, o, .)`
         - alternative: `... = R + omega(. | s') pi(. | s', .).T Q(s', ., .) - pi(. | s, o).T Q(s, o, .)`
         """
+        if critic is None:
+            critic = self.critic
+
         if self._alternative_advantage:
             if terminated:
                 v_so_next = 0.0
@@ -545,7 +552,7 @@ class A2CQLearner(A2CLearnerBase):
             else:
                 v_s_next = self.value(next_obs, opponent_action=None, critic=critic).detach().squeeze(0)
                 
-                if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+                if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA or self._opponent_update_style == self.UpdateStyle.SARSA:
                     next_opp_pi = next_obs_opponent_policy
                 elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
                     next_opp_pi = nn.functional.one_hot(torch.argmin(v_s_next), num_classes=self.opponent_action_dim).unsqueeze(1).float()
@@ -638,7 +645,7 @@ class A2CQLearner(A2CLearnerBase):
 
         else:
             # Keep the opponent's next policy, which should have been provided as an argument
-            if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA:
+            if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA or self._opponent_update_style == self.UpdateStyle.SARSA:
                 if next_obs_opponent_policy is None:
                     raise ValueError("Expected SARSA updates for the opponent require the opponent's policy on the next observation to be provided")
             # Enable Q-learning, change opponent's policy to greedy
@@ -678,6 +685,51 @@ class A2CQLearner(A2CLearnerBase):
         - `next_obs_opponent_policy`: the probability distribution over opponent actions for the next observation. Should be a column vector. Can be `None` as long as the update style is not Expected SARSA, or the episode terminated
         - `intrinsic_reward`: the intrinsic reward from the environment
         """
+        # If using Sarsa-like updates for the opponent, then we need to learn one time step later
+        if self._opponent_update_style == self.UpdateStyle.SARSA and len(self._delayed_updates) < 2:
+            self._delayed_updates.append(
+                self.LearnUpdate(
+                    obs=obs,
+                    next_obs=next_obs,
+                    reward=reward,
+                    terminated=terminated,
+                    truncated=truncated,
+                    obs_agent_action=obs_agent_action,
+                    obs_opponent_action=obs_opponent_action,
+                    agent_will_frameskip=agent_will_frameskip,
+                    opponent_will_frameskip=opponent_will_frameskip,
+                    next_obs_opponent_policy=None, # Notice how we don't care about the next opponent policy; this is because we are going to fill it as a one-hot tensor of the opponent's actual next action
+                    intrinsic_reward=intrinsic_reward
+                )
+            )
+            
+            # Can't learn yet, we need information of the next time step
+            if len(self._delayed_updates) < 2:
+                return
+
+            # Learn
+            update = self._delayed_updates[0]
+            next_obs_opponent_action = self._delayed_updates[1].obs_opponent_action
+            next_obs_opponent_policy = nn.functional.one_hot(torch.tensor(next_obs_opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
+
+            self.learn(
+                obs=update.obs,
+                next_obs=update.next_obs,
+                reward=update.reward,
+                terminated=update.terminated,
+                truncated=update.truncated,
+                obs_agent_action=update.obs_agent_action,
+                obs_opponent_action=update.obs_opponent_action,
+                agent_will_frameskip=update.agent_will_frameskip,
+                opponent_will_frameskip=update.opponent_will_frameskip,
+                next_obs_opponent_policy=next_obs_opponent_policy, # Here, we substitute the future policy with the action the opponent actually took
+                intrinsic_reward=update.intrinsic_reward
+            )
+
+            # Finish the update and leave
+            self._delayed_updates.popleft()
+            return
+
         # Save the TD error in case the caller wants to check it. The TD error is None if no critic update was performed
         self.extrinsic_td_error = None
         self.intrinsic_td_error = None
