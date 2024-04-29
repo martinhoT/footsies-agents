@@ -10,7 +10,7 @@ from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustom
 from gymnasium.spaces import Discrete
 from typing import cast
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     result_path = path.splitext(__file__)[0]
 
     dummy_env, _ = create_env()
@@ -48,7 +48,12 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
         "initted": AgentCustomRun(agent_1, opponent.act),
     }
 
-    dfs = get_data_custom_loop(result_path, runs, WinRateObserver, seeds=seeds, timesteps=timesteps, processes=processes)
+    dfs = get_data_custom_loop(result_path, runs, WinRateObserver, 
+        seeds=seeds,
+        timesteps=timesteps,
+        processes=processes,
+        y=y,
+    )
     if dfs is None:
         return
 

@@ -3,7 +3,7 @@ from scripts.evaluation.data_collectors import get_data
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     runs_raw = {
         "discount_1_0": {"critic_discount": 1.0, "policy_cumulative_discount": False},
         # "discount_0_999": {"critic_discount": 0.999, "policy_cumulative_discount": False},
@@ -25,6 +25,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
         runs=runs,
         seeds=seeds,
         processes=processes,
+        y=y,
     )
 
     if dfs is None:

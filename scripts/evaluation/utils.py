@@ -81,7 +81,8 @@ def quick_env_args(**kwargs) -> EnvArgs:
         "game_path": "../Footsies-Gym/Build/FOOTSIES.x86_64",
         "dense_reward": False,
     }
-    inner_kwargs.update(kwargs["kwargs"])
+    if "kwargs" in kwargs:
+        inner_kwargs.update(kwargs["kwargs"])
     root_kwargs["kwargs"] = inner_kwargs
 
     return EnvArgs(
@@ -102,7 +103,7 @@ def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, epi
         
         log_tensorboard=True,
         log_file=False,
-        log_frequency=10000,
+        log_frequency=1000,
         log_test_states_number=5000,
         log_step_start=0,
         log_episode_start=0,

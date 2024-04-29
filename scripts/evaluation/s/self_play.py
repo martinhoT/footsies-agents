@@ -7,7 +7,7 @@ from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustomRun
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     result_path = path.splitext(__file__)[0]
 
     dummy_env, _ = create_env()
@@ -36,6 +36,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
         seeds=seeds,
         timesteps=timesteps,
         processes=processes,
+        y=y,
     )
 
     if dfs is None:

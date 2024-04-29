@@ -1,5 +1,6 @@
 sb3_ppo
 sb3_dqn
+sb3_a2c
 game_model
 to
 *.db

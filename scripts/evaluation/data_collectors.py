@@ -20,7 +20,7 @@ class AgentCustomRun:
     opponent:   Callable[[dict, dict], tuple[bool, bool, bool]] | None
 
 
-def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], observer_type: type[Observer], seeds: int = 10, timesteps: int = int(1e6), processes: int = 4) -> dict[str, pd.DataFrame] | None:
+def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], observer_type: type[Observer], seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
     dfs: dict[str, pd.DataFrame] = {}
 
     # `None` means all seeds are missing, and so a new dataframe has to be created
@@ -38,11 +38,12 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
             missing[run_name] = None
 
     if missing:
-        names_list = [f"- {run_name} (seeds: {seeds})" for run_name, seeds in missing.items()]
-        print("The following runs are missing:", *names_list, sep="\n")
-        ans = input("Do you want to run them now? [y/N] ")
-        if ans.upper() != "Y":
-            return None
+        if not y:
+            names_list = [f"- {run_name} (seeds: {seeds})" for run_name, seeds in missing.items()]
+            print("The following runs are missing:", *names_list, sep="\n")
+            ans = input("Do you want to run them now? [y/N] ")
+            if ans.upper() != "Y":
+                return None
 
         # Collect the data
 
@@ -114,7 +115,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
     return dfs
 
 
-def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4) -> dict[str, pd.DataFrame] | None:
+def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
     missing: dict[str, list[tuple[str, int]]] = {}
     for run_name in runs:
         for seed in range(seeds):
@@ -124,11 +125,12 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                 missing.setdefault(run_name, []).append((run_fullname, seed))
 
     if missing:
-        names_list = [f"- {run_name} (seeds: {[s for _, s in seeds]})" for run_name, seeds in missing.items()]
-        print("The following runs are missing:", *names_list, sep="\n")
-        ans = input("Do you want to run them now? [y/N] ")
-        if ans.upper() != "Y":
-            return None
+        if not y:
+            names_list = [f"- {run_name} (seeds: {[s for _, s in seeds]})" for run_name, seeds in missing.items()]
+            print("The following runs are missing:", *names_list, sep="\n")
+            ans = input("Do you want to run them now? [y/N] ")
+            if ans.upper() != "Y":
+                return None
         
         # Try to avoid oversubscription, since each agent will have at least 2 processes running: itself, and the game
         with mp.Pool(processes=processes) as pool:
@@ -138,7 +140,8 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                 for run_fullname, seed in missing_seeded_runs:
                     run_args_modified = deepcopy(run_args)
                     # Update with specific ports for each run
-                    env_ports = FootsiesEnv.find_ports(11000 + i*25, stop=11000 + i*100 + (seed)*10)
+                    port_start = 11000 + i*100 + seed*10
+                    env_ports = FootsiesEnv.find_ports(port_start, stop=port_start + 10)
                     run_args_modified.env.kwargs.update(env_ports)
                     # Update with specific name and seed
                     run_args_modified.agent.name = run_fullname
@@ -167,7 +170,7 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
     return dfs
 
 
-def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModelAgent], observer_type: type[Observer], seeds: int = 10, processes: int = 4, epochs: int = 100, shuffle: bool = True) -> dict[str, pd.DataFrame] | None:
+def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModelAgent], observer_type: type[Observer], seeds: int = 10, processes: int = 4, epochs: int = 100, shuffle: bool = True, y: bool = False) -> dict[str, pd.DataFrame] | None:
     dfs: dict[str, pd.DataFrame] = {}
 
     # `None` means all seeds are missing, and so a new dataframe has to be created
@@ -185,11 +188,12 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
             missing[run_name] = None
 
     if missing:
-        names_list = [f"- {run_name} (seeds: {seeds})" for run_name, seeds in missing.items()]
-        print("The following runs are missing:", *names_list, sep="\n")
-        ans = input("Do you want to run them now? [y/N] ")
-        if ans.upper() != "Y":
-            return None
+        if not y:
+            names_list = [f"- {run_name} (seeds: {seeds})" for run_name, seeds in missing.items()]
+            print("The following runs are missing:", *names_list, sep="\n")
+            ans = input("Do you want to run them now? [y/N] ")
+            if ans.upper() != "Y":
+                return None
 
         # Collect the data
 

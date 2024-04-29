@@ -40,7 +40,7 @@ class QSumObserver(Observer):
         return ("q_sum",)
 
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     env, _ = create_env()
     assert env.observation_space.shape
     assert isinstance(env.action_space, Discrete)
@@ -89,7 +89,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
     dfs = get_data_custom_loop(result_path, agents, observer,
         seeds=seeds,
         timesteps=timesteps,
-        processes=processes
+        processes=processes,
+        y=y,
     )
 
     if dfs is None:

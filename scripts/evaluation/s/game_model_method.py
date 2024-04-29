@@ -6,7 +6,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import GameModelObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = ""):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     runs_raw = {
         "gm_residual": {"learn": "all", "game_model_method": "residual", "game_model_skippers": False},
         "gm_normal": {"learn": "all", "game_model_method": "normal", "game_model_skippers": False},
@@ -26,6 +26,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         runs=runs,
         seeds=seeds,
         processes=processes,
+        y=y,
     )
 
     if dfs is None:

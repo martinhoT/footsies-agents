@@ -560,7 +560,8 @@ def main(args: MainArgs):
             test_states_number=args.misc.log_test_states_number,
             step_start_value=args.misc.log_step_start,
             episode_start_value=args.misc.log_episode_start,
-            **loggables,
+            csv_save=True,
+            **loggables, # type: ignore
         )
     
     if args.intrinsic_reward_scheme:

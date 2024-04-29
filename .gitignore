@@ -8,6 +8,8 @@ logs
 /runs_*
 /saved_*
 /rps/plots
+*.log
+*.prof
 
 # VS Code
 .vscode

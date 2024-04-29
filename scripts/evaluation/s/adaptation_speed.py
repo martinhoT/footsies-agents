@@ -63,7 +63,9 @@ def train_agent_against_opponent(agent: TheOneAgent, opponent: Opponent | None, 
 
 def main(
     seeds: int = 10,
+    timesteps: int = int(1e6),
     processes: int = 4,
+    y: bool = False,
 ):
     dummy_env, _  = create_env()
 
