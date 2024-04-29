@@ -537,8 +537,9 @@ def main(args: MainArgs):
             log_dir=log_dir,
         )
 
+        starter_opponent = opponent_manager.current_opponent.act if opponent_manager.current_opponent is not None else opponent_manager.current_opponent
         footsies_env: FootsiesEnv = env.unwrapped
-        footsies_env.set_opponent(opponent_manager.current_opponent.act)
+        footsies_env.set_opponent(starter_opponent)
 
         LOGGER.info("Activated curriculum learning")
 
@@ -570,15 +571,11 @@ def main(args: MainArgs):
     else:
         intrinsic_reward_scheme = None
 
-    if args.agent.is_sb3:
+    if isinstance(agent, BaseAlgorithm):
         try:
             from stable_baselines3.common.logger import configure
             sb3_logger = configure(log_dir, ["tensorboard"])
             agent.set_logger(sb3_logger)
-
-            # opponent_pool = deque([], maxlen=args.self_play_max_snapshots)
-            # if will_footsies_self_play:
-            #     opponent_pool.append(env.unwrapped.opponent)
 
             if args.misc.log_tensorboard:
                 logging_callback = WinRateCallback(
@@ -588,6 +585,9 @@ def main(args: MainArgs):
                 )
             else:
                 logging_callback = None
+
+            if args.time_steps is None:
+                raise ValueError("the number of time steps has to be specified for SB3 algorithms")
 
             agent.learn(
                 total_timesteps=args.time_steps,

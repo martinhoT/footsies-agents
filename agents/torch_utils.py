@@ -3,7 +3,7 @@ import torch
 import torch.multiprocessing as mp
 import logging
 from logging.handlers import RotatingFileHandler
-from typing import Callable
+from typing import Callable, cast
 from math import floor
 from torch import nn
 from itertools import pairwise
@@ -56,9 +56,9 @@ def hogwild(
     env_generator: Callable[..., Env],
     training_method: Callable,
     n_workers: int,
-    cpus_to_use: int = None,
+    cpus_to_use: int | None = None,
     is_footsies: bool = False,
-    logging_wrapper: Callable[[FootsiesAgentTorch], TrainingLoggerWrapper] = None,
+    logging_wrapper: Callable[[FootsiesAgentTorch], TrainingLoggerWrapper] | None = None,
     **training_method_kwargs
 ):
     """
@@ -101,7 +101,7 @@ def hogwild(
         n_threads: int = 1,
         base_seed: int = 1,
         is_footsies: bool = False,
-        logging_wrapper: Callable[[FootsiesAgentTorch], TrainingLoggerWrapper] = None,
+        logging_wrapper: Callable[[FootsiesAgentTorch], TrainingLoggerWrapper] | None = None,
         **train_kwargs,
     ):
         # Change the logging destination! logging using multiprocessing into the same file is not supported (but into the console works?)
@@ -111,7 +111,7 @@ def hogwild(
                 new_filename = handler.baseFilename.replace(".log", f"_p{rank}.log")
                 
                 # The handler.maxBytes attribute seems to be a string, but the kwarg asks for an int
-                new_handler = RotatingFileHandler(new_filename, maxBytes=1e7, backupCount=handler.backupCount)
+                new_handler = RotatingFileHandler(new_filename, maxBytes=int(1e7), backupCount=handler.backupCount)
                 new_handler.setFormatter(handler.formatter)
                 new_handler.setLevel(handler.level)
 
@@ -289,7 +289,7 @@ def epoched(timesteps: int | None = None, epochs: int | None = None, minibatch_s
     - `minibatch_size`: the size of the accumulated data partitions
     """
     class ArgumentDataset(Dataset):
-        def __init__(self, args: list[list]):
+        def __init__(self, args: list[tuple[torch.Tensor, ...]]):
             # Convert all arguments to tensors.
             # We squeeze the first dimension of those that are already tensors to avoid having the dataloader unnecessarily add another batch dimension.
             self.args = [[(torch.tensor(a) if not isinstance(a, torch.Tensor) else a.squeeze(0)) for a in arg] for arg in args]
@@ -301,9 +301,9 @@ def epoched(timesteps: int | None = None, epochs: int | None = None, minibatch_s
             return self.args[idx]
 
     def epoched_decorator(learning_method: Callable[..., None]):
-        updates: list[list] = []
-        dataset: Dataset = None
-        dataloader: DataLoader = None
+        updates: list[tuple[torch.Tensor, ...]] = []
+        dataset: Dataset | None = None
+        dataloader: DataLoader | None = None
 
         @wraps(learning_method)
         def wrapped(self, *args: torch.Tensor, **kwargs: torch.Tensor):
@@ -344,7 +344,7 @@ class ImitationLearner:
         
         self.policy = policy
         self.action_dim = action_dim
-        self.optimizer = torch.optim.SGD(self.policy.parameters(), maximize=False, lr=learning_rate)
+        self.optimizer = torch.optim.SGD(self.policy.parameters(), maximize=False, lr=learning_rate) # type: ignore
         # NOTE: because of this loss, combinatory actions are not supported
         self.loss_fn = nn.KLDivLoss(reduction="batchmean")
 
@@ -382,6 +382,7 @@ class ActionHistoryAugmentation:
         self.distinct = distinct
         # Fill history with no-ops
         self.history = deque([0] * n, maxlen=n)
+        self.history_len = n
     
     def __call__(self, obs: torch.Tensor, action: int | None) -> torch.Tensor:
         if action is not None and (not self.distinct or (self.history[-1] != action)):
@@ -392,7 +393,7 @@ class ActionHistoryAugmentation:
 
     def reset(self):
         self.history.clear()
-        self.history.extend([0] * self.history.maxlen)
+        self.history.extend([0] * self.history_len)
 
 
 class TimeSinceLastCommitAugmentation:
