@@ -4,9 +4,8 @@ import logging
 import random
 import warnings
 from torch import nn
-from agents.base import FootsiesAgentTorch, FootsiesAgentOpponent
+from agents.base import FootsiesAgentOpponent
 from gymnasium import Env
-from agents.the_one.model import FullModel
 from agents.base import FootsiesAgentBase
 from agents.the_one.reaction_time import ReactionTimeEmulator, MultiStepPredictor
 from agents.a2c.agent import A2CAgent
@@ -168,12 +167,14 @@ class TheOneAgent(FootsiesAgentBase):
                 if "next_opponent_policy" in next_info:
                     warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
                 next_opponent_policy, _ = self.opp.p2_model.network.probabilities(next_obs, "auto")
-                next_info["next_opponent_policy"] = next_opponent_policy.detach().squeeze()
+                next_info["next_opponent_policy"] = next_opponent_policy.detach().squeeze(0)
 
             # Cap the opponent's action in case the action dimensionality we consider is smaller
             # (for instance, if it's 1 which is as if we did not consider them at all)
-            info["p2_simple"] = min(info["p2_simple"], self.opponent_action_dim - 1)
-            next_info["p2_simple"] = min(next_info["p2_simple"], self.opponent_action_dim - 1)
+            if info["p2_simple"] is not None:
+                info["p2_simple"] = min(info["p2_simple"], self.opponent_action_dim - 1)
+            if next_info["p2_simple"] is not None:
+                next_info["p2_simple"] = min(next_info["p2_simple"], self.opponent_action_dim - 1)
 
             if self._learn_a2c:
                 self.a2c.update(obs, next_obs, reward, terminated, truncated, info, next_info)

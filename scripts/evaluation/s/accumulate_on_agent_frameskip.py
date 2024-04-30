@@ -5,8 +5,8 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     runs_raw = {
-        "frameskip": {"accumulate_at_frameskip": True},
-        "no_frameskip": {"accumulate_at_frameskip": False}
+        "yes_agent_frameskip": {"accumulate_at_frameskip": True},
+        "no_agent_frameskip": {"accumulate_at_frameskip": False}
     }
 
     runs = {k: quick_train_args(

@@ -615,14 +615,13 @@ class A2CQLearner(A2CLearnerBase):
         # If the agent could act, then it makes sense for it to have a policy.
         # We have to construct it manually since it is not provided as an argument.
         # It doesn't make sense to provide the policy as argument, since we already have access to it here.
-        # On the other hand, we don't have access to the opponent model, hence why it is explicitly provided.
+        # On the other hand, we don't have access to the opponent model, hence why it is explicitly provided on that method.
         else:
             # Use the agent's next policy
             if self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
                 # We don't consider the action that the opponent will perform, this is just the Q-value matrix to provide to the critic method,
                 # which will then sort how to consider the opponent's next actions internally.
-                next_obs_agent_policy = self.actor.probabilities(next_obs, next_opponent_action=None).detach().squeeze().T
-                pass
+                next_obs_agent_policy = self.actor.probabilities(next_obs, next_opponent_action=None).detach().squeeze(0).T
             # Enable Q-learning, change agent's policy to greedy
             elif self._agent_update_style == self.UpdateStyle.Q_LEARNING:
                 next_obs_agent_policy = "greedy"

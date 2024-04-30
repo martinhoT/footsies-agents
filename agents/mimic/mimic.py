@@ -388,7 +388,7 @@ class PlayerModel:
 
             predicted, _ = self._network(obs, None)
             distribution = torch.distributions.Categorical(logits=predicted)
-            loss = (self.loss_function(predicted, action) - self._entropy_coef + distribution.entropy()) * multiplier
+            loss = (self.loss_function(predicted, action) - self._entropy_coef * distribution.entropy()) * multiplier
             # We need to manually perform the mean accoding to how many effective examples we have.
             # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended.
             loss_agg = loss.sum() / num_examples
@@ -404,7 +404,7 @@ class PlayerModel:
             if all(
                 not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
                 for layer in self.learnable_layers
-            ):
+            ) and loss != 0.0:
                 LOGGER.warning("Learning is dead, gradients are 0! (loss: %s)", loss_agg.item())
             
             self._most_recent_loss = loss_agg.item()

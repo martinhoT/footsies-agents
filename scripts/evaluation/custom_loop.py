@@ -5,7 +5,7 @@ from typing import Callable, TypeVar
 from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
 from tqdm import trange, tqdm
-from scripts.evaluation.utils import create_env
+from scripts.evaluation.utils import create_eval_env
 from data import FootsiesDataset, FootsiesTorchDataset
 from torch.utils.data import DataLoader
 from agents.game_model.agent import GameModelAgent
@@ -117,7 +117,7 @@ def custom_loop(
 
     port_start = 11000 + 1000 * id_
     port_stop = 11000 + (1000) * (id_ + 1)
-    env, footsies_env = create_env(port_start=port_start, port_stop=port_stop)
+    env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop)
 
     footsies_env.set_opponent(opponent)
 

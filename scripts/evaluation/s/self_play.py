@@ -1,7 +1,7 @@
 from main import load_agent_parameters
 from models import to_
 from os import path
-from scripts.evaluation.utils import create_env
+from scripts.evaluation.utils import create_eval_env
 from scripts.evaluation.custom_loop import WinRateObserver
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustomRun
@@ -10,7 +10,7 @@ from gymnasium.spaces import Discrete
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     result_path = path.splitext(__file__)[0]
 
-    dummy_env, _ = create_env()
+    dummy_env, _ = create_eval_env()
     assert dummy_env.observation_space.shape
     assert isinstance(dummy_env.action_space, Discrete)
 

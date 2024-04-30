@@ -2,9 +2,10 @@ from os import path
 from models import mimic_
 from scripts.evaluation.data_collectors import get_data, get_data_dataset
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_env
+from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_eval_env
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
+from dataclasses import replace
 
 def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     result_basename = path.splitext(__file__)[0] + name_suffix
@@ -28,6 +29,29 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
 
+
+    # Win rate on normal agent against curriculum
+    runs_curriculum = {k: replace(v, curriculum=True, curriculum_threshold=1000) for k, v in runs.items()}
+    dfs = get_data(
+        data="win_rate",
+        runs=runs_curriculum,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="Win rate over the last 100 episodes against the curriculum",
+        fig_path=result_basename + "_wr_curriculum",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Win rate",
+        run_name_mapping=run_name_mapping,
+    )
 
     # Win rate on normal agent
     dfs = get_data(
@@ -80,7 +104,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         "opp_entropy_coef_032_opp":   {"entropy_coef": 0.32},
     }
     
-    dummy_env, _ = create_env()
+    dummy_env, _ = create_eval_env()
     assert dummy_env.observation_space.shape
     assert isinstance(dummy_env.action_space, Discrete)
 

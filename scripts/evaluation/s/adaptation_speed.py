@@ -1,6 +1,6 @@
 import multiprocessing as mp
 from os import path
-from scripts.evaluation.utils import create_env
+from scripts.evaluation.utils import create_eval_env
 from models import to_
 from itertools import combinations
 from copy import deepcopy
@@ -34,7 +34,7 @@ class AgentRun:
 def train_agent_against_opponent(agent: TheOneAgent, opponent: Opponent | None, id_: int, label: str = "", timesteps: int = int(1e6), initial_seed: int | None = 0):
     port_start = 11000 + 1000 * id_
     port_stop = 11000 + (1000) * (id_ + 1)
-    env, footsies_env = create_env(port_start=port_start, port_stop=port_stop)
+    env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop)
 
     o = opponent.act if opponent is not None else None
     footsies_env.set_opponent(o)
@@ -67,7 +67,7 @@ def main(
     processes: int = 4,
     y: bool = False,
 ):
-    dummy_env, _  = create_env()
+    dummy_env, _  = create_eval_env()
 
     agent, _ = to_(
         observation_space_size=dummy_env.observation_space.shape[0],

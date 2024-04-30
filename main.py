@@ -283,10 +283,11 @@ def train(
             opponent_manager.close()
 
 
-def create_env(args: EnvArgs) -> Env:
+def create_env(args: EnvArgs, log_dir: str = "runs") -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
         env = FootsiesEnv(
+            opponent=lambda o, i: (False, False, False), # always define a dummy opponent
             **args.kwargs,
         )
 
@@ -313,7 +314,7 @@ def create_env(args: EnvArgs) -> Env:
         if args.footsies_wrapper_adv:
             env = FootsiesEncourageAdvance(
                 env,
-                log_dir=args.log_dir,
+                log_dir=log_dir,
             )
 
         if args.footsies_wrapper_phasic:
@@ -352,7 +353,7 @@ def create_env(args: EnvArgs) -> Env:
                 discriminator_hidden_layer_sizes=args.diayn.discriminator_hidden_layer_sizes,
                 discriminator_hidden_layer_activation=args.diayn.discriminator_hidden_layer_activation,
             ),
-            log_dir=args.log_dir,
+            log_dir=log_dir,
         )
 
     return env
@@ -432,7 +433,7 @@ class WinRateCallback(BaseCallback):
 
 def main(args: MainArgs):
     # Use the same logging directory as the one the environment uses. Everything should be logging to the same place.
-    log_dir = args.env.log_dir
+    log_dir: str = args.log_folder
 
     # Alleviate the need of specifically specifying different ports for each parallel instance.
     # Still, allow the user to specify specific ports if they want to.
@@ -462,7 +463,7 @@ def main(args: MainArgs):
         environment_initialization_msg += "\n".join(f"  {k}: {v} ({type(v).__name__})" for k, v in args.env.kwargs.items())
         LOGGER.info(environment_initialization_msg)
     
-    env = create_env(args.env)
+    env = create_env(args.env, log_dir=log_dir)
 
     # Log which wrappers are being used
     e = env

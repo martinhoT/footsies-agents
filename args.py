@@ -52,25 +52,15 @@ class MainArgs:
         if self.self_play.enabled and self.curriculum:
             raise ValueError("can't use both self-play and curriculum learning at the same time")
         
-        if self.self_play.enabled or self.curriculum:
-            self.env.kwargs["opponent"] = self._dummy_opponent # type: ignore
-        
         if self.env.is_footsies:
             if "game_path" not in self.env.kwargs:
                 raise ValueError(
                     "the path to the FOOTSIES executable should be specified when using the FOOTSIES environment, through the environment keyword argument ('game_path')"
                 )
         
-        self.env.log_dir = f"{self.env.log_dir}/{self.agent.name}"
-
         if self.skip_freeze and not self.env.torch:
             raise ValueError("skipping environment freezes is not supported on observations that aren't PyTorch tensors")
     
-    # NOTE: this is to allow pickle serialization when we perform multiprocessing, as we can't use a lambda function
-    @staticmethod
-    def _dummy_opponent(obs: dict, info: dict) -> tuple[bool, bool, bool]:
-        return (False, False, False)
-
     @property
     def intrinsic_reward_scheme(self) -> type[IntrinsicRewardScheme] | None:
         """The type of intrinsic reward to use"""
@@ -83,6 +73,11 @@ class MainArgs:
 
         return None
 
+    @property
+    def log_folder(self) -> str:
+        """The directory to which all Tensorboard logs are to be saved"""
+        return f"{self.misc.log_base_folder}/{self.agent.name}"
+
 
 @dataclass
 class MiscArgs:
@@ -93,6 +88,8 @@ class MiscArgs:
     
     log_tensorboard: bool = True
     """Whether the agent is logged (Tensorboard logs)"""
+    log_base_folder: str = "runs"
+    """The root directory in which all Tensorboard logs are to be saved. Not meant to be used directly"""
     log_file: bool = True
     """Whether to write standard logs to a file"""
     log_frequency: int = 2000
@@ -154,10 +151,6 @@ class AgentArgs:
         """The name of the agent, for saving, loading and logging"""
         return self._name
 
-    @name.setter
-    def name(self, value: str):
-        self._name = value
-
 
 @dataclass
 class EnvArgs:
@@ -190,8 +183,6 @@ class EnvArgs:
     
     torch: bool = True
     """Whether to transform environment observations to torch tensors"""
-    log_dir: str = "runs"
-    """The directory where any environment-related Tensorboard logs are to be saved"""
 
     @property
     def is_footsies(self) -> bool:

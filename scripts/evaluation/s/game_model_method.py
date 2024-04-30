@@ -2,7 +2,7 @@ from os import path
 from models import game_model_
 from scripts.evaluation.data_collectors import get_data, get_data_dataset
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_env
+from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_eval_env
 from scripts.evaluation.custom_loop import GameModelObserver
 from gymnasium.spaces import Discrete
 
@@ -82,7 +82,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         "gm_differences_gm": {"residual": False, "by_differences": True},
     }
     
-    dummy_env, _ = create_env()
+    dummy_env, _ = create_eval_env()
     assert dummy_env.observation_space.shape
     assert isinstance(dummy_env.action_space, Discrete)
 

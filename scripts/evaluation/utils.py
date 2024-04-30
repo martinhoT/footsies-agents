@@ -18,7 +18,7 @@ def obs_to_torch(o) -> torch.Tensor:
     return torch.from_numpy(o).float().unsqueeze(0)
 
 
-def create_env(
+def create_eval_env(
     port_start: int = 5000,
     port_stop: int | None = None,
 ) -> tuple[Env[torch.Tensor, int], FootsiesEnv]:
@@ -88,7 +88,6 @@ def quick_env_args(**kwargs) -> EnvArgs:
     return EnvArgs(
         name="FOOTSIES",
         torch=True,
-        log_dir="runs",
         **root_kwargs,
     )
 
@@ -102,6 +101,7 @@ def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, epi
         load=False,
         
         log_tensorboard=True,
+        log_base_folder="runs",
         log_file=False,
         log_frequency=1000,
         log_test_states_number=5000,

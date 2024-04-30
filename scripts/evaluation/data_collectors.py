@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from functools import partial
 from main import main
 from copy import deepcopy
+from dataclasses import replace
 
 
 @dataclass
@@ -126,7 +127,7 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
 
     if missing:
         if not y:
-            names_list = [f"- {run_name} (seeds: {[s for _, s in seeds]})" for run_name, seeds in missing.items()]
+            names_list = [f"- {run_name} (seeds: {[seed for _, seed in missing_seeded_runs]})" for run_name, missing_seeded_runs in missing.items()]
             print("The following runs are missing:", *names_list, sep="\n")
             ans = input("Do you want to run them now? [y/N] ")
             if ans.upper() != "Y":
@@ -138,14 +139,20 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
             for i, (run_name, missing_seeded_runs) in enumerate(missing.items()):
                 run_args = runs[run_name]
                 for run_fullname, seed in missing_seeded_runs:
-                    run_args_modified = deepcopy(run_args)
-                    # Update with specific ports for each run
+                    # Update env args with specific ports for each run
                     port_start = 11000 + i*100 + seed*10
-                    env_ports = FootsiesEnv.find_ports(port_start, stop=port_start + 10)
-                    run_args_modified.env.kwargs.update(env_ports)
-                    # Update with specific name and seed
-                    run_args_modified.agent.name = run_fullname
-                    run_args_modified.seed = seed
+                    ports = FootsiesEnv.find_ports(port_start, stop=port_start + 10)
+                    env_args_modified = replace(run_args.env, kwargs=run_args.env.kwargs | ports)
+
+                    # Update agent args with specific name
+                    agent_args_modified = replace(run_args.agent, name_=run_fullname)
+
+                    # Update main args with everything + seed
+                    run_args_modified = replace(run_args,
+                        env=env_args_modified,
+                        agent=agent_args_modified,
+                        seed=seed,
+                    )
                     
                     args.append(run_args_modified)
 
