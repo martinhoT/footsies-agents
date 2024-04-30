@@ -7,7 +7,7 @@ from gymnasium.wrappers.flatten_observation import FlattenObservation
 from agents.wrappers import FootsiesSimpleActions
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers import FootsiesNormalized
-from args import AgentArgs, DIAYNArgs, EnvArgs, MainArgs, MiscArgs, SelfPlayArgs
+from args import AgentArgs, CurriculumArgs, DIAYNArgs, EnvArgs, FootsiesSimpleActionsArgs, MainArgs, MiscArgs, SelfPlayArgs
 
 
 def dummy_opponent(o: dict, i: dict) -> tuple[bool, bool, bool]:
@@ -63,13 +63,15 @@ def quick_agent_args(name: str, model: str = "to", kwargs: dict[str, Any] | None
 def quick_env_args(**kwargs) -> EnvArgs:
     root_kwargs: dict[str, Any] = {
         "diayn": DIAYNArgs(),
+        "self_play": SelfPlayArgs(),
+        "curriculum": CurriculumArgs(),
         
         "wrapper_time_limit": 3000,
 
         "footsies_wrapper_norm": True,
         "footsies_wrapper_norm_guard": True,
         "footsies_wrapper_acd": False,
-        "footsies_wrapper_simple": (True, True, "last", "last"),
+        "footsies_wrapper_simple": FootsiesSimpleActionsArgs(),
         "footsies_wrapper_fs": False,
         "footsies_wrapper_adv": False,
         "footsies_wrapper_phasic": False,
@@ -119,7 +121,6 @@ def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, epi
 
     main_kwargs = {
         "penalize_truncation": None,
-        "curriculum": False,
         "intrinsic_reward_scheme_": None,
         "skip_freeze": True,
     }
@@ -129,7 +130,6 @@ def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, epi
         misc=misc_args,
         agent=agent_args,
         env=env_args,
-        self_play=self_play_args,
         episodes=episodes,
         time_steps=timesteps,
         progress_bar_kwargs={

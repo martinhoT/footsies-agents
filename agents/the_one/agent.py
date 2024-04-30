@@ -1,5 +1,5 @@
 from copy import deepcopy
-import torch
+import torch as T
 import logging
 import random
 import warnings
@@ -63,6 +63,8 @@ class TheOneAgent(FootsiesAgentBase):
             raise ValueError("can't have an opponent model when using the rollback strategy as an opponent predictor, can only use one or the other")
         if reaction_time_emulator is not None and opponent_model is None:
             raise ValueError("can't use reaction time without an opponent model, since reaction time depends on how well we model the opponent's behavior")
+        if opponent_model is not None and opponent_model.p2_model is None:
+            raise ValueError("specified an useless opponent model, it should have a model defined for player 2 (the opponent)")
 
         LOGGER.info("Agent was setup with opponent prediction strategy: %s", "rollback" if rollback_as_opponent_model else "opponent model" if opponent_model is not None else "random (unless doing curriculum learning)")
 
@@ -108,8 +110,8 @@ class TheOneAgent(FootsiesAgentBase):
 
     # It's in this function that the current observation and representation variables are updated.
     # NOTE: during hitstop, the agent is acting in the first frame of hitstop; that means it does not matter how long the hitstop is, the agent won't be able to react to it
-    @torch.no_grad
-    def act(self, obs: torch.Tensor, info: dict) -> int:
+    @T.no_grad
+    def act(self, obs: T.Tensor, info: dict) -> int:
         # Do some pre-processing.
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
@@ -141,7 +143,7 @@ class TheOneAgent(FootsiesAgentBase):
 
         # Predict an action for the opponent.
         # NOTE: this doesn't take into account whether the opponent is actually able to act or not
-        if self.opp is not None:
+        if self.opp is not None and self.opp.p2_model is not None:
             predicted_opponent_distribution, _ = self.opp.p2_model.network.distribution(obs, opponent_model_hidden_state)
             predicted_opponent_action = int(predicted_opponent_distribution.sample().item())
         elif self._rollback_as_opponent_model:
@@ -160,10 +162,10 @@ class TheOneAgent(FootsiesAgentBase):
     # NOTE: reaction time is not used here, it's only used for acting not for learning.
     #       We aren't considering delayed information for the updates, since neural network updates are slow and thus
     #       it's unlikely that these privileged updates are going to make a difference. In turn, the code is simpler.
-    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
+    def update(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
         # Update the different models
         if self._learn_a2c or self._learn_game_model or self._learn_opponent_model:
-            if self.opp is not None:
+            if self.opp is not None and self.opp.p2_model is not None:
                 if "next_opponent_policy" in next_info:
                     warnings.warn("The 'next_opponent_policy' was already provided in info dictionary, but will be overwritten with the opponent model.")
                 next_opponent_policy, _ = self.opp.p2_model.network.probabilities(next_obs, "auto")

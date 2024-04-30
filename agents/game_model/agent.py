@@ -1,11 +1,8 @@
 import os
-import torch
+import torch as T
 import logging
-from torch import nn
 from agents.base import FootsiesAgentBase
-from agents.action import ActionMap
-from gymnasium import Env
-from typing import Callable, Tuple, Literal
+from typing import Any
 from agents.game_model.game_model import GameModel
 from copy import deepcopy
 from collections import deque
@@ -17,7 +14,7 @@ LOGGER = logging.getLogger("main.game_model")
 @dataclass(slots=True)
 class ScheduledUpdate:
     life:       int
-    obs:        torch.Tensor
+    obs:        T.Tensor
     p1_action:  int | None
     p2_action:  int | None
 
@@ -53,10 +50,10 @@ class GameModelAgent(FootsiesAgentBase):
         self.cumulative_loss_move_progress = 0
         self.cumulative_loss_position = 0
 
-    def act(self, obs: torch.Tensor, info: dict) -> "any":
+    def act(self, obs: T.Tensor, info: dict) -> Any:
         return 0
 
-    def update_with_simple_actions(self, obs: torch.Tensor, p1_action: int | None, p2_action: int | None, next_obs: torch.Tensor):
+    def update_with_simple_actions(self, obs: T.Tensor, p1_action: int | None, p2_action: int | None, next_obs: T.Tensor):
         """Perform an update with the given simple actions, useful to avoid recomputing them."""
         guard_loss, move_loss, move_progress_loss, position_loss = 0.0, 0.0, 0.0, 0.0
         there_was_update = False
@@ -96,14 +93,14 @@ class GameModelAgent(FootsiesAgentBase):
             self.cumulative_loss += guard_loss + move_loss + move_progress_loss + position_loss
             self.cumulative_loss_n += 1
 
-    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
+    def update(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
         # We treat both players equally, to guarantee the Markov property
         p1_action = next_info["p1_simple"]
         p2_action = next_info["p2_simple"]
         self.update_with_simple_actions(obs, p1_action, p2_action, next_obs)
 
-    @torch.no_grad
-    def predict(self, obs: torch.Tensor, p1_action: int, p2_action: int, n: int) -> tuple[torch.Tensor, int]:
+    @T.no_grad
+    def predict(self, obs: T.Tensor, p1_action: T.Tensor | int | None, p2_action: T.Tensor | int | None, n: int) -> tuple[T.Tensor, int]:
         """
         Predict the next observation from the current one, which is `n` timesteps ahead.
 
@@ -167,15 +164,12 @@ class GameModelAgent(FootsiesAgentBase):
     def load(self, folder_path: str):
         for i, (_, g) in enumerate(self._game_models):
             model_path = os.path.join(folder_path, f"game_model_{i}.pth")
-            g.network.load_state_dict(torch.load(model_path))
+            g.network.load_state_dict(T.load(model_path))
 
     def save(self, folder_path: str):
         for i, (_, g) in enumerate(self._game_models):
             model_path = os.path.join(folder_path, f"game_model_{i}.pth")
-            torch.save(g.network.state_dict(), model_path)        
-
-    def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        return lambda s: None
+            T.save(g.network.state_dict(), model_path)        
 
     @property
     def game_models(self) -> list[tuple[int, GameModel]]:

@@ -1,5 +1,5 @@
 import os
-import torch
+import torch as T
 import random
 import logging
 from torch import nn
@@ -47,7 +47,7 @@ class A2CAgent(FootsiesAgentTorch):
         self._actor = learner.actor
         self._critic = learner.critic
         
-        modules = {"actor": self._actor}
+        modules: dict[str, nn.Module] = {"actor": self._actor}
         if isinstance(self._critic, ValueNetwork):
             modules["critic"] = self._critic
         elif isinstance(self._critic, QFunctionNetwork):
@@ -55,7 +55,7 @@ class A2CAgent(FootsiesAgentTorch):
         self._model = AggregateModule(modules)
 
         # For tracking
-        self._current_action = None
+        self._current_action: int = 0
 
         # For logging
         self.cumulative_delta = 0
@@ -64,7 +64,7 @@ class A2CAgent(FootsiesAgentTorch):
         self.cumulative_qtable_error_n = 0
         self._test_observations = None
 
-    def act(self, obs: torch.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> "any":
+    def act(self, obs: T.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> int:
         # If we can't perform an action, don't even attempt one.
         if not info["p1_is_actionable"]:
             return 0
@@ -88,10 +88,11 @@ class A2CAgent(FootsiesAgentTorch):
             else:
                 simple_action = self._learner.sample_action(obs, next_opponent_action=predicted_opponent_action)
         
-        self._current_action = simple_action
-        return simple_action
+        action = int(simple_action)
+        self._current_action = action
+        return action
 
-    def update(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
+    def update(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
         # We always consider the agent's simple action, never the one inferred from the observation.
         obs_agent_action = next_info["agent_simple"]
         obs_opponent_action = next_info["p2_simple"]
@@ -117,24 +118,6 @@ class A2CAgent(FootsiesAgentTorch):
             if self._learner.extrinsic_td_error is not None:
                 self.cumulative_qtable_error += self._learner.extrinsic_td_error
                 self.cumulative_qtable_error_n += 1
-        
-    # NOTE: if by the time this function is called `act_with_qvalues` is true, then the extracted policy will act according to the Q-values as well
-    def extract_opponent(self, env: Env) -> Callable[[dict], Tuple[bool, bool, bool]]:
-        if self.act_with_qvalues:
-            critic = deepcopy(self._critic)
-
-            def internal_policy(obs):
-                logits = critic.q(obs)
-                return Categorical(logits=logits).sample().item()
-
-        else:
-            actor = deepcopy(self._actor)
-
-            def internal_policy(obs):
-                probs = actor(obs)
-                return Categorical(probs=probs).sample().item()
-
-        return super()._extract_opponent(env, internal_policy)
     
     @property
     def model(self) -> nn.Module:
@@ -160,7 +143,7 @@ class A2CAgent(FootsiesAgentTorch):
     def load(self, folder_path: str):
         # Load actor
         actor_path = os.path.join(folder_path, "actor")
-        self._actor.load_state_dict(torch.load(actor_path))
+        self._actor.load_state_dict(T.load(actor_path))
         
         # Load critic
         if isinstance(self._critic, QFunctionTable):
@@ -171,12 +154,12 @@ class A2CAgent(FootsiesAgentTorch):
             self._critic.load(critic_path)
         elif isinstance(self._critic, ValueNetwork):
             critic_path = os.path.join(folder_path, "critic_vnetwork")
-            self._critic.load_state_dict(torch.load(critic_path))
+            self._critic.load_state_dict(T.load(critic_path))
 
     def save(self, folder_path: str):
         # Save actor
         actor_path = os.path.join(folder_path, "actor")
-        torch.save(self._actor.state_dict(), actor_path)
+        T.save(self._actor.state_dict(), actor_path)
         
         # Save critic
         def save_critic(critic: QFunction, folder_path: str):
@@ -188,7 +171,7 @@ class A2CAgent(FootsiesAgentTorch):
                 critic.save(critic_path)
             elif isinstance(critic, ValueNetwork):
                 critic_path = os.path.join(folder_path, "critic_vnetwork")
-                torch.save(critic.state_dict(), critic_path)
+                T.save(critic.state_dict(), critic_path)
         
         save_critic(self._critic, folder_path)
         if self.learner.intrinsic_critic is not None:
@@ -217,12 +200,12 @@ class A2CAgent(FootsiesAgentTorch):
     def _initialize_test_states(self, test_states: list[TestState]):
         if self._test_observations is None:
             test_observations = [s.observation for s in test_states]
-            self._test_observations = torch.vstack(test_observations)
+            self._test_observations = T.vstack(test_observations)
 
     def evaluate_average_policy_entropy(self, test_states: list[TestState]) -> float:
         self._initialize_test_states(test_states)
 
-        with torch.no_grad():
+        with T.no_grad():
             probs = self._actor(self._test_observations)
-            entropies = -torch.sum(torch.log(probs + 1e-8) * probs, dim=-1)
-            return torch.mean(entropies).item()
+            entropies = -T.sum(T.log(probs + 1e-8) * probs, dim=-1)
+            return T.mean(entropies).item()

@@ -11,14 +11,12 @@ from torch import nn
 
 @dataclass
 class MainArgs:
-    misc: "MiscArgs"
-    """Miscellaneous arguments"""
     agent: "AgentArgs"
     """Agent arguments"""
-    env: "EnvArgs"
+    misc: "MiscArgs" = field(default_factory=lambda: MiscArgs())
+    """Miscellaneous arguments"""
+    env: "EnvArgs" = field(default_factory=lambda: EnvArgs())
     """Environment arguments"""
-    self_play: "SelfPlayArgs"
-    """Self-play arguments"""
 
     episodes: int | None = None
     """Number of episodes. Doesn't work if an SB3 agent is used"""
@@ -26,10 +24,6 @@ class MainArgs:
     """Number of time steps"""
     penalize_truncation: float | None = None
     """How much to penalize the agent in case the environment is truncated, useful when a time limit is defined for instance. No penalization by default"""
-    curriculum: bool = False
-    """Perform curriculum learning on FOOTSIES with pre-made rule-based opponents"""
-    curriculum_threshold: int | None = None
-    """The maximum number of episodes allowed for the agent to beat the current curriculum opponent before passing on to the next"""
     intrinsic_reward_scheme_: Literal["count", "icm", "rnd", None] = None
     """The type of intrinsic reward to use (string specification)"""
     skip_freeze: bool = True
@@ -48,9 +42,6 @@ class MainArgs:
         
         if self.agent.is_sb3 and self.episodes is not None:
             raise ValueError("specifying a number of episodes for SB3 algorithms is not supported")
-
-        if self.self_play.enabled and self.curriculum:
-            raise ValueError("can't use both self-play and curriculum learning at the same time")
         
         if self.env.is_footsies:
             if "game_path" not in self.env.kwargs:
@@ -154,8 +145,12 @@ class AgentArgs:
 
 @dataclass
 class EnvArgs:
-    diayn: "DIAYNArgs"
+    diayn: "DIAYNArgs" = field(default_factory=lambda: DIAYNArgs())
     """Arguments for the DIAYN wrapper"""
+    self_play: "SelfPlayArgs" = field(default_factory=lambda: SelfPlayArgs())
+    """Arguments for self-play"""
+    curriculum: "CurriculumArgs" = field(default_factory=lambda: CurriculumArgs())
+    """Arguments for curriculum learning"""
 
     name: str = "FOOTSIES"
     """Gymnasium environment to use. The special value 'FOOTSIES' instantiates the FOOTSIES environment"""
@@ -170,8 +165,8 @@ class EnvArgs:
     """For the Normalized wrapper, whether to normalize the guard variable"""
     footsies_wrapper_acd: bool = False
     """Use the Action Combinations Discretized wrapper for FOOTSIES"""
-    footsies_wrapper_simple: tuple[bool, bool, str, str] = (True, True, "last", "last")
-    """Use the Simple Actions wrapper for FOOTSIES (tuple of `(enabled, allow_agent_special_moves, assumed_agent_action_on_nonactionable, assumed_opponent_action_on_nonactionable)`)"""
+    footsies_wrapper_simple: "FootsiesSimpleActionsArgs" = field(default_factory=lambda: FootsiesSimpleActionsArgs())
+    """Arguments for the Simple Actions wrapper for FOOTSIES"""
     footsies_wrapper_fs: bool = False
     """Use the Frame Skipped wrapper for FOOTSIES"""
     footsies_wrapper_adv: bool = False
@@ -184,10 +179,26 @@ class EnvArgs:
     torch: bool = True
     """Whether to transform environment observations to torch tensors"""
 
+    def __post_init__(self):
+        if self.self_play.enabled and self.curriculum.enabled:
+            raise ValueError("can't use both self-play and curriculum learning at the same time")
+
     @property
     def is_footsies(self) -> bool:
         """Whether the environment is FOOTSIES"""
         return self.name == "FOOTSIES"
+
+
+@dataclass
+class FootsiesSimpleActionsArgs:
+    enabled: bool = True
+    """Whether to use the Simple Actions wrapper"""
+    allow_agent_special_moves: bool = True
+    """Whether to allow the agent to utilize special moves"""
+    assumed_agent_action_on_nonactionable: Literal["last", "none", "stand"] = "last"
+    """Which action to assume of the agent when they cannot act"""
+    assumed_opponent_action_on_nonactionable: Literal["last", "none", "stand"] = "last"
+    """Which action to assume of the opponent when they cannot act"""
 
 
 @dataclass
@@ -205,9 +216,10 @@ class DIAYNArgs:
     discriminator_hidden_layer_activation_: str = "ReLU"
     """Hidden layer activation for the discriminator network in DIAYN (string specification)"""
 
-    def discriminator_hidden_layer_activation(self) -> nn.Module:
+    @property
+    def discriminator_hidden_layer_activation(self) -> type[nn.Module]:
         """Hidden layer activation for the discriminator network in DIAYN"""
-        return getattr(nn, self.discriminator_hidden_layer_activation_)()
+        return getattr(nn, self.discriminator_hidden_layer_activation_)
 
 
 @dataclass
@@ -224,6 +236,18 @@ class SelfPlayArgs:
     """How many opponents will the in-game opponent count as, when sampling from the opponent pool. In-game bot won't be sampled if 0"""
     add_curriculum_opps: bool = False
     """Add all opponents that are used for curriculum learning into the self-play's opponent pool"""
+
+
+@dataclass
+class CurriculumArgs:
+    enabled: bool = False
+    """Perform curriculum learning on FOOTSIES with pre-made rule-based opponents"""
+    win_rate_threshold: float = 0.7
+    """The threshold beyond which it is considered that the agent has surpassed the current opponent"""
+    win_rate_over_episodes: int = 100
+    """The number of episodes to consider when calculating the win rate"""
+    episode_threshold: int | None = None
+    """The maximum number of episodes allowed for the agent to beat the current curriculum opponent before passing on to the next"""
 
 
 @dataclass

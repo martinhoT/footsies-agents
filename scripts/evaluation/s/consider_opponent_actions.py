@@ -1,7 +1,8 @@
 from os import path
 from scripts.evaluation.data_collectors import get_data
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.utils import quick_agent_args, quick_train_args
+from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
+from args import CurriculumArgs
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     runs_raw = {
@@ -11,9 +12,13 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
     
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k, model="to", kwargs=v),
+        env_args=quick_env_args(
+            curriculum=CurriculumArgs(
+                enabled=True,
+                episode_threshold=1000,
+            ),
+        ),
         timesteps=timesteps,
-        curriculum=True,
-        curriculum_threshold=1000,
     ) for k, v in runs_raw.items()}
 
     dfs = get_data(

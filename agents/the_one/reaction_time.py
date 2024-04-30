@@ -1,4 +1,4 @@
-import torch
+import torch as T
 import numpy as np
 import logging
 from typing import Literal, TypeVar, Union
@@ -46,8 +46,8 @@ class ReactionTimeEmulator:
         self._prev_reaction_time = None
         self._constant = False
 
-        self._prev_obs_delayed = None
-        self._prev_obs = None
+        self._prev_obs_delayed: T.Tensor
+        self._prev_obs: T.Tensor
         self._opp_hs = None
 
     def confine_to_range(self, minimum: int, maximum: int, agent_n_actions: int):
@@ -60,7 +60,7 @@ class ReactionTimeEmulator:
         
         maximum_entropy = self.maximum_decision_entropy(agent_n_actions)
         b = (maximum - minimum) / maximum_entropy
-        c = minimum
+        c = float(minimum)
 
         self._multiplier = b
         self._additive = c
@@ -86,7 +86,7 @@ class ReactionTimeEmulator:
         # We need to be reasonable, reaction time should not be larger than the previous one (we can'torch.Tensor start seeing things in the past)
         return min(previous_reaction_time + 1, computed_reaction_time)
     
-    def register(self, state: torch.Tensor, info: dict):
+    def register(self, state: T.Tensor, info: dict):
         """Register a state and agent action into the state and player 1 action histories. Should be performed at every environment step, before perceiving an observation."""
         self._states.append(state)
         self._infos.append(info)
@@ -97,7 +97,7 @@ class ReactionTimeEmulator:
         if hasattr(self, "react"):
             del self.react
 
-    def perceive(self, reaction_time: int, previous_reaction_time: int | None = None) -> tuple[torch.Tensor, list[torch.Tensor], dict, list[dict]]:
+    def perceive(self, reaction_time: int, previous_reaction_time: int | None = None) -> tuple[T.Tensor, list[T.Tensor], dict, list[dict]]:
         """Get an observation according to the provided reaction time, and all the observations that were skipped according to the previous reaction time. For a reaction time of 0, return the observation at the current instant."""
         if previous_reaction_time is None:
             # ... why? For instance, imagine the agent starts in the environment (the obs and info buffers filled) but perceives faster than the initial prev_reaction_time (which is None).
@@ -106,15 +106,15 @@ class ReactionTimeEmulator:
 
         observation = self._states[-1 - reaction_time]
         info = self._infos[-1 - reaction_time]
-        skipped_observations = list(islice(self._states, (self._states.maxlen - 1) - previous_reaction_time, (self._states.maxlen - 1) - reaction_time))
-        skipped_infos = list(islice(self._infos, (self._infos.maxlen - 1) - previous_reaction_time, (self._infos.maxlen - 1) - reaction_time))
+        skipped_observations = list(islice(self._states, (self._history_size - 1) - previous_reaction_time, (self._history_size - 1) - reaction_time))
+        skipped_infos = list(islice(self._infos, (self._history_size - 1) - previous_reaction_time, (self._history_size - 1) - reaction_time))
 
         return observation, skipped_observations, info, skipped_infos
 
     # Having this "cache" stuff allows the "_prev" variables to not be updated everytime react is called, and only after new registrations.
     @cached_property
-    @torch.no_grad
-    def react(self) -> tuple[torch.Tensor, int, torch.Tensor]:
+    @T.no_grad
+    def react(self) -> tuple[T.Tensor, int, T.Tensor | None]:
         """
         Perform a reaction, receiving a delayed observation (or a corrected one if a multi-step predictor is used) according to the current reaction time.
         
@@ -135,7 +135,7 @@ class ReactionTimeEmulator:
 
         # Calculate the reaction time from the decision distribution.
         if self._constant:
-            reaction_time = self._additive
+            reaction_time = int(self._additive)
         else:
             reaction_time = self.reaction_time(d.entropy().item(), self._prev_reaction_time)
 
@@ -155,15 +155,15 @@ class ReactionTimeEmulator:
 
         return obs, reaction_time, opp_hs
 
-    def reset(self, state: torch.Tensor, info: dict):
+    def reset(self, state: T.Tensor, info: dict):
         """Reset the internal state of the reaction time emulator, which should be done at the start of every episode."""
         self._states.clear()
         self._infos.clear()
         self._states.extend([state] * self._history_size)
         self._infos.extend([info] * self._history_size)
         self._prev_reaction_time = None
-        self._prev_obs = state
         self._prev_obs_delayed = state
+        self._prev_obs = state
         if hasattr(self, "react"):
             del self.react
 
@@ -180,14 +180,14 @@ class ReactionTimeEmulator:
         self._constant = value
 
     @property
-    def previous_reaction_time(self) -> int:
-        """The most recently perceived reaction time (last call to `register_and_perceive`)."""
+    def previous_reaction_time(self) -> int | None:
+        """The most recently perceived reaction time (last call to `register_and_perceive()`). If it is `None`, then `register_and_perceive()` was never called after `reset()."""
         return self._prev_reaction_time
 
     @property
     def history_size(self) -> int:
         """The (maximum) size of the observation history."""
-        return self._states.maxlen
+        return self._history_size
     
     @property
     def predictor(self) -> Union["MultiStepPredictor", None]:
@@ -208,22 +208,22 @@ class MultiStepPredictor:
         self._actor = reaction_time_emulator._actor
         self._opponent = reaction_time_emulator._opponent
         self._game_model_agent = game_model_agent
-        self._assumed_opponent_action_on_nonactionable = assumed_opponent_action_on_nonactionable
+        # For multi-step prediction, we should make assumptions on the opponent's actions during nonactionable periods
+        # in the same way that the environment does, in order to match what the game model expects.
+        self._assumed_opponent_action_on_nonactionable: Literal["last", "none", "stand"] = assumed_opponent_action_on_nonactionable
 
         # The hidden state of the opponent model (only matters if recurrent).
         # This version of the hidden state is the one calculated after advancing the opponent model up to predicted observation.
         self._current_opp_hs = None
         # The actions that the agent has previously performed.
         # This is a buffer of the same size of the reaction time observation buffer to aid in multi-step prediction of the current state.
-        # The buffer doesn'torch.Tensor need to include the action that was performed at the current state, so we subtract 1.
+        # The buffer doesn't need to include the action that was performed at the current state, so we subtract 1.
         past_size = reaction_time_emulator.history_size - 1
+        self._past_size = past_size
         self._past_agent_actions = deque([0] * past_size, maxlen=past_size)
         self._past_p2_actionables = deque([True] * past_size, maxlen=past_size)
-        # For multi-step prediction, we should make assumptions on the opponent's actions during nonactionable periods
-        # in the same way that the environment does, in order to match what the game model expects.
-        self._assumed_opponent_action_on_nonactionable = None
 
-    def predict(self, prev_obs: torch.Tensor, obs: torch.Tensor, info: dict, n: int, skipped_state_info_pairs: list[tuple[torch.Tensor, dict]]) -> tuple[torch.Tensor, torch.Tensor, int]:
+    def predict(self, prev_obs: T.Tensor, obs: T.Tensor, info: dict, n: int, skipped_state_info_pairs: list[tuple[T.Tensor, dict]]) -> tuple[T.Tensor, T.Tensor | None]:
         """
         Predict the observation `n` timesteps into the future from `obs`.
         
@@ -248,7 +248,7 @@ class MultiStepPredictor:
         
         return obs, opponent_model_hidden_state
 
-    def multi_step_prediction(self, obs: torch.Tensor, n: int, opp_hs: torch.Tensor, last_valid_opp_action: torch.Tensor | int) -> tuple[torch.Tensor, torch.Tensor]:
+    def multi_step_prediction(self, obs: T.Tensor, n: int, opp_hs: T.Tensor | None, last_valid_opp_action: T.Tensor | int) -> tuple[T.Tensor, T.Tensor | None]:
         """
         Predict the observation `n` time steps into the future, using the agent's past executed actions, opponent model and game model.
         
@@ -281,9 +281,14 @@ class MultiStepPredictor:
         
         return o, opp_hs
 
-    def _resolve_opponent_action(self, last_valid_action: int) -> int | None:
+    def _resolve_opponent_action(self, last_valid_action: T.Tensor | int | None) -> int | None:
         if self._assumed_opponent_action_on_nonactionable == "last":
-            return last_valid_action
+            if isinstance(last_valid_action, int):
+                return last_valid_action
+            elif isinstance(last_valid_action, T.Tensor):
+                return int(last_valid_action.item())
+            else:
+                raise ValueError("if using the 'last' opponent action assumption, then the provied last valid actions must not be 'None'")
         elif self._assumed_opponent_action_on_nonactionable == "stand":
             return 0
         elif self._assumed_opponent_action_on_nonactionable == "none":
@@ -299,17 +304,17 @@ class MultiStepPredictor:
     def reset(self):
         """Reset internal state, ideally done at the end of every episode."""
         self._past_agent_actions.clear()
-        self._past_agent_actions.extend([0] * self._past_agent_actions.maxlen)
+        self._past_agent_actions.extend([0] * self._past_size)
         self._past_p2_actionables.clear()
-        self._past_p2_actionables.extend([0] * self._past_p2_actionables.maxlen)
+        self._past_p2_actionables.extend([False] * self._past_size)
         self._current_opp_hs = None
 
     @property
-    def assumed_opponent_action_on_nonactionable(self) -> Literal["str", "none", "stand"]:
+    def assumed_opponent_action_on_nonactionable(self) -> Literal["last", "none", "stand"]:
         """The action that is assumed of the opponent when they can'torch.Tensor act."""
         return self._assumed_opponent_action_on_nonactionable
     
     @assumed_opponent_action_on_nonactionable.setter
-    def assumed_opponent_action_on_nonactionable(self, value: str):
+    def assumed_opponent_action_on_nonactionable(self, value: Literal["last", "none", "stand"]):
         self._assumed_opponent_action_on_nonactionable = value
 

@@ -1,8 +1,10 @@
 import os
 import numpy as np
-import torch
+import torch as T
+import torch.nn.functional as F
 import logging
 from torch import nn
+from typing import Literal
 from abc import ABC, abstractmethod
 from agents.torch_utils import create_layered_network
 from agents.torch_utils import ToMatrix
@@ -16,11 +18,11 @@ class QFunction(ABC):
     """Abstract class for a Q-value function estimator."""
 
     @abstractmethod
-    def _update_q_value(self, obs: torch.Tensor, target: float, action: int = None, opponent_action: int = None):
+    def _update_q_value(self, obs: T.Tensor, target: float, action: int | None = None, opponent_action: int | None = None):
         """Update the Q-value for the given state-action pair considering the provided TD error."""
 
     @abstractmethod
-    def q(self, obs: torch.Tensor, action: int | None = None, opponent_action: int | None = None) -> torch.Tensor:
+    def q(self, obs: T.Tensor, action: int | None = None, opponent_action: int | None = None) -> T.Tensor:
         """Get the Q-value for the given action and observation. If an action is `None`, then return Q-values considering all actions."""
 
     @abstractmethod
@@ -68,15 +70,15 @@ class QFunction(ABC):
 
     def update(
         self,
-        obs: torch.Tensor,
+        obs: T.Tensor,
         reward: float,
-        next_obs: torch.Tensor,
+        next_obs: T.Tensor,
         terminated: bool,
         agent_action: int | None = None,
         opponent_action: int | None = None,
-        next_agent_policy: torch.Tensor | str | None = None,
-        next_opponent_policy: torch.Tensor | str | None = None,
-    ) -> torch.Tensor:
+        next_agent_policy: T.Tensor | Literal["uniform", "greedy"] = "greedy",
+        next_opponent_policy: T.Tensor | Literal["uniform", "greedy"] = "greedy",
+    ) -> T.Tensor:
         """
         Perform a Q-value update. Returns the TD error.
         
@@ -98,8 +100,10 @@ class QFunction(ABC):
         If both this value and `next_opponent_action` are `None`, then the opponent will be assumed to follow a uniform random policy in the next observation.
         Can also be a string: "greedy" for a greedy policy, or "uniform" for a uniform random policy.
         """
-        if isinstance(next_opponent_policy, torch.Tensor) and next_opponent_policy.dim() > 2:
+        if isinstance(next_opponent_policy, T.Tensor) and next_opponent_policy.dim() > 2:
             raise ValueError("expected next_opponent_policy to be a column vector, but found a >2D tensor instead")
+        if self.opponent_action_dim is None:
+            raise ValueError("not considering opponent actions *strongly* is not supported")
 
         if terminated:
             nxt_value = 0.0
@@ -113,21 +117,21 @@ class QFunction(ABC):
             # First compute the effective agent policy (a matrix or column vector), if needed.
             # If it was explicitly passed, then we don't need to artificially create one.
             if next_agent_policy == "uniform":
-                next_agent_policy = torch.ones(self.action_dim).unsqueeze(1) / self.action_dim
+                next_agent_policy = T.ones(self.action_dim).unsqueeze(1) / self.action_dim
             elif next_agent_policy == "greedy":
-                next_agent_policy = nn.functional.one_hot(torch.argmax(next_qs, dim=-1), num_classes=self.action_dim).float().T
+                next_agent_policy = F.one_hot(T.argmax(next_qs, dim=-1), num_classes=self.action_dim).float().T
 
             # The next Q-values aggregated according to the agent's policy, but missing the opponent's
-            next_q_opp = torch.sum(next_qs * next_agent_policy.T, dim=1, keepdim=True)
+            next_q_opp = T.sum(next_qs * next_agent_policy.T, dim=1, keepdim=True)
 
             # Then compute the effective opponent policy (a column vector), if needed.
             # If it was explicitly passed, then we don't need to artificially create one.
             if next_opponent_policy == "uniform":
-                next_opponent_policy = torch.ones(self.opponent_action_dim).unsqueeze(1) / self.opponent_action_dim
+                next_opponent_policy = T.ones(self.opponent_action_dim).unsqueeze(1) / self.opponent_action_dim
             elif next_opponent_policy == "greedy":
                 # This one is tricky! The opponent's policy is a column vector (not conditioned on agent action),
                 # so we need to implicitly take the agent's policy into account in the Q-values
-                next_opponent_policy = nn.functional.one_hot(torch.argmin(next_q_opp), num_classes=self.opponent_action_dim).unsqueeze(1).float()
+                next_opponent_policy = F.one_hot(next_q_opp.argmin(), num_classes=self.opponent_action_dim).unsqueeze(1).float()
 
             # Finally, aggregate the next Q-values according to the opponent's policy
             next_q = next_opponent_policy.T @ next_q_opp
@@ -138,11 +142,11 @@ class QFunction(ABC):
         cur_value = self.q(obs, agent_action, opponent_action=opponent_action).detach()
         td_error = target - cur_value
 
-        if torch.any(torch.isnan(td_error)):
+        if T.any(T.isnan(td_error)):
             LOGGER.critical("Q-values are NaN! Training probably got unstable due to improper targets or high learning rate")
 
         # Don't even bother updating.
-        if torch.all(td_error == 0.0):
+        if T.all(td_error == 0.0):
             return td_error
         
         self._update_q_value(obs, target, agent_action, opponent_action)
@@ -159,14 +163,15 @@ class QFunction(ABC):
 
         return td_error
 
-    def sample_action_best(self, obs: torch.Tensor, opponent_action: int | None = None) -> int:
+    def sample_action_best(self, obs: T.Tensor, opponent_action: int | None = None) -> int:
         """Sample the best action for the given observation."""
         if opponent_action is None and self.considering_opponent:
             raise ValueError("opponent_action must be provided when explicitly considering the opponent's actions")
         
-        return np.argmax(self.q(obs, opponent_action=opponent_action)) if self.considering_opponent else np.argmax(self.q(obs))
+        qs = self.q(obs, opponent_action=opponent_action) if self.considering_opponent else self.q(obs)
+        return int(qs.argmax().item())
 
-    def sample_action_random(self, obs: torch.Tensor, opponent_action: int | None = None) -> int:
+    def sample_action_random(self, obs: T.Tensor, opponent_action: int | None = None) -> int:
         """Sample a random action for the given observation, with action probabilities proportional to their Q-values."""
         if opponent_action is None and self.considering_opponent:
             raise ValueError("opponent_action must be provided when explicitly considering the opponent's actions")
@@ -174,13 +179,13 @@ class QFunction(ABC):
         qs = self.q(obs, opponent_action=opponent_action) if self.considering_opponent else self.q(obs)
 
         # Softmax
-        probs = torch.exp(qs) / torch.sum(torch.exp(qs))
+        probs = T.exp(qs) / T.sum(T.exp(qs))
         return np.random.choice(self.action_dim, p=probs)
 
-    def sample_action_epsilon_greedy(self, obs: torch.Tensor, epsilon: float, opponent_action: int | None = None) -> int:
+    def sample_action_epsilon_greedy(self, obs: T.Tensor, epsilon: float, opponent_action: int | None = None) -> int:
         """Sample an action following an epsilon-greedy policy."""
-        if torch.rand() < epsilon:
-            return torch.randint(self.action_size)
+        if T.rand() < epsilon:
+            return int(T.randint(0, self.action_dim, (1,)).item())
         else:
             return self.sample_action_best(obs, opponent_action)
     
@@ -200,7 +205,7 @@ class QFunctionTable(QFunction):
     def __init__(
         self,
         action_dim: int,
-        opponent_action_dim: int = None,
+        opponent_action_dim: int | None = None,
         discount: float = 1.0,
         learning_rate: float = 1e-2,
         table_as_matrix: bool = False,
@@ -231,7 +236,6 @@ class QFunctionTable(QFunction):
         self._opponent_action_dim = opponent_action_dim
         self._learning_rate = learning_rate
         self._discount = discount
-        self.table_as_matrix = table_as_matrix
         self.environment = environment
 
         if self.environment == "footsies":
@@ -252,27 +256,26 @@ class QFunctionTable(QFunction):
             self.position_bins = np.linspace(-1.2, 0.6, position_n_bins)
             self.velocity_bins = np.linspace(-0.07, 0.07, velocity_n_bins)
 
-        if self.table_as_matrix:
-            if self.considering_opponent:
-                self.table = np.zeros((self.obs_dim, self._opponent_action_dim, self.action_dim), dtype=np.float32)
-                self.update_frequency_table = np.zeros((self.obs_dim, self._opponent_action_dim, self.action_dim), dtype=np.int32)
+        self.table: T.Tensor | dict[int | None, T.Tensor]
+        self.update_frequency_table: T.Tensor | dict[int | None, T.Tensor]
+        if table_as_matrix:
+            if self._opponent_action_dim is not None:
+                self.table = T.zeros((self.obs_dim, self._opponent_action_dim, self.action_dim), dtype=T.float32)
+                self.update_frequency_table = T.zeros((self.obs_dim, self._opponent_action_dim, self.action_dim), dtype=T.int32)
             else:
-                self.table = np.zeros((self.obs_dim, self.action_dim), dtype=np.float32)
-                self.update_frequency_table = np.zeros((self.obs_dim, self.action_dim), dtype=np.int32)
+                self.table = T.zeros((self.obs_dim, self.action_dim), dtype=T.float32)
+                self.update_frequency_table = T.zeros((self.obs_dim, self.action_dim), dtype=T.int32)
         else:
-            if self.considering_opponent:
+            if self._opponent_action_dim is not None:
                 self.table = {}
                 self.update_frequency_table = {}
-                self.table_empty_value = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.float32)
+                self.table_empty_value = T.zeros((self._opponent_action_dim, self.action_dim), dtype=T.float32)
             else:
                 self.table = {}
                 self.update_frequency_table = {}
-                self.table_empty_value = np.zeros(self.action_dim, dtype=np.float32)
-
-            # Make the empty value read-only. This is the value that is returned if the queried observation is not in the Q-table
-            self.table_empty_value.setflags(write=False)
+                self.table_empty_value = T.zeros(self.action_dim, dtype=T.float32)
     
-    def _footsies_obs_idx(self, obs: torch.Tensor) -> int:
+    def _footsies_obs_idx(self, obs: T.Tensor) -> int:
         """Obtain the integer identifier associated to the given observation from the `footsies` environment."""
         obs = obs.squeeze().numpy()
         
@@ -280,11 +283,11 @@ class QFunctionTable(QFunction):
         mo1 = np.argmax(obs[2:17])
         mo2 = np.argmax(obs[17:32])
 
-        mo1_move = ActionMap.move_from_move_index(mo1)
-        mo2_move = ActionMap.move_from_move_index(mo2)
+        mo1_move = ActionMap.move_from_move_index(mo1.item())
+        mo2_move = ActionMap.move_from_move_index(mo2.item())
 
-        mf1 = round(obs[32] * mo1_move.value.duration)
-        mf2 = round(obs[33] * mo2_move.value.duration)
+        mf1 = round(obs[32].item() * mo1_move.value.duration)
+        mf2 = round(obs[33].item() * mo2_move.value.duration)
 
         po1, po2 = tuple(np.digitize(obs[34:36], self.position_bins))
         
@@ -300,7 +303,7 @@ class QFunctionTable(QFunction):
             + 4**2 * 15**2 * self.max_move_duration**2 * self.position_n_bins * po2
         )
 
-    def _mountain_car_obs_idx(self, obs: torch.Tensor) -> int:
+    def _mountain_car_obs_idx(self, obs: T.Tensor) -> int:
         """Obtain the integer identifier associated to the given observation from the `mountain car` environment."""
         obs = obs.squeeze().numpy()
         
@@ -308,7 +311,7 @@ class QFunctionTable(QFunction):
         vel = np.digitize(obs[1], self.velocity_bins).item()
         return int(pos + 10 * vel)
 
-    def _obs_idx(self, obs: torch.Tensor) -> int:
+    def _obs_idx(self, obs: T.Tensor) -> int | None:
         """Obtain the integer identifier associated to the given observation."""
         if self.environment == "footsies":
             return self._footsies_obs_idx(obs)
@@ -317,11 +320,9 @@ class QFunctionTable(QFunction):
         
         return None
 
-    def _update_q_value(self, obs: torch.Tensor, target: float, action: int = None, opponent_action: int = None):
-        if action is None:
-            action = slice(None)
-        if opponent_action is None:
-            opponent_action = slice(None)
+    def _update_q_value(self, obs: T.Tensor, target: float, action: int | None = None, opponent_action: int | None = None):
+        action_idx = slice(None) if action is None else action
+        opponent_action_idx = slice(None) if opponent_action is None else opponent_action
 
         obs_idx = self._obs_idx(obs)
 
@@ -329,66 +330,66 @@ class QFunctionTable(QFunction):
 
         LOGGER.debug("Update Q-value of observation %s to %s", obs_idx, target)
 
-        if self.table_as_matrix:
-            if self.considering_opponent:
-                self.table[obs_idx, opponent_action, action] += self._learning_rate * td_error
-                self.update_frequency_table[obs_idx, opponent_action, action] += 1
+        if isinstance(self.table, T.Tensor) and isinstance(self.update_frequency_table, T.Tensor):
+            if self._opponent_action_dim is not None:
+                self.table[obs_idx, opponent_action_idx, action_idx] += self._learning_rate * td_error
+                self.update_frequency_table[obs_idx, opponent_action_idx, action_idx] += 1
             else:
-                self.table[obs_idx, action] += self._learning_rate * td_error
-                self.update_frequency_table[obs_idx, action] += 1
+                self.table[obs_idx, action_idx] += self._learning_rate * td_error
+                self.update_frequency_table[obs_idx, action_idx] += 1
         else:
-            if self.considering_opponent:
+            if self._opponent_action_dim is not None:
                 if obs_idx not in self.table:
-                    self.table[obs_idx] = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.float32)
-                    self.update_frequency_table[obs_idx] = np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.int32)
-                self.table[obs_idx][opponent_action, action] += + self._learning_rate * td_error
-                self.update_frequency_table[obs_idx][opponent_action, action] += 1
+                    self.table[obs_idx] = T.zeros((self._opponent_action_dim, self.action_dim), dtype=T.float32)
+                    self.update_frequency_table[obs_idx] = T.zeros((self._opponent_action_dim, self.action_dim), dtype=T.int32)
+                self.table[obs_idx][opponent_action_idx, action_idx] += + self._learning_rate * td_error
+                self.update_frequency_table[obs_idx][opponent_action_idx, action_idx] += 1
             else:
                 if obs_idx not in self.table:
-                    self.table[obs_idx] = np.zeros(self.action_dim, dtype=np.float32)
-                    self.update_frequency_table[obs_idx] = np.zeros(self.action_dim, dtype=np.int32)
-                self.table[obs_idx][action] += + self._learning_rate * td_error
-                self.update_frequency_table[obs_idx][action] += 1
+                    self.table[obs_idx] = T.zeros(self.action_dim, dtype=T.float32)
+                    self.update_frequency_table[obs_idx] = T.zeros(self.action_dim, dtype=T.int32)
+                self.table[obs_idx][action_idx] += + self._learning_rate * td_error
+                self.update_frequency_table[obs_idx][action_idx] += 1
 
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None) -> float | torch.Tensor:
-        if action is None:
-            action = slice(None)
-        if opponent_action is None:
-            opponent_action = slice(None)
+    def q(self, obs: T.Tensor, action: int | None = None, opponent_action: int | None = None) -> T.Tensor:
+        action_idx = slice(None) if action is None else action
+        opponent_action_idx = slice(None) if opponent_action is None else opponent_action
         
         res = None
-        if self.table_as_matrix:
-            res = self.table[self._obs_idx(obs), opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs), action] 
+        if isinstance(self.table, T.Tensor):
+            res = self.table[self._obs_idx(obs), opponent_action_idx, action_idx] if self.considering_opponent else self.table[self._obs_idx(obs), action_idx] 
         else:
             obs_idx = self._obs_idx(obs)
             if obs_idx not in self.table:
-                res = self.table_empty_value[opponent_action, action]
+                res = self.table_empty_value[opponent_action_idx, action_idx]
             else:
-                res = self.table[self._obs_idx(obs)][opponent_action, action] if self.considering_opponent else self.table[self._obs_idx(obs)][action]
+                res = self.table[self._obs_idx(obs)][opponent_action_idx, action_idx] if self.considering_opponent else self.table[self._obs_idx(obs)][action_idx]
             
-        return torch.from_numpy(res).unsqueeze(0) if isinstance(res, np.ndarray) else torch.tensor(res).unsqueeze(0)
+        return T.from_numpy(res).unsqueeze(0) if isinstance(res, np.ndarray) else T.tensor(res).unsqueeze(0)
 
-    def update_frequency(self, obs: torch.Tensor) -> np.ndarray:
+    def update_frequency(self, obs: T.Tensor) -> T.Tensor:
         """Get the update frequency for the given observation."""
-        if self.table_as_matrix:
+        if isinstance(self.update_frequency_table, T.Tensor):
             return self.update_frequency_table[self._obs_idx(obs), :, :] if self.considering_opponent else self.update_frequency_table[self._obs_idx(obs), :]
         else:
             obs_idx = self._obs_idx(obs)
             if obs_idx not in self.update_frequency_table:
-                return np.zeros((self._opponent_action_dim, self.action_dim), dtype=np.int32) if self.considering_opponent else np.zeros(self.action_dim, dtype=np.int32)
+                return T.zeros((self._opponent_action_dim, self.action_dim), dtype=T.int32) if self._opponent_action_dim is not None else T.zeros(self.action_dim, dtype=T.int32)
             return self.update_frequency_table[obs_idx][:, :] if self.considering_opponent else self.update_frequency_table[obs_idx][:]
 
     def save(self, path: str):
         table_path = path + "_table"
         update_frequency_table_path = path + "_update_frequency_table"
-        np.save(table_path, self.table)
-        np.save(update_frequency_table_path, self.update_frequency_table)
+        with open(table_path, "wb") as f:
+            T.save(self.table, f)
+        with open(update_frequency_table_path, "wb") as f:
+            T.save(self.update_frequency_table, f)
     
     def load(self, path: str):
-        table_path = path + "_table.npy"
-        update_frequency_table_path = path + "_update_frequency_table.npy"
-        self.table = np.load(table_path, allow_pickle=True).item()
-        self.update_frequency_table = np.load(update_frequency_table_path, allow_pickle=True).item()
+        table_path = path + "_table"
+        update_frequency_table_path = path + "_update_frequency_table"
+        self.table = T.load(table_path, allow_pickle=True)
+        self.update_frequency_table = T.load(update_frequency_table_path, allow_pickle=True)
 
     @property
     def considering_opponent(self) -> bool:
@@ -396,10 +397,10 @@ class QFunctionTable(QFunction):
 
     def sparsity(self) -> float:
         """Calculate how sparse the Q-table is (i.e. how many entries are 0)."""
-        if self.table_as_matrix:
+        if isinstance(self.table, T.Tensor):
             if self.table.size == 0:
                 return 0.0
-            return 1 - len(self.table.nonzero()[0]) / self.table.size
+            return 1 - len(self.table.nonzero()[0]) / self.table.nelement()
         else:
             if len(self.table) == 0:
                 return 0.0
@@ -414,7 +415,7 @@ class QFunctionTable(QFunction):
         return self._action_dim
 
     @property
-    def opponent_action_dim(self) -> int:
+    def opponent_action_dim(self) -> int | None:
         return self._opponent_action_dim
 
     @property
@@ -462,12 +463,12 @@ class QNetwork(nn.Module):
             self.q_layers.append(nn.Tanh())
         self.representation = nn.Identity() if representation is None else representation
     
-    def forward(self, obs: torch.Tensor):
+    def forward(self, obs: T.Tensor):
         rep = self.representation(obs)
         qs = self.q_layers(rep)
         return qs * self._output_multiplier
 
-    def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
+    def from_representation(self, rep: T.Tensor) -> T.Tensor:
         qs = self.q_layers(rep)
         return qs * self._output_multiplier
 
@@ -480,7 +481,7 @@ class QNetwork(nn.Module):
         return self._action_dim
     
     @property
-    def opponent_action_dim(self) -> int:
+    def opponent_action_dim(self) -> int | None:
         return self._opponent_action_dim
 
 
@@ -491,10 +492,10 @@ class QFunctionNetwork(QFunction):
         self,
         q_network: QNetwork,
         action_dim: int,
-        opponent_action_dim: int = None,
+        opponent_action_dim: int | None = None,
         discount: float = 1.0,
         learning_rate: float = 1e-2,
-        target_network: QNetwork = None,
+        target_network: QNetwork | None = None,
         target_network_update_interval: int = 1000,
     ):
         """
@@ -515,12 +516,11 @@ class QFunctionNetwork(QFunction):
         self._action_dim = action_dim
         self._opponent_action_dim = opponent_action_dim
         self._discount = discount
-        self._use_target_network = target_network is not None
         self._target_network_update_interval = target_network_update_interval
 
         self.q_network = q_network
-        self.q_network_optimizer = torch.optim.SGD(self.q_network.parameters(), lr=learning_rate)
-        if self._use_target_network:
+        self.q_network_optimizer = T.optim.SGD(self.q_network.parameters(), lr=learning_rate)
+        if target_network is not None:
             # Make a copy of the Q-network, but with parameters set to 0 to remove any noise that the Q-network would pick up
             self.target_network = target_network
             for param in self.target_network.parameters():
@@ -529,49 +529,51 @@ class QFunctionNetwork(QFunction):
             # Disable gradient computation to get speed boost.
             self.target_network.requires_grad_(False)
         else:
-            self.target_network = self.q_network
+            self.target_network = None
         
         # Target network update tracker
         self._current_update_step = 0
 
-    def _update_q_value(self, obs: torch.Tensor, target: float, action: int = None, opponent_action: int = None):        
-        if action is None:
-            action = slice(None)
-        if opponent_action is None:
-            opponent_action = slice(None)
+    def _update_q_value(self, obs: T.Tensor, target: float, action: int | None = None, opponent_action: int | None = None):        
+        action_idx = slice(None) if action is None else action
+        opponent_action_idx = slice(None) if opponent_action is None else opponent_action
 
         self.q_network_optimizer.zero_grad()
 
         predicted = self.q_network(obs)
-        loss = torch.mean((target - predicted[:, opponent_action, action])**2)
+        loss = T.mean((target - predicted[:, opponent_action_idx, action_idx])**2)
         loss.backward()
 
         self.q_network_optimizer.step()
 
         self._current_update_step += 1
-        if self._use_target_network and self._current_update_step >= self._target_network_update_interval:
+        if self.target_network is not None and self._current_update_step >= self._target_network_update_interval:
             LOGGER.debug("Target network has been updated")
             for target_param, q_param in zip(self.target_network.parameters(), self.q_network.parameters()):
                 target_param.data.copy_(q_param.data)
             self._current_update_step = 0
     
     # The target network is not used by default, being used only for estimating the Q-value of the next observation and avoid instability
-    def q(self, obs: torch.Tensor, action: int = None, opponent_action: int = None, *, use_target_network: bool = False) -> float | torch.Tensor:
-        if action is None:
-            action = slice(None)
-        if opponent_action is None:
-            opponent_action = slice(None)
+    def q(self, obs: T.Tensor, action: int | None = None, opponent_action: int | None = None, *, use_target_network: bool = False) -> T.Tensor:
+        action_idx = slice(None) if action is None else action
+        opponent_action_idx = slice(None) if opponent_action is None else opponent_action
 
-        network = self.target_network if use_target_network else self.q_network
-        return network(obs)[:, opponent_action, action]
+        if use_target_network:
+            if self.target_network is None:
+                raise ValueError("cannot use the target network since it was not requested")
+            network = self.target_network
+        else:
+            network = self.q_network
+
+        return network(obs)[:, opponent_action_idx, action_idx]
 
     def save(self, path: str):
-        torch.save(self.q_network.state_dict(), path)
+        T.save(self.q_network.state_dict(), path)
     
     def load(self, path: str):
-        state_dict = torch.load(path)
+        state_dict = T.load(path)
         self.q_network.load_state_dict(state_dict)
-        if self._use_target_network:
+        if self.target_network is not None:
             self.target_network.load_state_dict(state_dict)
 
     @property
@@ -579,7 +581,7 @@ class QFunctionNetwork(QFunction):
         return self._action_dim
 
     @property
-    def opponent_action_dim(self) -> int:
+    def opponent_action_dim(self) -> int | None:
         return self._opponent_action_dim
 
     @property
@@ -611,10 +613,10 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
         self,
         q_network: QNetwork,
         action_dim: int,
-        opponent_action_dim: int = None,
+        opponent_action_dim: int | None = None,
         discount: float = 1.0,
         learning_rate: float = 1e-2,
-        target_network: QNetwork = None,
+        target_network: QNetwork | None = None,
         target_network_update_interval: int = 1000,
         move_frame_n_bins: int = 5,
         position_n_bins: int = 5,
@@ -660,8 +662,8 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
             self._obs_dim = self.env_obs_dim("footsies", move_frame=move_frame_n_bins, position=position_n_bins)
 
             # Leave some leeway for the start and end of the linear space, since the start and end are part of the observation
-            self.move_frame_bins = torch.linspace(-0.1, 1.1, move_frame_n_bins)
-            self.position_bins = torch.linspace(-1.1, 1.1, position_n_bins)
+            self.move_frame_bins = T.linspace(-0.1, 1.1, move_frame_n_bins)
+            self.position_bins = T.linspace(-1.1, 1.1, position_n_bins)
 
         elif self.environment == "mountain car":
             # These variables are hardcorded for the mountain car environment
@@ -670,45 +672,45 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
             self._obs_dim = self.env_obs_dim("mountain car", position=position_n_bins, velocity=velocity_n_bins)
             self.position_n_bins = position_n_bins
 
-            self.position_bins = torch.linspace(-1.2, 0.6, position_n_bins)
-            self.velocity_bins = torch.linspace(-0.07, 0.07, velocity_n_bins)
+            self.position_bins = T.linspace(-1.2, 0.6, position_n_bins)
+            self.velocity_bins = T.linspace(-0.07, 0.07, velocity_n_bins)
 
-    def _transform_obs(self, obs: torch.Tensor) -> torch.Tensor:
+    def _transform_obs(self, obs: T.Tensor) -> T.Tensor:
         """Transform the continuous environment observation into a discretized one, similar in nature to the Q-table."""
         obs = obs.squeeze()
         
-        gu1, gu2 = torch.round(obs[0:2] * 3).tolist()
+        gu1, gu2 = T.round(obs[0:2] * 3).tolist()
         # We set right=True to mimic the behavior of NumPy's digitize (they are exactly opposite)
-        mf1, mf2 = torch.bucketize(obs[32:34], self.move_frame_bins, right=True).tolist()
-        po1, po2 = torch.bucketize(obs[34:36], self.position_bins, right=True).tolist()
+        mf1, mf2 = T.bucketize(obs[32:34], self.move_frame_bins, right=True).tolist()
+        po1, po2 = T.bucketize(obs[34:36], self.position_bins, right=True).tolist()
         
-        obs_discretized = torch.hstack((
+        obs_discretized = T.hstack((
             # Guard
-            nn.functional.one_hot(torch.tensor([gu1, gu2]).long(), num_classes=4).float().flatten(),
+            F.one_hot(T.tensor([gu1, gu2]).long(), num_classes=4).float().flatten(),
             # Moves
             obs[2:32],
             # Move frame
-            nn.functional.one_hot(torch.tensor([mf1, mf2]).long(), num_classes=self.move_frame_n_bins).float().flatten(),
+            F.one_hot(T.tensor([mf1, mf2]).long(), num_classes=self.move_frame_n_bins).float().flatten(),
             # Position
-            nn.functional.one_hot(torch.tensor([po1, po2]).long(), num_classes=self.position_n_bins).float().flatten(),
+            F.one_hot(T.tensor([po1, po2]).long(), num_classes=self.position_n_bins).float().flatten(),
         ))
 
         return obs_discretized.unsqueeze(0)
 
-    def _update_q_value(self, obs_discretized: torch.Tensor, target: float, action: int = None, opponent_action: int = None):        
+    def _update_q_value(self, obs_discretized: T.Tensor, target: float, action: int | None = None, opponent_action: int | None = None):
         obs_discretized = self._transform_obs(obs_discretized)
         super()._update_q_value(obs_discretized, target, action, opponent_action)
     
-    def q(self, obs: torch.Tensor, *args, **kwargs) -> float | torch.Tensor:
+    def q(self, obs: T.Tensor, *args, **kwargs) -> float | T.Tensor:
         obs_discretized = self._transform_obs(obs)
         return super().q(obs_discretized, *args, **kwargs)
 
     @property
-    def obs_dim(self) -> int:
+    def obs_dim(self) -> int | None:
         return self._obs_dim
 
     @staticmethod
-    def env_obs_dim(environment: str, **kwargs: dict) -> int:
+    def env_obs_dim(environment: str, **kwargs) -> int | None:
         if environment == "footsies":
             move_frame = kwargs["move_frame"]
             position = kwargs["position"]
@@ -717,3 +719,5 @@ class QFunctionNetworkDiscretized(QFunctionNetwork):
             position = kwargs["position"]
             velocity = kwargs["velocity"]
             return position + velocity
+
+        return None

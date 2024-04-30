@@ -1,4 +1,4 @@
-import torch
+import torch as T
 import torch.nn.functional as F
 from torch import nn
 from torch.distributions import Categorical
@@ -13,12 +13,12 @@ class GameModelNetwork(nn.Module):
         obs_dim: int,
         p1_action_dim: int,
         p2_action_dim: int,
-        hidden_layer_sizes: list[int] = None,
+        hidden_layer_sizes: list[int] | None = None,
         hidden_layer_activation: type[nn.Module] = nn.LeakyReLU,
         residual: bool = False,
-        residual_delta: nn.Module = None,
-        residual_forget: nn.Module = None,
-        residual_new: nn.Module = None,
+        residual_delta: nn.Module | None = None,
+        residual_forget: nn.Module | None = None,
+        residual_new: nn.Module | None = None,
     ):
         """
         Neural network for predicting the next FOOTSIES observation given the current observation and the action of each player.
@@ -59,13 +59,13 @@ class GameModelNetwork(nn.Module):
                 input_dim, obs_dim, hidden_layer_sizes, hidden_layer_activation
             )
 
-    def forward(self, obs: torch.Tensor, p1_action: torch.Tensor, p2_action: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: T.Tensor, p1_action: T.Tensor, p2_action: T.Tensor) -> T.Tensor:
         if p1_action.dim() < 2:
             p1_action = F.one_hot(p1_action, num_classes=self._p1_action_dim).float()
         if p2_action.dim() < 2:
             p2_action = F.one_hot(p2_action, num_classes=self._p2_action_dim).float()
         
-        x = torch.hstack((obs, p1_action, p2_action))
+        x = T.hstack((obs, p1_action, p2_action))
         
         if self._residual:    
             f = self._forget_network(x)
@@ -132,7 +132,7 @@ class GameModel:
         self._epoch_epochs = epoch_epochs
         self._epoch_minibatch_size = epoch_minibatch_size
 
-        self.optimizer = torch.optim.SGD(params=self._network.parameters(), lr=learning_rate)
+        self.optimizer = T.optim.SGD(params=self._network.parameters(), lr=learning_rate)
 
         # Slices at which we get the desired variables of the input.
         # This is necessary in case, for instance, we consider the guard variable to be discrete rather than continuous.
@@ -155,7 +155,7 @@ class GameModel:
         # For training
         self.state_batch_as_list = []
 
-    def _convert_discrete_components(self, obs: torch.Tensor) -> torch.Tensor:
+    def _convert_discrete_components(self, obs: T.Tensor) -> T.Tensor:
         """
         Convert the discrete components of the observation to logits.
         This makes it so that addition is more meaningful especially when applying the residual architecture, as suggested in the SSBM paper.
@@ -172,16 +172,16 @@ class GameModel:
         
         return obs
 
-    def _action_to_tensor(self, action: torch.Tensor | int | None, action_dim: int) -> torch.Tensor:
+    def _action_to_tensor(self, action: T.Tensor | int | None, action_dim: int) -> T.Tensor:
         if isinstance(action, int):
-            return torch.tensor([action])
+            return T.tensor([action])
         
         if action is None:
-            return torch.zeros(1, action_dim)
+            return T.zeros(1, action_dim)
     
         return action
 
-    def predict(self, obs: torch.Tensor, p1_action: torch.Tensor | int | None, p2_action: torch.Tensor | int | None) -> torch.Tensor:
+    def predict(self, obs: T.Tensor, p1_action: T.Tensor | int | None, p2_action: T.Tensor | int | None) -> T.Tensor:
         """
         Predict the next observation given the current observation and each player's action (either as a probability distribution or as the action ID).
         The result is detached from the computational graph.
@@ -204,11 +204,11 @@ class GameModel:
 
         return next_obs
 
-    def preprocess_observation(self, obs: torch.Tensor) -> torch.Tensor:
+    def preprocess_observation(self, obs: T.Tensor) -> T.Tensor:
         """Preprocess an observation before passing it to the network."""
         return self._convert_discrete_components(obs)
 
-    def postprocess_prediction(self, prediction: torch.Tensor) -> torch.Tensor:
+    def postprocess_prediction(self, prediction: T.Tensor) -> T.Tensor:
         """Postprocess a network prediction to fit the expected observation structure."""
         prediction = prediction.clone()
         
@@ -227,7 +227,7 @@ class GameModel:
 
         return prediction
 
-    def update(self, obs: torch.Tensor, p1_action: torch.Tensor | int | None, p2_action: torch.Tensor | int | None, next_obs: torch.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
+    def update(self, obs: T.Tensor, p1_action: T.Tensor | int | None, p2_action: T.Tensor | int | None, next_obs: T.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
         """
         Update the game model with the given transition.
         
@@ -311,7 +311,7 @@ class GameModel:
     @property
     def epoch_minibatch_size(self) -> int:
         """The size of the accumulated data partitions."""
-        return self._minibatch_size
+        return self._epoch_minibatch_size
 
     @property
     def learning_rate(self) -> float:

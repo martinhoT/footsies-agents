@@ -71,6 +71,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
                 y=True,
             )
         
+        except KeyboardInterrupt:
+            print(f"Okay, runs of '{name}' were interrupted")
+            exit(0)
+        
         # Catch any problem and ignore it, just notify and try the next script
         except Exception as e:
             print("-" * 50)
@@ -80,7 +84,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
             continue
 
         print("-" * 50)
-        print(f"{'COMPLETED ' + name:^520}")
+        print(f"{'COMPLETED ' + name:^50}")
         print("-" * 50)
 
 

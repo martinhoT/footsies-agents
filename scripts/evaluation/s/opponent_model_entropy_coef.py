@@ -2,10 +2,10 @@ from os import path
 from models import mimic_
 from scripts.evaluation.data_collectors import get_data, get_data_dataset
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_eval_env
+from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args, create_eval_env
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
-from dataclasses import replace
+from args import CurriculumArgs
 
 def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     result_basename = path.splitext(__file__)[0] + name_suffix
@@ -29,9 +29,17 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
 
-
     # Win rate on normal agent against curriculum
-    runs_curriculum = {k: replace(v, curriculum=True, curriculum_threshold=1000) for k, v in runs.items()}
+    runs_curriculum = {k: quick_train_args(
+        agent_args=quick_agent_args(k, model="to", kwargs=v),
+        env_args=quick_env_args(
+            curriculum=CurriculumArgs(
+                enabled=True,
+                episode_threshold=1000,
+            ),
+        ),
+        timesteps=timesteps,
+    ) for k, v in runs_raw.items()}
     dfs = get_data(
         data="win_rate",
         runs=runs_curriculum,

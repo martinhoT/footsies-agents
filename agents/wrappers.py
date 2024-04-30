@@ -1,14 +1,14 @@
 import logging
 from collections import deque
 from typing import Any, Literal, SupportsFloat, cast
-from gymnasium import ObservationWrapper, Wrapper, spaces
+from gymnasium import Env, ObservationWrapper, Wrapper, spaces
 from agents.action import ActionMap
 from footsies_gym.moves import FootsiesMove
 from footsies_gym.envs.footsies import FootsiesEnv
 from torch.utils.tensorboard import SummaryWriter # type: ignore
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from opponents.base import OpponentManager
-from opponents.curriculum import CurriculumManager, CurriculumOpponent
+from opponents.curriculum import CurriculumOpponent
 
 
 class AppendSimpleHistoryWrapper(Wrapper):
@@ -34,6 +34,7 @@ class AppendSimpleHistoryWrapper(Wrapper):
         self.distinct = distinct
         # Fill history with no-ops
         self.history = deque([0] * n, maxlen=n)
+        self.history_len = n
 
         self.prev_obs = None
     
@@ -62,14 +63,15 @@ class AppendSimpleHistoryWrapper(Wrapper):
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict]:
         self.history.clear()
-        self.history.extend([0] * self.history.maxlen)
+        self.history.extend([0] * self.history_len)
         self.prev_obs = None
 
+        obs, info = self.env.reset(seed=seed, options=options)
         obs = self.observation(obs)
 
-        return self.env.reset(seed=seed, options=options)
+        return obs, info
 
-    def step(self, action) -> tuple[Any, float, bool, bool, dict]:
+    def step(self, action) -> tuple[Any, SupportsFloat, bool, bool, dict]:
         next_obs, reward, terminated, truncated, info = self.env.step(action)
 
         next_obs = self.observation(next_obs)
@@ -83,7 +85,7 @@ class FootsiesEncourageAdvance(Wrapper):
     def __init__(self, env,
         distance_cap: float = 4.0,
         advance_reward: float = 0.02,
-        log_dir: str = None,
+        log_dir: str | None = None,
     ):
         """
         Wrapper for providing a reward for advancing towards the opponent based on the distance between players.
@@ -106,8 +108,9 @@ class FootsiesEncourageAdvance(Wrapper):
         self._episode_extra_reward = 0.0
         self._episodes = 0
 
-    def step(self, action: tuple[bool, bool, bool]) -> tuple[dict, float, bool, dict]:
+    def step(self, action: tuple[bool, bool, bool]) -> tuple[dict, float, bool, bool, dict]:
         obs, reward, terminated, truncated, info = self.env.step(action)
+        reward = float(reward)
 
         obs_original = self.footsies_env.most_recent_observation
 
@@ -138,11 +141,11 @@ class FootsiesEncourageAdvance(Wrapper):
 class FootsiesPhasicMoveProgress(ObservationWrapper):
     """Wrapper for bucketizing the move progress according to the move's phase (startup, active, recovery). Must be put after `FootsiesNormalized`, since it works with unflattened observations and normalized move progress."""
 
-    def __init__(self, env):
+    def __init__(self, env: Env):
         super().__init__(env)
 
-        self.observation_space: spaces.Dict = env.observation_space
-        self.observation_space.spaces["move_frame"] = spaces.MultiDiscrete([3, 3])
+        self.observation_space = cast(spaces.Dict, env.observation_space)
+        self.observation_space.spaces["move_frame"] = spaces.MultiDiscrete([3, 3]) # type: ignore
 
     def observation(self, obs: dict) -> dict:
         obs = obs.copy()
@@ -385,14 +388,14 @@ class OpponentManagerWrapper(Wrapper):
 
         self.env = env
         self.footsies_env: FootsiesEnv = cast(FootsiesEnv, env.unwrapped)
-        self.opponent_manager = opponent_manager
+        self._opponent_manager = opponent_manager
     
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict]:
-        if self.opponent_manager.current_opponent is not None:
-            self.opponent_manager.current_opponent.reset()
+        if self._opponent_manager.current_opponent is not None:
+            self._opponent_manager.current_opponent.reset()
 
         # This makes sure the environment and the curriculum manager are in sync
-        opponent = self.opponent_manager.current_opponent.act if self.opponent_manager.current_opponent is not None else None
+        opponent = self._opponent_manager.current_opponent.act if self._opponent_manager.current_opponent is not None else None
         self.footsies_env.set_opponent(opponent)
 
         obs, info = self.env.reset(seed=seed, options=options)
@@ -403,8 +406,8 @@ class OpponentManagerWrapper(Wrapper):
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         # Whether to notify the agent of the opponent's next action distribution
-        if isinstance(self.opponent_manager.current_opponent, CurriculumOpponent):
-            info["next_opponent_policy"] = self.opponent_manager.current_opponent.peek(info)
+        if isinstance(self._opponent_manager.current_opponent, CurriculumOpponent):
+            info["next_opponent_policy"] = self._opponent_manager.current_opponent.peek(info)
 
         if terminated or truncated:
             # Determine the final game result, to provide to the self-play manager
@@ -415,13 +418,17 @@ class OpponentManagerWrapper(Wrapper):
                 result = 1 if info["guard"][0] > info["guard"][1] else 0
 
             # Set a new opponent from the opponent pool
-            should_change = self.opponent_manager.update_at_episode(result)
+            should_change = self._opponent_manager.update_at_episode(result)
 
             if should_change:
-                opponent = self.opponent_manager.current_opponent.act if self.opponent_manager.current_opponent is not None else None
+                opponent = self._opponent_manager.current_opponent.act if self._opponent_manager.current_opponent is not None else None
                 self.footsies_env.set_opponent(opponent)
 
         return obs, reward, terminated, truncated, info
 
     def close(self):
-        self.opponent_manager.close()
+        self._opponent_manager.close()
+
+    @property
+    def opponent_manager(self) -> OpponentManager:
+        return self._opponent_manager

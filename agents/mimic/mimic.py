@@ -1,10 +1,10 @@
-import torch
+import torch as T
 import logging
 from torch import nn
 from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
 from collections.abc import Generator
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import astuple, dataclass
 from math import log
 from contextlib import contextmanager
 from typing import Literal
@@ -24,7 +24,7 @@ class PlayerModelNetwork(nn.Module):
         use_sigmoid_output: bool = False,
         input_clip: bool = False,
         input_clip_leaky_coef: float = 0,
-        hidden_layer_sizes: list[int] = None,
+        hidden_layer_sizes: list[int] | None = None,
         hidden_layer_activation: type[nn.Module] = nn.LeakyReLU,
         recurrent: nn.RNNBase | bool = False,
     ):
@@ -74,7 +74,7 @@ class PlayerModelNetwork(nn.Module):
         # Hidden state if using recurrency
         self._hidden = None
 
-    def _resolve_recurrency(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor | None]:
+    def _resolve_recurrency(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.Tensor, T.Tensor | None]:
         if isinstance(hidden, str):
             if hidden == "auto":
                 hidden = self.hidden
@@ -89,27 +89,27 @@ class PlayerModelNetwork(nn.Module):
         
         return x, hidden_state
 
-    def forward(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor | None]:
+    def forward(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.Tensor, T.Tensor | None]:
         x, hidden_state = self._resolve_recurrency(obs, hidden)
         output = self.layers(x)
         return output, hidden_state
 
-    def probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor]:
+    def probabilities(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.Tensor, T.Tensor]:
         """The action probabilities at the given observation."""
-        logits, hidden = self(obs, hidden)
-        return self.softmax(logits), hidden
+        logits, new_hidden = self(obs, hidden)
+        return self.softmax(logits), new_hidden
 
-    def log_probabilities(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.Tensor, torch.Tensor]:
+    def log_probabilities(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.Tensor, T.Tensor]:
         """The action log-probabilities at the given observation."""
-        logits, hidden = self(obs, hidden)
-        return self.log_softmax(logits), hidden
+        logits, new_hidden = self(obs, hidden)
+        return self.log_softmax(logits), new_hidden
 
-    def distribution(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> tuple[torch.distributions.Categorical, torch.Tensor]:
+    def distribution(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.distributions.Categorical, T.Tensor]:
         """The action distribution at the given observation."""
-        logits, hidden = self(obs, hidden)
-        return torch.distributions.Categorical(logits=logits), hidden
+        logits, new_hidden = self(obs, hidden)
+        return T.distributions.Categorical(logits=logits), new_hidden
 
-    def compute_hidden_state(self, obs: torch.Tensor, hidden: torch.Tensor | None | str = "auto") -> torch.Tensor:
+    def compute_hidden_state(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> T.Tensor | None:
         """Compute only the hidden state, in case one might want to avoid computing probabilities."""
         _, hidden_state = self._resolve_recurrency(obs, hidden)
         return hidden_state
@@ -120,7 +120,7 @@ class PlayerModelNetwork(nn.Module):
         return self._action_dim
 
     @property
-    def hidden(self) -> torch.Tensor | None:
+    def hidden(self) -> T.Tensor | None:
         """
         The hidden state of the network, used if recurrency is being used. If `None`, then the hidden state hasn't been initialized (should signify the beginning of an episode).
         
@@ -130,7 +130,7 @@ class PlayerModelNetwork(nn.Module):
         return self._hidden
 
     @hidden.setter
-    def hidden(self, value: torch.Tensor | None):
+    def hidden(self, value: T.Tensor | None):
         self._hidden = value
 
     @property
@@ -138,7 +138,7 @@ class PlayerModelNetwork(nn.Module):
         """Whether the network is recurrent."""
         return self._recurrent is not None
 
-    def update_hidden_state(self, obs: torch.Tensor):
+    def update_hidden_state(self, obs: T.Tensor):
         """Update the internal hidden state, useful if using recurrency."""
         hidden = self.compute_hidden_state(obs, self._hidden)
         if hidden is not None:
@@ -174,10 +174,10 @@ class ScarStore:
         self._max_size = max_size
         self._min_loss = min_loss
 
-        self._obs = torch.zeros(max_size, obs_dim)
-        self._action = torch.zeros(max_size, dtype=torch.long)
-        self._multiplier = torch.zeros(max_size)
-        self._loss = torch.zeros(max_size)
+        self._obs = T.zeros(max_size, obs_dim)
+        self._action = T.zeros(max_size, dtype=T.long)
+        self._multiplier = T.zeros(max_size)
+        self._loss = T.zeros(max_size)
 
         self._idx = 0
     
@@ -185,7 +185,7 @@ class ScarStore:
         """Advance the pointer to the oldest scar."""
         self._idx = (self._idx + 1) % self._max_size
     
-    def include(self, obs: torch.Tensor, action: int, multiplier: float):
+    def include(self, obs: T.Tensor, action: int, multiplier: float):
         """Include a new example into the scar store as another example."""
         if self._loss[self._idx] >= self._min_loss:
             LOGGER.warning("The opponent model is forgetting scars! (previous loss: %s, minimum loss: %s). This might be a sign of either a small scar storage or an unforgiving minimum loss.", self._loss[self._idx], self._min_loss)
@@ -197,11 +197,11 @@ class ScarStore:
         self._rotate()
 
     @property
-    def batch(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def batch(self) -> tuple[T.Tensor, T.Tensor, T.Tensor]:
         """The scar store as a training batch (observations, actions and multipliers)."""
         return self._obs, self._action, self._multiplier
 
-    def update(self, loss: torch.Tensor):
+    def update(self, loss: T.Tensor):
         """Update the scar storage. The `loss` should be unreduced (e.g. no averaging over the batch), and thus have the same batch size as the other arguments."""
         self._loss = loss
         # Invalidate examples that already have acceptable loss.
@@ -227,7 +227,7 @@ class PlayerModel:
     def __init__(
         self,
         player_model_network: PlayerModelNetwork,
-        scar_store: ScarStore = None,
+        scar_store: ScarStore | None = None,
         learning_rate: float = 1e-2,
         loss_dynamic_weights: bool = False,
         loss_dynamic_weights_max: float = 10.0,
@@ -260,13 +260,15 @@ class PlayerModel:
         If 1, then only entropy is maximized
         - `reset_context_at`: the point at which to reset the opponent model's context/hidden state
         """
-        if player_model_network.is_recurrent and scar_store.max_size > 1:
+        if player_model_network.is_recurrent and scar_store is not None and scar_store.max_size > 1:
             raise ValueError("the scar system should not be used with recurrent networks, as the hidden state is not properly managed")
+        if not player_model_network.is_recurrent and scar_store is None:
+            raise ValueError("a scar store needs to be specified if using non-recurrent networks")
 
         self._network = player_model_network
         self._scars = scar_store
         self._loss_dynamic_weights = loss_dynamic_weights
-        self._loss_dynamic_weights_max = torch.tensor(loss_dynamic_weights_max)
+        self._loss_dynamic_weights_max = T.tensor(loss_dynamic_weights_max)
         # In the agent's policy, we perform entropy regularization but not as a linear interpolation.
         # That's because in that case the values in this interpolation have vastly different scales (advantage vs entropy), which makes the coefficient awkward to tune.
         # Here, since we are calculating entropies, we can expect values in similar ranges, so we perform linear interpolation.
@@ -276,7 +278,7 @@ class PlayerModel:
 
         self.loss_function = nn.CrossEntropyLoss(reduction="none")
 
-        self.optimizer = torch.optim.SGD(params=self._network.parameters(), lr=learning_rate)
+        self.optimizer = T.optim.SGD(params=self._network.parameters(), lr=learning_rate)
 
         # Just to make training easier, know which layers actually have learnable parameters
         self.is_learnable_layer = [
@@ -297,7 +299,7 @@ class PlayerModel:
         self._most_recent_loss = 0.0
 
         # Action counts
-        self._action_counts = torch.zeros(self._network.action_dim)
+        self._action_counts = T.zeros(self._network.action_dim)
         self._action_counts_total = 0
 
         # We need to keep track of the previous observation so that we know whether to reset the model's context in some circumstances.
@@ -306,9 +308,9 @@ class PlayerModel:
 
         # If the network is recurrent, then we need to keep track of data within an episode before training.
         # We train over an entire episode's worth of data at once.
-        self._accumulated_args = []
+        self._accumulated_args: list[PlayerModel.AccumulatedUpdate] = []
 
-    def should_reset_context(self, prev_obs: torch.Tensor, obs: torch.Tensor, terminated_or_truncated: bool) -> bool:
+    def should_reset_context(self, prev_obs: T.Tensor | None, obs: T.Tensor, terminated_or_truncated: bool) -> bool:
         """Whether to reset the context of the opponent model (if recurrent)."""
         # ALWAYS terminate on episode termination, regardless of mode.
         if terminated_or_truncated:
@@ -318,7 +320,7 @@ class PlayerModel:
         if prev_obs is None:
             return False
         
-        hit = ((obs[0, 0] < prev_obs[0, 0]) or (obs[0, 1] < prev_obs[0, 1])).item()
+        hit = bool(((obs[0, 0] < prev_obs[0, 0]) or (obs[0, 1] < prev_obs[0, 1])).item())
         
         if self._reset_context_at == "neutral":
             prev_dist = (prev_obs[0, 34] - prev_obs[0, 35]).abs().item()
@@ -327,15 +329,23 @@ class PlayerModel:
             return hit or (dist < self._reset_context_at_neutral_dist_threshold and prev_dist >= self._reset_context_at_neutral_dist_threshold)
         elif self._reset_context_at == "hit":
             return hit
+        
+        return False
 
-    def update(self, obs: torch.Tensor, action: torch.Tensor | None | int, terminated_or_truncated: bool, multiplier: torch.Tensor | float = 1.0) -> float:
+    @dataclass(slots=True)
+    class AccumulatedUpdate:
+        obs:        T.Tensor
+        action:     int
+        multiplier: float
+
+    def update(self, obs: T.Tensor, action: int | None, terminated_or_truncated: bool, multiplier: float = 1.0) -> float | None:
         """
         Update the model to predict the action given the provided observation. Can optionally set a multiplier for the given example to give it more importance.
         If `terminated_or_truncated`, any hidden state related to an episode is reset.
 
         It's assumed that the observations in `obs` are in sequence, not shuffled in time!
 
-        Returns the loss.
+        Returns the loss, or `None` if no learning was performed.
         """
         # If the neural network is recurrent, then we accumulate the arguments over an entire episode until termination
         if self._network.is_recurrent:
@@ -347,7 +357,7 @@ class PlayerModel:
                 # This should match the state sequence that the network is actually trained on! (i.e. with frameskipping)
                 self._network.update_hidden_state(obs)
 
-                self._accumulated_args.append((obs, action, multiplier))
+                self._accumulated_args.append(self.AccumulatedUpdate(obs, action, multiplier))
             
             # Don't train as long as the context should be reset
             prev_obs = self._prev_obs
@@ -362,10 +372,14 @@ class PlayerModel:
             if not self._accumulated_args:
                 return None
 
-            obs, action, multiplier = zip(*self._accumulated_args)
-            obs = torch.vstack(obs).float()
-            action = torch.tensor(action).long()
-            multiplier = torch.tensor(multiplier).float()
+            obs_batch, action_batch, multiplier_batch = zip(*(astuple(arg) for arg in self._accumulated_args))
+            obs_batch: tuple[T.Tensor]
+            action_batch: tuple[float]
+            multiplier_batch: tuple[float]
+
+            obs = T.vstack(obs_batch).float()
+            action_target = T.tensor(action_batch).long()
+            multipliers = T.tensor(multiplier_batch).float()
 
             self._accumulated_args.clear()
         
@@ -375,11 +389,14 @@ class PlayerModel:
                 self._update_action_frequency(action)
 
                 # Update the scar store
-                self._scars.include(obs, action, multiplier)
+                if self._scars is not None:
+                    self._scars.include(obs, action, multiplier)
             
-            obs, action, multiplier = self._scars.batch
+            if self._scars is None:
+                raise RuntimeError("the scar store should be specified if using non-recurrent networks")
+            obs, action_target, multipliers = self._scars.batch
 
-        num_examples = multiplier.nonzero().size(0)
+        num_examples = multipliers.nonzero().size(0)
 
         # Update the network
         self._most_recent_loss = None
@@ -387,8 +404,8 @@ class PlayerModel:
             self.optimizer.zero_grad()
 
             predicted, _ = self._network(obs, None)
-            distribution = torch.distributions.Categorical(logits=predicted)
-            loss = (self.loss_function(predicted, action) - self._entropy_coef * distribution.entropy()) * multiplier
+            distribution = T.distributions.Categorical(logits=predicted)
+            loss = (self.loss_function(predicted, action_target) - self._entropy_coef * distribution.entropy()) * multipliers
             # We need to manually perform the mean accoding to how many effective examples we have.
             # Otherwise, the mean will change the speed of learning depending on the scar storage size, which might not be intended.
             loss_agg = loss.sum() / num_examples
@@ -397,17 +414,17 @@ class PlayerModel:
             self.optimizer.step()
 
             # Update the scar store with the newest losses
-            if not self._network.is_recurrent:
+            if not self._network.is_recurrent and self._scars is not None:
                 self._scars.update(loss.detach())
 
             # Check whether learning is dead
             if all(
-                not torch.any(layer.weight.grad) and not torch.any(layer.bias.grad)
+                not T.any(layer.weight.grad) and not T.any(layer.bias.grad)
                 for layer in self.learnable_layers
             ) and loss != 0.0:
                 LOGGER.warning("Learning is dead, gradients are 0! (loss: %s)", loss_agg.item())
             
-            self._most_recent_loss = loss_agg.item()
+            self._most_recent_loss = float(loss_agg.item())
 
         # Reset the action counts once an episode has terminated or truncated, as well as the previous observation variable.
         if terminated_or_truncated:
@@ -417,10 +434,10 @@ class PlayerModel:
         return self._most_recent_loss
 
     def load(self, path: str):
-        self._network.load_state_dict(torch.load(path))
+        self._network.load_state_dict(T.load(path))
 
     def save(self, path: str):
-        torch.save(self._network.state_dict(), path)
+        T.save(self._network.state_dict(), path)
 
     def _update_action_frequency(self, action: int):
         """Increase the amount of actions received by the model for updating. Also, update the loss's action weights according to their inverse frequency, if dynamic loss weights are being used."""
@@ -431,7 +448,7 @@ class PlayerModel:
 
     def _reset_action_counts(self):
         """Reset the counts of the actions received by the model for updating. This should be done if the opponent changes, or after some time (if the opponent is adapting)."""
-        self._action_counts = torch.zeros(self._network.action_dim)
+        self._action_counts = T.zeros(self._network.action_dim)
         self._action_counts_total = 0
 
         self._update_loss_function_weights()
@@ -440,7 +457,7 @@ class PlayerModel:
         """Update the weights of the loss function given to each class (action). No-op if dynamic loss weights are disabled."""
         if self._loss_dynamic_weights:
             # Avoid infinities which are ugly, and too large weights as well.
-            self.loss_function.weight = torch.min(1 / (self.action_frequencies + 1e-8), self._loss_dynamic_weights_max)
+            self.loss_function.weight = T.min(1 / (self.action_frequencies + 1e-8), self._loss_dynamic_weights_max)
 
     @property
     def learnable_layers(self) -> Generator[nn.Module, None, None]:
@@ -450,10 +467,10 @@ class PlayerModel:
                 yield layer
 
     @property
-    def action_frequencies(self) -> torch.Tensor:
+    def action_frequencies(self) -> T.Tensor:
         """The frequency of each action received by the model for updating."""
         if self._action_counts_total == 0:
-            return torch.ones_like(self._action_counts) / self._action_counts.size(0)
+            return T.ones_like(self._action_counts) / self._action_counts.size(0)
         return self._action_counts / self._action_counts_total
 
     @property
@@ -466,8 +483,8 @@ class PlayerModel:
         self.optimizer.param_groups[0]["lr"] = learning_rate
 
     @property
-    def most_recent_loss(self) -> float:
-        """The loss of the most recent `update` call."""
+    def most_recent_loss(self) -> float | None:
+        """The loss of the most recent `update` call, or `None` if no update was performed."""
         return self._most_recent_loss
     
     @property
@@ -481,8 +498,8 @@ class PlayerModel:
         return self._network
     
     @property
-    def scars(self) -> ScarStore:
-        """The scar store of this player model."""
+    def scars(self) -> ScarStore | None:
+        """The scar store of this player model, or `None` if none is being used."""
         return self._scars
 
     @property
@@ -501,7 +518,7 @@ class PlayerModel:
 
     @loss_dynamic_weights_max.setter
     def loss_dynamic_weights_max(self, value: float):
-        self._loss_dynamic_weights_max = torch.tensor(value)
+        self._loss_dynamic_weights_max = T.tensor(value)
     
     @property
     def entropy_coef(self) -> float:

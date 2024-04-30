@@ -2,7 +2,7 @@ import os
 from agents.ql.ql import QFunctionTable
 from agents.base import FootsiesAgentBase
 from gymnasium import Env
-from typing import Callable, Tuple
+from typing import Any, Callable, Tuple
 from agents.utils import extract_sub_kwargs
 
 
@@ -11,7 +11,7 @@ class QLAgent(FootsiesAgentBase):
         self,
         observation_space_size: int,
         action_space_size: int,
-        q_table: QFunctionTable = None,
+        q_table: QFunctionTable | None = None,
         **kwargs,
     ):
         q_table_kwargs, = extract_sub_kwargs(kwargs, ("q_table",))
@@ -26,8 +26,8 @@ class QLAgent(FootsiesAgentBase):
 
         self.current_action = None
 
-    def act(self, obs, info: dict) -> "any":
-        self.current_action = self.q_table.sample_action(obs)
+    def act(self, obs, info: dict) -> Any:
+        self.current_action = self.q_table.sample_action_best(obs)
         return self.current_action
 
     def update(self, obs, next_obs, reward: float, terminated: bool, truncated: bool, info, next_info: dict):

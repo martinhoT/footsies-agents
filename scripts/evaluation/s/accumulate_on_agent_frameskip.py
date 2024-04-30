@@ -33,8 +33,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
         xlabel="Time step",
         ylabel="Win rate",
         run_name_mapping={
-            "frameskip":    "Frameskip",
-            "no_frameskip": "No frameskip",
+            "yes_agent_frameskip":  "Frameskip",
+            "no_agent_frameskip":   "No frameskip",
         },
     )
 

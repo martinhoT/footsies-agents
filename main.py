@@ -1,7 +1,7 @@
 import os
 import importlib
 import gymnasium as gym
-import torch
+import torch as T
 import logging
 import json
 import datetime
@@ -20,7 +20,7 @@ from tqdm import tqdm
 from itertools import count
 from copy import deepcopy
 from functools import partial
-from typing import Callable
+from typing import Callable, Iterable, cast
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.base import FootsiesAgentBase, FootsiesAgentTorch
 from agents.diayn import DIAYN, DIAYNWrapper
@@ -38,6 +38,7 @@ from collections import deque
 from gymnasium.spaces import Discrete
 from models import ModelInit
 from torch.utils.tensorboard import SummaryWriter # type: ignore
+from agents.wrappers import OpponentManagerWrapper
 
 LOGGER = logging.getLogger("main")
 
@@ -139,13 +140,23 @@ def save_agent_training_args(training_args: dict, name: str, folder: str = "save
         json.dump(training_args, f, indent=4)
 
 
+def extract_opponent_manager(env: Env) -> OpponentManager:
+    """Iterate over the environment wrappers, find the OpponentManagerWrapper and get its opponent manager. This is required, for instance, when we want to programatically know when the oppponent manager has exhausted"""
+    e = env
+    while e != e.unwrapped:
+        if isinstance(e, OpponentManagerWrapper):
+            return e.opponent_manager
+        e = e.env # type: ignore
+
+    raise ValueError("the provided wrapped environment doesn't have an opponent manager wrapper")
+
+
 def train(
     agent: FootsiesAgentBase,
     env: Env,
     n_episodes: int | None = None,
     n_timesteps: int | None = None,
     penalize_truncation: float | None = None,
-    opponent_manager: OpponentManager | None = None,
     intrinsic_reward_scheme: IntrinsicRewardScheme | None = None,
     episode_finished_callback: Callable[[int], None] = lambda episode: None,
     progress_bar: bool = True,
@@ -163,7 +174,6 @@ def train(
     - `n_episodes`: if specified, the number of training episodes. Should not be specified along with `n_timesteps`
     - `n_timesteps`: if specified, the number of timesteps to train on. Should not be specified along with `n_episodes`
     - `penalize_truncation`: penalize the agent if the time limit was exceeded, to discourage lengthening the episode
-    - `opponent_manager`: manager of a custom opponent pool. Can be used for for self-play or curriculum learning. If None, custom opponents will not be used
     - `intrinsic_reward`: the intrinsic reward scheme to use, if any
     - `episode_finished_callback`: function that will be called after each episode is finished
     - `progress_bar`: whether to display a progress bar (with `tqdm`)
@@ -171,6 +181,13 @@ def train(
     - `skip_freeze`: whether to skip environment freezes, such as histop in FOOTSIES
     - `initial_seed`: the environment seed that will be passed to the first `reset()` call
     """
+    try:
+        LOGGER.info("Using an opponent manager")
+        opponent_manager = extract_opponent_manager(env)
+    except ValueError:
+        LOGGER.info("Not using an opponent manager")
+        opponent_manager = None
+
     if n_episodes is not None and n_timesteps is not None:
         raise ValueError(f"either 'n_episodes' ({n_episodes}) or 'n_timesteps' ({n_timesteps}) is allowed to be specified, not both")
 
@@ -179,33 +196,35 @@ def train(
     agent.preprocess(env)
     LOGGER.info("Preprocessing done!")
 
-    training_iterator = count() if n_episodes is None else range(n_episodes)
+    base_training_iterator = count() if n_episodes is None else range(n_episodes)
 
-    # Whether to notify the agent of the opponent's next action distribution. Only valid for a very specific implementation.
-    tell_agent_of_opponent = isinstance(opponent_manager, CurriculumManager)
-
+    training_iterator: Iterable[int]
     if progress_bar:
         total = n_episodes if n_episodes is not None else n_timesteps / 180 if n_timesteps is not None else None
-        training_iterator = tqdm(training_iterator, total=total, unit="ep", colour="#80e4ed", dynamic_ncols=True, **progress_bar_kwargs)
+        training_iterator = tqdm(base_training_iterator,
+            total=total,
+            unit="ep",
+            colour="#80e4ed",
+            dynamic_ncols=True,
+            **progress_bar_kwargs, # type: ignore
+        )
+
+    else:
+        training_iterator = base_training_iterator
 
     timestep_counter = 0
 
     try:
         for episode in training_iterator:
             obs, info = env.reset(seed=seed)
-            if opponent_manager is not None:
-                opponent_manager.current_opponent.reset()
-
-            # Immediately after a reset, we can notify the agent of the next opponent's policy
-            if tell_agent_of_opponent:
-                info["next_opponent_policy"] = opponent_manager.current_opponent.peek(info)
-
+            
             terminated = False
             truncated = False
             result = 0.5 # by default, the game is a draw
             while not (terminated or truncated):
                 action = agent.act(obs, info)
                 next_obs, reward, terminated, truncated, next_info = env.step(action)
+                reward = float(reward)
                 
                 # Discard histop/freeze
                 if skip_freeze:
@@ -215,6 +234,7 @@ def train(
                         # We are only doing this freeze-skipping thing to avoid updating the agent on meaningless transitions.
                         action = agent.act(obs, info)
                         next_obs, r, terminated, truncated, next_info = env.step(action)
+                        r = float(r)
                         reward += r
                         LOGGER.debug("Skipped one transition, which is presumed to be artificial freeze")
 
@@ -230,11 +250,6 @@ def train(
                         LOGGER.warning("'intrinsic reward' key already present in info, will overwrite it although it shouldn't be present in the first place")
                     info["intrinsic_reward"] = intrinsic_reward
 
-                if tell_agent_of_opponent:
-                    # Notify the agent of the opponent's next action distribution, using the same storage method for the intrinsic reward.
-                    # Note that this info dict will be kept for the next iteration, which means the agent's `act` method also has access to this information.
-                    next_info["next_opponent_policy"] = opponent_manager.current_opponent.peek(next_info)
-
                 agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
                 obs = next_obs
                 info = next_info
@@ -249,18 +264,10 @@ def train(
 
             LOGGER.debug("Episode finished with result %s, with termination (%s) or truncation (%s)", result, terminated, truncated)
 
-            # Set a new opponent from the opponent pool
-            if opponent_manager is not None:
-                should_change = opponent_manager.update_at_episode(result)
+            if opponent_manager is not None and opponent_manager.exhausted:
+                LOGGER.info("Opponent pool exhausted, quitting training")
+                break
 
-                if opponent_manager.exhausted:
-                    LOGGER.info("Opponent pool exhausted, quitting training")
-                    break
-
-                if should_change:
-                    opponent = opponent_manager.current_opponent.act if opponent_manager.current_opponent else None
-                    env.unwrapped.set_opponent(opponent)
-            
             episode_finished_callback(episode)
 
             if n_timesteps is not None and timestep_counter > n_timesteps:
@@ -283,12 +290,12 @@ def train(
             opponent_manager.close()
 
 
-def create_env(args: EnvArgs, log_dir: str = "runs") -> Env:
+def create_env(args: EnvArgs, log_dir: str = "runs", agent: FootsiesAgentBase | None = None) -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
         env = FootsiesEnv(
             opponent=lambda o, i: (False, False, False), # always define a dummy opponent
-            **args.kwargs,
+            **args.kwargs, # type: ignore
         )
 
         if args.footsies_wrapper_norm:
@@ -296,19 +303,23 @@ def create_env(args: EnvArgs, log_dir: str = "runs") -> Env:
                 raise NotImplementedError("non-normalized guard observation variable is not supported until ActionMap (and potentially other regions of code) are slice-independent when evaluating observation regions")
             env = FootsiesNormalized(env, normalize_guard=args.footsies_wrapper_norm_guard)
 
-        if args.footsies_wrapper_simple[0]:
-            env = FootsiesSimpleActions(env, *args.footsies_wrapper_simple[1:])
+        if args.footsies_wrapper_simple.enabled:
+            env = FootsiesSimpleActions(env,
+                agent_allow_special_moves=args.footsies_wrapper_simple.allow_agent_special_moves,
+                assumed_agent_action_on_nonactionable=args.footsies_wrapper_simple.assumed_agent_action_on_nonactionable,
+                assumed_opponent_action_on_nonactionable=args.footsies_wrapper_simple.assumed_opponent_action_on_nonactionable,
+            )
 
         if args.footsies_wrapper_history:
             env = AppendSimpleHistoryWrapper(env,
-                p1=args.footsies_wrapper_history.get("p1", True),
-                n=args.footsies_wrapper_history.get("p1_n", 5),
-                distinct=args.footsies_wrapper_history.get("p1_distinct", True),
+                p1=cast(bool, args.footsies_wrapper_history.get("p1", True)),
+                n=cast(int, args.footsies_wrapper_history.get("p1_n", 5)),
+                distinct=cast(bool, args.footsies_wrapper_history.get("p1_distinct", True)),
             )
             env = AppendSimpleHistoryWrapper(env,
-                p1=args.footsies_wrapper_history.get("p2", True),
-                n=args.footsies_wrapper_history.get("p2_n", 5),
-                distinct=args.footsies_wrapper_history.get("p2_distinct", True),
+                p1=cast(bool, args.footsies_wrapper_history.get("p2", True)),
+                n=cast(int, args.footsies_wrapper_history.get("p2_n", 5)),
+                distinct=cast(bool, args.footsies_wrapper_history.get("p2_distinct", True)),
             )
 
         if args.footsies_wrapper_adv:
@@ -323,9 +334,62 @@ def create_env(args: EnvArgs, log_dir: str = "runs") -> Env:
         if args.footsies_wrapper_fs:
             raise NotImplementedError("don't use the environment's frame skipping wrapper as it's deprecated")
             env = FootsiesFrameSkipped(env)
+        
+        if args.self_play.enabled:
+            if not isinstance(agent, FootsiesAgentBase):
+                raise ValueError("self-play with a non-FOOTSIES agent is not supported")
+            
+            footsies_env = cast(FootsiesEnv, env.unwrapped)
+            snapshot_method = lambda: agent.extract_opponent(env)
+            starter_opponent = snapshot_method()
+
+            # Set a good default agent for self-play
+            footsies_env.set_opponent(starter_opponent.act)
+            opponent_manager = SelfPlayManager(
+                snapshot_method=snapshot_method,
+                max_opponents=args.self_play.max_opponents,
+                snapshot_interval=args.self_play.snapshot_interval,
+                switch_interval=args.self_play.switch_interval,
+                mix_bot=args.self_play.mix_bot,
+                log_elo=True,
+                log_dir=log_dir,
+                log_interval=1,
+                starter_opponent=starter_opponent,
+            )
+
+            if args.self_play.add_curriculum_opps:
+                opponent_manager.populate_with_curriculum_opponents(
+                    Idle(),
+                    Backer(),
+                    NSpammer(),
+                    BSpammer(),
+                    NSpecialSpammer(),
+                    BSpecialSpammer(),
+                    WhiffPunisher(),
+                    UnsafePunisher(),
+                )
+
+            LOGGER.info("Activated self-play")
+        
+        elif args.curriculum.enabled:
+            opponent_manager = CurriculumManager(
+                win_rate_threshold=args.curriculum.win_rate_threshold,
+                win_rate_over_episodes=args.curriculum.win_rate_over_episodes,
+                episode_threshold=args.curriculum.episode_threshold,
+                log_dir=log_dir,
+            )
+
+            starter_opponent = opponent_manager.current_opponent.act if opponent_manager.current_opponent is not None else opponent_manager.current_opponent
+            footsies_env = cast(FootsiesEnv, env.unwrapped)
+            footsies_env.set_opponent(starter_opponent)
+
+            LOGGER.info("Activated curriculum learning")
 
     else:
-        env = gym.make(args.name, **args.kwargs)
+        env = gym.make(
+            args.name,
+            **args.kwargs # type: ignore
+        )
 
     # Wrap with additional, environment-independent wrappers
     if args.wrapper_time_limit > 0:
@@ -339,10 +403,12 @@ def create_env(args: EnvArgs, log_dir: str = "runs") -> Env:
             env = FootsiesActionCombinationsDiscretized(env)
 
     if args.torch:
-        env = TransformObservation(env, lambda obs: torch.from_numpy(obs).float().unsqueeze(0))
+        env = TransformObservation(env, lambda obs: T.from_numpy(obs).float().unsqueeze(0))
 
     # Final miscellaneous wrappers
     if args.diayn.enabled:
+        assert env.observation_space.shape
+
         env = DIAYNWrapper(
             env,
             DIAYN(
@@ -449,7 +515,7 @@ def main(args: MainArgs):
     # Pre-processing
 
     if args.seed is not None:
-        torch.manual_seed(args.seed)
+        T.manual_seed(args.seed)
         random.seed(args.seed)
         LOGGER.info("Seed was set to %s", args.seed)
 
@@ -491,58 +557,6 @@ def main(args: MainArgs):
 
     if args.misc.load:
         load_agent(agent, args.agent.name)
-
-    # Create the custom opponent manager (self-play or curriculum), or nothing if None
-    opponent_manager = None
-    if args.self_play.enabled:
-        if args.agent.is_sb3:
-            raise ValueError("self-play with an SB3 agent is not supported")
-        
-        footsies_env: FootsiesEnv = env.unwrapped
-        snapshot_method = lambda: agent.extract_opponent(env)
-        starter_opponent = snapshot_method()
-
-        # Set a good default agent for self-play
-        footsies_env.set_opponent(starter_opponent.act)
-        opponent_manager = SelfPlayManager(
-            snapshot_method=snapshot_method,
-            max_opponents=args.self_play.max_opponents,
-            snapshot_interval=args.self_play.snapshot_interval,
-            switch_interval=args.self_play.switch_interval,
-            mix_bot=args.self_play.mix_bot,
-            log_elo=True,
-            log_dir=log_dir,
-            log_interval=1,
-            starter_opponent=starter_opponent,
-        )
-
-        if args.self_play.add_curriculum_opps:
-            opponent_manager.populate_with_curriculum_opponents(
-                Idle(),
-                Backer(),
-                NSpammer(),
-                BSpammer(),
-                NSpecialSpammer(),
-                BSpecialSpammer(),
-                WhiffPunisher(),
-                UnsafePunisher(),
-            )
-
-        LOGGER.info("Activated self-play")
-
-    elif args.curriculum:
-        opponent_manager = CurriculumManager(
-            win_rate_threshold=0.7,
-            win_rate_over_episodes=100,
-            episode_threshold=args.curriculum_threshold,
-            log_dir=log_dir,
-        )
-
-        starter_opponent = opponent_manager.current_opponent.act if opponent_manager.current_opponent is not None else opponent_manager.current_opponent
-        footsies_env: FootsiesEnv = env.unwrapped
-        footsies_env.set_opponent(starter_opponent)
-
-        LOGGER.info("Activated curriculum learning")
 
     # Identity function, used when logging is disabled
     agent_logging_wrapper = lambda a: a
@@ -610,7 +624,6 @@ def main(args: MainArgs):
             "n_episodes": args.episodes,
             "n_timesteps": args.time_steps,
             "penalize_truncation": args.penalize_truncation,
-            "opponent_manager": opponent_manager,
             "intrinsic_reward_scheme": intrinsic_reward_scheme,
             "progress_bar_kwargs": args.progress_bar_kwargs,
             "skip_freeze": args.skip_freeze,

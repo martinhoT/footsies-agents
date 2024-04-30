@@ -2,6 +2,7 @@ from os import path
 from scripts.evaluation.data_collectors import get_data
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
+from args import FootsiesSimpleActionsArgs
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     runs_raw = {
@@ -11,7 +12,14 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
 
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k, model="to", kwargs=v),
-        env_args=quick_env_args(footsies_wrapper_simple=(True, not v["remove_special_moves"], "last", "last")),
+        env_args=quick_env_args(
+            footsies_wrapper_simple=FootsiesSimpleActionsArgs(
+                enabled=True,
+                allow_agent_special_moves=not v["remove_special_moves"],
+                assumed_agent_action_on_nonactionable="last",
+                assumed_opponent_action_on_nonactionable="last"
+            )
+        ),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
 

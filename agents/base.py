@@ -30,7 +30,6 @@ class FootsiesAgentBase(ABC):
     def save(self, folder_path: str):
         """Save the agent to disk (overwriting an already saved agent at that path)."""
 
-    @abstractmethod
     def extract_opponent(self, env: Env) -> "FootsiesAgentOpponent":
         """
         Extract a policy which can be provided to the FOOTSIES environment as an opponent.
@@ -41,29 +40,18 @@ class FootsiesAgentBase(ABC):
         to account for the change in perspective between player 1 (agent) and player 2 (opponent, i.e. the extracted policy).
         This is already handled externally.
         """
+        raise NotImplementedError("this agent did not implement a way for extracting themselves")
 
     def reset(self):
         """Reset any internal state that the agent builds up over an episode. Important for when an opponent is extracted, so that we can reset its internal state."""
 
 
 class FootsiesAgentTorch(FootsiesAgentBase):
-    @property
-    @abstractmethod
-    def model(self) -> nn.Module:
-        """The PyTorch model used by the agent."""
     
     @property
+    @abstractmethod
     def shareable_model(self) -> nn.Module:
         """The PyTorch module that can be shared with other agents during Hogwild! parallel training. Returns the `model` property by default."""
-        return self.model
-
-    def load(self, folder_path: str):
-        model_path = os.path.join(folder_path, "model")
-        self.model.load_state_dict(torch.load(model_path))
-
-    def save(self, folder_path: str):
-        model_path = os.path.join(folder_path, "model")
-        torch.save(self.model.state_dict(), model_path)
 
 
 class FootsiesAgentOpponent(Opponent):
@@ -89,7 +77,7 @@ class FootsiesAgentOpponent(Opponent):
             elif isinstance(current_env, FootsiesSimpleActions):
                 simple_actions_wrapper = current_env
 
-            current_env = current_env.env
+            current_env = current_env.env # type: ignore
 
         if simple_actions_wrapper:
             self._simple_action_executor = FootsiesSimpleActionExecutor(
@@ -134,7 +122,8 @@ class FootsiesAgentOpponent(Opponent):
 
     def reset(self):
         self._agent.reset()
-        self._simple_action_executor.reset()
+        if self._simple_action_executor is not None:
+            self._simple_action_executor.reset()
         self._simple_action_extractor_should_reset = True
 
     @property

@@ -1,14 +1,15 @@
-import torch
+import torch as T
+import torch.nn.functional as F
 import logging
 from torch import nn
 from torch.distributions import Categorical
-from agents.torch_utils import create_layered_network, ToMatrix, epoched
+from agents.torch_utils import create_layered_network, ToMatrix
 from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
 from enum import Enum
 from agents.action import ActionMap
-from typing import Literal
 from collections import deque, namedtuple
+from dataclasses import dataclass
 
 LOGGER = logging.getLogger("main.a2c")
 
@@ -17,21 +18,21 @@ class ValueNetwork(nn.Module):
     def __init__(
         self,
         obs_dim: int,
-        hidden_layer_sizes: list[int] = None,
+        hidden_layer_sizes: list[int] | None = None,
         hidden_layer_activation: type[nn.Module] = nn.Identity,
-        representation: nn.Module = None,
+        representation: nn.Module | None = None,
     ):
         super().__init__()
 
         self.critic_layers = create_layered_network(obs_dim, 1, hidden_layer_sizes, hidden_layer_activation)
         self.representation = nn.Identity() if representation is None else representation
 
-    def forward(self, obs: torch.Tensor):
+    def forward(self, obs: T.Tensor):
         rep = self.representation(obs)
 
         return self.critic_layers(rep)
 
-    def from_representation(self, rep: torch.Tensor) -> torch.Tensor:
+    def from_representation(self, rep: T.Tensor) -> T.Tensor:
         return self.critic_layers(rep)
 
 
@@ -40,10 +41,10 @@ class ActorNetwork(nn.Module):
         self,
         obs_dim: int,
         action_dim: int,
-        hidden_layer_sizes: list[int] = None,
+        hidden_layer_sizes: list[int] | None = None,
         hidden_layer_activation: type[nn.Module] = nn.Identity,
-        representation: nn.Module = None,
-        opponent_action_dim: int = None,
+        representation: nn.Module | None = None,
+        opponent_action_dim: int | None = None,
         footsies_masking: bool = True,
         p1: bool = True,
     ):
@@ -71,14 +72,14 @@ class ActorNetwork(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
 
         # What actions can be performed during hitstop
-        self._hitstop_mask = torch.zeros((1, opponent_action_dim, action_dim), dtype=torch.bool)
+        self._hitstop_mask = T.zeros((1, opponent_action_dim, action_dim), dtype=T.bool)
         for simple in ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP_INT:
             self._hitstop_mask[..., simple] = True
 
-    def forward(self, obs: torch.Tensor):
+    def forward(self, obs: T.Tensor):
         if self._footsies_masking:
             in_hitstop = ActionMap.is_in_hitstop_torch(obs, p1=self._p1)
-            action_mask = torch.ones_like(self._hitstop_mask).repeat(obs.size(0), 1, 1)
+            action_mask = T.ones_like(self._hitstop_mask).repeat(obs.size(0), 1, 1)
             action_mask[in_hitstop] = self._hitstop_mask
  
         else:
@@ -87,35 +88,37 @@ class ActorNetwork(nn.Module):
         rep = self._representation(obs)
         return self.from_representation(rep, action_mask)
     
-    def from_representation(self, rep: torch.Tensor, action_mask: torch.Tensor | None = None) -> torch.Tensor:
+    def from_representation(self, rep: T.Tensor, action_mask: T.Tensor | None = None) -> T.Tensor:
         logits = self.actor_layers(rep)
         if action_mask is not None:
             # Invalidate all actions that are not in the mask
-            logits = logits.masked_fill(~action_mask, -torch.inf)
+            logits = logits.masked_fill(~action_mask, -T.inf)
         return self.softmax(logits)
     
     @property
     def consider_opponent_action(self) -> bool:
         return self._consider_opponent_action
     
-    def probabilities(self, obs: torch.Tensor, next_opponent_action: torch.Tensor | int | None) -> torch.Tensor:
+    def probabilities(self, obs: T.Tensor, next_opponent_action: T.Tensor | int | None) -> T.Tensor:
         """Get the action probability distribution for the given observation and predicted opponent action. If the next opponent action is a tensor, then it should be 1-dimensional."""
         if next_opponent_action is None:
-            next_opponent_action = slice(None)
+            next_opponent_action_idx = slice(None)
+        else:
+            next_opponent_action_idx = next_opponent_action
 
-        if isinstance(next_opponent_action, (int, slice)):
-            action_probabilities = self(obs)[:, next_opponent_action, :]
+        if isinstance(next_opponent_action_idx, (int, slice)):
+            action_probabilities = self(obs)[:, next_opponent_action_idx, :]
             return action_probabilities
 
-        action_probabilities = self(obs)
-        return action_probabilities.take_along_dim(next_opponent_action[:, None, None], dim=1)
+        action_probabilities: T.Tensor = self(obs)
+        return action_probabilities.take_along_dim(next_opponent_action_idx[:, None, None], dim=1)
 
-    def distribution_size(self, obs: torch.Tensor) -> int:
+    def distribution_size(self, obs: T.Tensor) -> int:
         """The effective size of the probability distribution when the agent acts at the given observation."""
         in_hitstop = ActionMap.is_in_hitstop_torch(obs, p1=self._p1)
         return 2 if in_hitstop else self._action_dim
 
-    def decision_distribution(self, obs: torch.Tensor, next_opponent_policy: torch.Tensor, detached: bool = False) -> Categorical:
+    def decision_distribution(self, obs: T.Tensor, next_opponent_policy: T.Tensor, detached: bool = False) -> Categorical:
         """Get the decision probabilities and distribution for the given observation and next opponent policy. The next opponent policy should have dimensions `batch_dim X opponent_action_dim`."""
         actor_probs = self.probabilities(obs, None)
         if detached:
@@ -127,7 +130,7 @@ class ActorNetwork(nn.Module):
         distribution = Categorical(probs=probs)
         return distribution
 
-    def sample_action(self, obs: torch.Tensor, next_opponent_action: int) -> int:
+    def sample_action(self, obs: T.Tensor, next_opponent_action: int) -> int:
         """Randomly sample an action. This should be essentially the same as sampling from the `decision_distribution`, if `next_opponent_action` was sampled from `next_opponent_policy`."""
         action_probabilities = self.probabilities(obs, next_opponent_action)
         action_distribution = Categorical(probs=action_probabilities)
@@ -157,11 +160,11 @@ class ActorNetwork(nn.Module):
 
 class A2CLearnerBase(ABC):
     @abstractmethod
-    def sample_action(self, obs: torch.Tensor, **kwargs) -> int:
+    def sample_action(self, obs: T.Tensor, **kwargs) -> int:
         pass
 
     @abstractmethod
-    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, **kwargs):
+    def learn(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, **kwargs):
         pass
 
     @property
@@ -202,20 +205,20 @@ class A2CLambdaLearner(A2CLearnerBase):
         self.policy_cumulative_discount = policy_cumulative_discount
 
         self.actor_traces = [
-            torch.zeros_like(parameter)
+            T.zeros_like(parameter)
             for parameter in actor.parameters()
         ]
         self.critic_traces = [
-            torch.zeros_like(parameter)
+            T.zeros_like(parameter)
             for parameter in critic.parameters()
         ]
 
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients' sign unchanged)
-        self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), maximize=True, lr=actor_learning_rate)
-        self.critic_optimizer = torch.optim.SGD(self._critic.parameters(), maximize=True, lr=critic_learning_rate)
+        self.actor_optimizer = T.optim.SGD(self._actor.parameters(), maximize=True, lr=actor_learning_rate) # type: ignore
+        self.critic_optimizer = T.optim.SGD(self._critic.parameters(), maximize=True, lr=critic_learning_rate) # type: ignore
 
         self.action_distribution = None
-        self.action = None
+        self.action = T.tensor(0)
 
         # Variables for policy improvement
         self.at_policy_improvement = True
@@ -228,13 +231,13 @@ class A2CLambdaLearner(A2CLearnerBase):
         # Track values
         self.delta = 0.0
 
-    def sample_action(self, obs: torch.Tensor, **kwargs) -> int:
+    def sample_action(self, obs: T.Tensor, **kwargs) -> int:
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
         action_probabilities = self._actor(obs)
         self.action_distribution = Categorical(probs=action_probabilities)
         self.action = self.action_distribution.sample()
         
-        return self.action.item()
+        return int(self.action.item())
 
     def _step_policy_iteration(self):
         step_threshold = self.policy_improvement_steps if self.at_policy_improvement else self.policy_evaluation_steps
@@ -244,36 +247,39 @@ class A2CLambdaLearner(A2CLearnerBase):
             self.at_policy_improvement = not self.at_policy_improvement
             self.policy_iteration_step = 0
 
-    def _update_critic(self, obs: torch.Tensor):
+    def _update_critic(self, obs: T.Tensor):
         self.critic_optimizer.zero_grad()
 
         critic_score = self._critic(obs)
         critic_score.backward()
-        with torch.no_grad():
+        with T.no_grad():
             for critic_trace, parameter in zip(self.critic_traces, self._critic.parameters()):
                 critic_trace.copy_(self.discount * self.critic_lambda * critic_trace + parameter.grad)
-                parameter.grad.copy_(self.delta * critic_trace)
+                parameter.grad.copy_(self.delta * critic_trace) # type: ignore
 
         self.critic_optimizer.step()
 
     def _update_actor(self):
+        if self.action_distribution is None:
+            raise RuntimeError("attempted to update actor before an action has been sampled")
+
         self.actor_optimizer.zero_grad()
 
         actor_score = self.cumulative_discount * self.action_distribution.log_prob(self.action)
         actor_score.backward(retain_graph=True)
-        with torch.no_grad():
+        with T.no_grad():
             for actor_trace, parameter in zip(self.actor_traces, self._actor.parameters()):
                 actor_trace.copy_(self.discount * self.actor_lambda * actor_trace + parameter.grad)
-                parameter.grad.copy_(self.delta * actor_trace * (1 - self.actor_entropy_loss_coef))
+                parameter.grad.copy_(self.delta * actor_trace * (1 - self.actor_entropy_loss_coef)) # type: ignore
         # Add the entropy score gradient
         entropy_score = self.actor_entropy_loss_coef * self.action_distribution.entropy()
         entropy_score.backward()
 
         self.actor_optimizer.step()
 
-    def compute_advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool) -> float:
+    def compute_advantage(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool) -> float:
         """Compute the TD delta (a.k.a. advantage)."""
-        with torch.no_grad():
+        with T.no_grad():
             if terminated:
                 target = reward
             else:
@@ -284,7 +290,7 @@ class A2CLambdaLearner(A2CLearnerBase):
         return delta
 
     # TODO: if we use linear function approximation, could we do True Online TD(lambda)?
-    def learn(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, **kwargs):
+    def learn(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, **kwargs):
         """Update the actor and critic networks in this environment step. Should be preceded by an environment interaction with `sample_action()`."""
         # Compute the TD delta
         self.delta = self.compute_advantage(obs, next_obs, reward, terminated)
@@ -328,8 +334,6 @@ class A2CQLearner(A2CLearnerBase):
         Q_LEARNING = 2
         # Considers the player to be acting uniformly randomly in the next observation
         UNIFORM = 3
-
-    LearnUpdate = namedtuple("LearnUpdate", ("obs", "next_obs", "reward", "terminated", "truncated", "obs_agent_action", "obs_opponent_action", "agent_will_frameskip", "opponent_will_frameskip", "next_obs_opponent_policy", "intrinsic_reward"))
 
     def __init__(
         self,
@@ -408,9 +412,9 @@ class A2CQLearner(A2CLearnerBase):
         self.opponent_action_dim = self._critic.opponent_action_dim
 
         # Due to the way the gradients are set up, we want the optimizer to maximize (i.e., leave the gradients' sign unchanged)
-        self.actor_optimizer = torch.optim.SGD(self._actor.parameters(), lr=actor_learning_rate, maximize=True) # type: ignore
+        self.actor_optimizer = T.optim.SGD(self._actor.parameters(), lr=actor_learning_rate, maximize=True) # type: ignore
 
-        self.frameskipped_critic_updates = []
+        self.frameskipped_critic_updates: list[A2CQLearner.FrameskippedUpdate] = []
 
         # Needed for Sarsa-like updates
         self._delayed_updates: deque[A2CQLearner.LearnUpdate] = deque([], maxlen=2)
@@ -427,65 +431,60 @@ class A2CQLearner(A2CLearnerBase):
         self.extrinsic_td_error = 0.0
         self.intrinsic_td_error = 0.0
 
-    def sample_action(self, obs: torch.Tensor, *, next_opponent_action: int, **kwargs) -> int:
+    def sample_action(self, obs: T.Tensor, *, next_opponent_action: int, **kwargs) -> int:
         """Sample an action from the actor. A training step starts with `sample_action()`, followed immediately by an environment step and `learn()`."""    
         return self.actor.sample_action(obs, next_opponent_action=next_opponent_action)
 
-    def maxent_reward(self, policy: torch.Tensor) -> torch.Tensor:
+    def maxent_reward(self, policy: T.Tensor) -> T.Tensor:
         """Compute the entropy term of the MaxEnt RL objective according to the agent's policy."""
         return self._maxent * Categorical(probs=policy).entropy()
 
-    @epoched(timesteps=256, epochs=5, minibatch_size=32)
-    def _update_actor_ppo(self, obs: torch.Tensor, opponent_action: torch.Tensor | int, agent_action: torch.Tensor | int, delta: torch.Tensor, *, epoch_data: dict | None = None):
-        action_probabilities = self.actor.probabilities(obs, opponent_action)
-        action_log_probabilities = torch.log(action_probabilities + 1e-8)
-        action_log_probability = action_log_probabilities.take_along_dim(agent_action[:, None, None], dim=-1)
+    # @epoched(timesteps=256, epochs=5, minibatch_size=32)
+    # def _update_actor_ppo(self, obs: T.Tensor, opponent_action: T.Tensor | int, agent_action: T.Tensor | int, delta: T.Tensor, *, epoch_data: dict | None = None):
+    #     action_probabilities = self.actor.probabilities(obs, opponent_action)
+    #     action_log_probabilities = T.log(action_probabilities + 1e-8)
+    #     action_log_probability = action_log_probabilities.take_along_dim(agent_action[:, None, None], dim=-1)
 
-        # Update the actor network
-        self.actor_optimizer.zero_grad()
+    #     # Update the actor network
+    #     self.actor_optimizer.zero_grad()
 
-        actor_entropy = -torch.sum(action_log_probabilities * action_probabilities, dim=-1)
+    #     actor_entropy = -T.sum(action_log_probabilities * action_probabilities, dim=-1)
 
-        if epoch_data is not None:
-            old_action_log_probability = epoch_data.setdefault("action_log_probability", action_log_probability.detach())
-        else:
-            old_action_log_probability = action_log_probability.detach()
+    #     if epoch_data is not None:
+    #         old_action_log_probability = epoch_data.setdefault("action_log_probability", action_log_probability.detach())
+    #     else:
+    #         old_action_log_probability = action_log_probability.detach()
 
-        ratio = (action_log_probability / old_action_log_probability).squeeze()
-        actor_delta = torch.min(self.cumulative_discount * delta * ratio, self.cumulative_discount * delta * torch.clamp(ratio, 1 - self._ppo_objective_clip_coef, 1 + self._ppo_objective_clip_coef))
+    #     ratio = (action_log_probability / old_action_log_probability).squeeze()
+    #     actor_delta = T.min(self.cumulative_discount * delta * ratio, self.cumulative_discount * delta * T.clamp(ratio, 1 - self._ppo_objective_clip_coef, 1 + self._ppo_objective_clip_coef))
 
-        actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy.mean()
-        actor_score.backward()
+    #     actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy.mean()
+    #     actor_score.backward()
 
-        if self._actor_gradient_clipping is not None:
-            nn.utils.clip_grad.clip_grad_norm_(self.actor.parameters(), self._actor_gradient_clipping)
+    #     if self._actor_gradient_clipping is not None:
+    #         nn.utils.clip_grad.clip_grad_norm_(self.actor.parameters(), self._actor_gradient_clipping)
 
-        self.actor_optimizer.step()
+    #     self.actor_optimizer.step()
 
-        if LOGGER.isEnabledFor(logging.DEBUG):
-            LOGGER.debug("Gradient step for the actor performed with score %s", actor_score.item())
+    #     if LOGGER.isEnabledFor(logging.DEBUG):
+    #         LOGGER.debug("Gradient step for the actor performed with score %s", actor_score.item())
 
-    def _update_actor(self, obs: torch.Tensor, opponent_action: int | None, agent_action: int, delta: torch.Tensor):
+    def _update_actor(self, obs: T.Tensor, opponent_action: int | None, agent_action: int, delta: T.Tensor):
         # Save the delta for tracking
         self.delta = delta.mean().item() # We might get a delta vector
         
-        # If we are utilizing the PPO clipped objective, which requires epoched computation, we offload it to an epoched method
-        if self._ppo_objective:
-            self._update_actor_ppo(obs, opponent_action, agent_action, delta)
-            return
-        
         # Calculate the probability distribution at obs considering opponent action, and consider we did the given action
         action_probabilities = self.actor.probabilities(obs, opponent_action)
-        action_log_probabilities = torch.log(action_probabilities + 1e-8)
+        action_log_probabilities = T.log(action_probabilities + 1e-8)
         action_log_probability = action_log_probabilities[..., agent_action]
 
         # Update the actor network
         self.actor_optimizer.zero_grad()
 
-        actor_entropy = -torch.sum(action_log_probabilities * action_probabilities, dim=-1)
+        actor_entropy = -T.sum(action_log_probabilities * action_probabilities, dim=-1)
         # Perform a correction depending on whether action masking was used
         action_distribution_size = self.actor.distribution_size(obs)
-        actor_entropy_corrected = actor_entropy / torch.log(torch.tensor(action_distribution_size))
+        actor_entropy_corrected = actor_entropy / T.log(T.tensor(action_distribution_size))
         actor_delta = self.cumulative_discount * delta * action_log_probability
         actor_score = actor_delta.mean() + self.actor_entropy_loss_coef * actor_entropy_corrected.mean()
         actor_score.backward()
@@ -497,10 +496,10 @@ class A2CQLearner(A2CLearnerBase):
 
         if LOGGER.isEnabledFor(logging.DEBUG):
             new_action_probabilities = self.actor.probabilities(obs, opponent_action).detach()
-            new_entropy = -torch.sum(torch.log(new_action_probabilities + 1e-8) * new_action_probabilities, dim=-1)
+            new_entropy = -T.sum(T.log(new_action_probabilities + 1e-8) * new_action_probabilities, dim=-1)
             LOGGER.debug("Actor was updated using delta %s for action %s and opponent action %s, going from a distribution of %s with entropy %s to a distribution of %s with entropy %s", delta, agent_action, opponent_action, action_probabilities, actor_entropy, new_action_probabilities, new_entropy)
 
-    def value(self, obs: torch.Tensor, opponent_action: int | None, critic: QFunction | None = None) -> torch.Tensor:
+    def value(self, obs: T.Tensor, opponent_action: int | None, critic: QFunction | None = None) -> T.Tensor:
         """
         Get the value of a given state, according to the effective policy (depending on the set `update_style`).
         The returned tensor is a leaf tensor.
@@ -522,18 +521,18 @@ class A2CQLearner(A2CLearnerBase):
         if self._agent_update_style == self.UpdateStyle.EXPECTED_SARSA:
             pi = self.actor.probabilities(obs, opponent_action).detach()
         elif self._agent_update_style == self.UpdateStyle.Q_LEARNING:
-            greedy_action = torch.argmax(q_so, dim=-1)
-            pi = nn.functional.one_hot(greedy_action, num_classes=self.action_dim).float()
+            greedy_action = T.argmax(q_so, dim=-1)
+            pi = F.one_hot(greedy_action, num_classes=self.action_dim).float()
         elif self._agent_update_style == self.UpdateStyle.UNIFORM:
             n_rows = 1 if opponent_action is not None else self.opponent_action_dim
-            pi = torch.ones(n_rows, self.action_dim).float() / self.action_dim
+            pi = T.ones(n_rows, self.action_dim).float() / self.action_dim
 
         # The policy doesn't need to be transposed since the last dimension is the action dimension.
         # By design, the policy is already transposed (opp_actions X agent_actions).
         # This Einstein summation equation computes the diagonal of a >2D tensor by considering the last two dimensions as matrices.
-        return torch.einsum("...ii->...i", pi @ q_so.transpose(-2, -1))
+        return T.einsum("...ii->...i", pi @ q_so.transpose(-2, -1))
 
-    def advantage(self, obs: torch.Tensor, next_obs: torch.Tensor, reward: torch.Tensor, terminated: bool, agent_action: int, opponent_action: int | None, next_obs_opponent_policy: torch.Tensor | None, critic: QFunction | None = None) -> torch.Tensor:
+    def advantage(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, agent_action: int | None, opponent_action: int | None, next_obs_opponent_policy: T.Tensor | None, critic: QFunction | None = None) -> T.Tensor:
         """
         Compute the advantage. May consider intrinsic reward if an intrinsic critic was provided.
         The returned tensor is a leaf tensor.
@@ -553,11 +552,15 @@ class A2CQLearner(A2CLearnerBase):
                 v_s_next = self.value(next_obs, opponent_action=None, critic=critic).detach().squeeze(0)
                 
                 if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA or self._opponent_update_style == self.UpdateStyle.SARSA:
+                    if next_obs_opponent_policy is None:
+                        raise ValueError("Sarsa-like updates for the opponent require the opponent's policy on the next observation to be provided")
                     next_opp_pi = next_obs_opponent_policy
                 elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
-                    next_opp_pi = nn.functional.one_hot(torch.argmin(v_s_next), num_classes=self.opponent_action_dim).unsqueeze(1).float()
+                    next_opp_pi = F.one_hot(T.argmin(v_s_next), num_classes=self.opponent_action_dim).unsqueeze(1).float()
                 elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
-                    next_opp_pi = torch.ones(self.opponent_action_dim, 1).float() / self.opponent_action_dim
+                    next_opp_pi = T.ones(self.opponent_action_dim, 1).float() / self.opponent_action_dim
+                else:
+                    raise RuntimeError(f"the opponent update style does not have a valid value: {self._opponent_update_style}")
                 
                 v_so_next = next_opp_pi.T @ v_s_next
 
@@ -571,7 +574,7 @@ class A2CQLearner(A2CLearnerBase):
         advantage = q_soa - v_so
         return advantage
     
-    def _update_critics(self, obs: torch.Tensor, next_obs: torch.Tensor, agent_action: int, opponent_action: int, next_agent_policy: torch.Tensor, next_opponent_policy: torch.Tensor, reward: float, intrinsic_reward: float, terminated: bool) -> tuple[float, float]:
+    def _update_critics(self, obs: T.Tensor, next_obs: T.Tensor, agent_action: int | None, opponent_action: int | None, next_agent_policy: T.Tensor | str, next_opponent_policy: T.Tensor | str, reward: float, intrinsic_reward: float, terminated: bool) -> tuple[float, float]:
         """Perform an update on the extrinsic and intrinsic critics. The intrinsic critic is only updated if it was specified. Returns the total TD error."""
         # The kwargs that are shared between the critic and the intrinsic critic
         critic_kwargs = {
@@ -597,20 +600,20 @@ class A2CQLearner(A2CLearnerBase):
                 **critic_kwargs,
             )
         else:
-            intrinsic_td_error = torch.tensor(0.0)
+            intrinsic_td_error = T.tensor(0.0)
         
         return extrinsic_td_error.mean().item(), intrinsic_td_error.mean().item()
 
-    def _effective_next_agent_policy(self, agent_action: int, agent_will_frameskip: bool, next_obs: torch.Tensor) -> torch.Tensor:
+    def _effective_next_agent_policy(self, agent_action: int | None, agent_will_frameskip: bool, next_obs: T.Tensor) -> T.Tensor | str:
         """Determine what is the agent's effective policy at the next observation `next_obs`."""
         # If the agent will be frameskipped...
         if agent_will_frameskip:
             # ... then we consider they will be doing any of their actions (uniform random policy).
             if agent_action is None:
-                next_obs_agent_policy = torch.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
+                next_obs_agent_policy = T.ones(self.action_dim, self.opponent_action_dim).float() / (self.action_dim)
             # ... then we consider the assumed action.
             else:
-                next_obs_agent_policy = nn.functional.one_hot(torch.tensor(agent_action), num_classes=self.action_dim).float().unsqueeze(1).expand(-1, self.opponent_action_dim)
+                next_obs_agent_policy = F.one_hot(T.tensor(agent_action), num_classes=self.action_dim).float().unsqueeze(1).expand(-1, self.opponent_action_dim)
         
         # If the agent could act, then it makes sense for it to have a policy.
         # We have to construct it manually since it is not provided as an argument.
@@ -631,35 +634,64 @@ class A2CQLearner(A2CLearnerBase):
         
         return next_obs_agent_policy
 
-    def _effective_next_opponent_policy(self, opponent_action: int, opponent_will_frameskip: bool, next_obs_opponent_policy: torch.Tensor | None) -> torch.Tensor:
+    def _effective_next_opponent_policy(self, opponent_action: int | None, opponent_will_frameskip: bool, next_obs_opponent_policy: T.Tensor | None) -> T.Tensor | str:
         """Determine what is the opponent's effective policy at the next observation `next_obs`. Will return the explicit `next_obs_opponent_policy` back if it should be the one used instead."""
         # If the opponent will be frameskipped...
         if opponent_will_frameskip:
             # ... then we consider they will be doing any of their actions (uniform random policy).
             if opponent_action is None:
-                next_obs_opponent_policy = torch.ones(self.opponent_action_dim, 1).float() / (self.opponent_action_dim)
+                res = T.ones(self.opponent_action_dim, 1).float() / (self.opponent_action_dim)
             # ... then we consider the assumed action.
             else:
-                next_obs_opponent_policy = nn.functional.one_hot(torch.tensor(opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
+                res = F.one_hot(T.tensor(opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
 
         else:
             # Keep the opponent's next policy, which should have been provided as an argument
             if self._opponent_update_style == self.UpdateStyle.EXPECTED_SARSA or self._opponent_update_style == self.UpdateStyle.SARSA:
                 if next_obs_opponent_policy is None:
-                    raise ValueError("Expected SARSA updates for the opponent require the opponent's policy on the next observation to be provided")
+                    raise ValueError("Sarsa-like updates for the opponent require the opponent's policy on the next observation to be provided")
+                res = next_obs_opponent_policy
             # Enable Q-learning, change opponent's policy to greedy
             elif self._opponent_update_style == self.UpdateStyle.Q_LEARNING:
-                next_obs_opponent_policy = "greedy"
+                res = "greedy"
             # Change opponent's policy to be uniform
             elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
-                next_obs_opponent_policy = "uniform"
+                res = "uniform"
             
-        return next_obs_opponent_policy
+        return res
+
+    @dataclass(slots=True)
+    class LearnUpdate:
+        """Holder of arguments to a `learn()` call, so that we can delay updates to be done in the future, mainly used to implement Sarsa updates"""
+        obs: T.Tensor
+        next_obs: T.Tensor
+        reward: float
+        terminated: bool
+        truncated: bool
+        obs_agent_action: int | None
+        obs_opponent_action: int | None
+        agent_will_frameskip: bool
+        opponent_will_frameskip: bool
+        next_obs_opponent_policy: T.Tensor | None
+        intrinsic_reward: float
+
+    @dataclass(slots=True)
+    class FrameskippedUpdate:
+        """Holder of arguments to a learning update, which was frameskippped"""
+        obs: T.Tensor
+        next_obs: T.Tensor
+        reward: float
+        terminated: bool
+        obs_agent_action: int | None
+        obs_opponent_action: int | None
+        next_obs_agent_policy: T.Tensor | str
+        next_obs_opponent_policy: T.Tensor | str
+        intrinsic_reward: float
 
     def learn(
         self,
-        obs: torch.Tensor,
-        next_obs: torch.Tensor,
+        obs: T.Tensor,
+        next_obs: T.Tensor,
         reward: float,
         terminated: bool,
         truncated: bool,
@@ -668,7 +700,7 @@ class A2CQLearner(A2CLearnerBase):
         obs_opponent_action: int | None,
         agent_will_frameskip: bool,
         opponent_will_frameskip: bool,
-        next_obs_opponent_policy: torch.Tensor | None = None,
+        next_obs_opponent_policy: T.Tensor | None = None,
         intrinsic_reward: float = 0.0,
         **kwargs,
     ):
@@ -697,7 +729,7 @@ class A2CQLearner(A2CLearnerBase):
                     obs_opponent_action=obs_opponent_action,
                     agent_will_frameskip=agent_will_frameskip,
                     opponent_will_frameskip=opponent_will_frameskip,
-                    next_obs_opponent_policy=None, # Notice how we don't care about the next opponent policy; this is because we are going to fill it as a one-hot tensor of the opponent's actual next action
+                    next_obs_opponent_policy=None, # We don't care about the next opponent policy; this is because we are going to fill it as a one-hot tensor of the opponent's actual next action
                     intrinsic_reward=intrinsic_reward
                 )
             )
@@ -709,7 +741,7 @@ class A2CQLearner(A2CLearnerBase):
             # Learn
             update = self._delayed_updates[0]
             next_obs_opponent_action = self._delayed_updates[1].obs_opponent_action
-            next_obs_opponent_policy = nn.functional.one_hot(torch.tensor(next_obs_opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
+            next_obs_opponent_policy = F.one_hot(T.tensor(next_obs_opponent_action), num_classes=self.opponent_action_dim).float().unsqueeze(1)
 
             self.learn(
                 obs=update.obs,
@@ -734,12 +766,22 @@ class A2CQLearner(A2CLearnerBase):
         self.intrinsic_td_error = None
         self.delta = None
 
-        next_obs_agent_policy = self._effective_next_agent_policy(obs_agent_action, agent_will_frameskip, next_obs)
-        next_obs_opponent_policy = self._effective_next_opponent_policy(obs_opponent_action, opponent_will_frameskip, next_obs_opponent_policy)
+        next_obs_agent_policy_effective = self._effective_next_agent_policy(obs_agent_action, agent_will_frameskip, next_obs)
+        next_obs_opponent_policy_effective = self._effective_next_opponent_policy(obs_opponent_action, opponent_will_frameskip, next_obs_opponent_policy)
 
         # Schedule a critic update
         self.frameskipped_critic_updates.append(
-            [obs, reward, next_obs, terminated, obs_agent_action, obs_opponent_action, next_obs_agent_policy, next_obs_opponent_policy, intrinsic_reward]
+            self.FrameskippedUpdate(
+                obs=obs,
+                next_obs=next_obs,
+                reward=reward,
+                terminated=terminated,
+                obs_agent_action=obs_agent_action,
+                obs_opponent_action=obs_opponent_action,
+                next_obs_agent_policy=next_obs_agent_policy_effective,
+                next_obs_opponent_policy=next_obs_opponent_policy_effective,
+                intrinsic_reward=intrinsic_reward,
+            )
         )
 
         # If the agent will not be frameskipped, then we can perform the updates now, since its last action has been fully resolved.
@@ -749,25 +791,24 @@ class A2CQLearner(A2CLearnerBase):
             # We only do so on the first observation since it's the only ones that is actionable.
             # The last observation is also actionable, but we only receive reward when we reach it.
             # This is important since the last observation may be terminal, in which case it doesn't even make sense to have reward.
-            obs_maxent_reward = self.maxent_reward(self.actor.probabilities(self.frameskipped_critic_updates[0][0], self.frameskipped_critic_updates[0][5]))
+            # obs_maxent_reward = self.maxent_reward(self.actor.probabilities(self.frameskipped_critic_updates[0].obs, self.frameskipped_critic_updates[0].obs_opponent_action))
             # The rewards will become tensors, so that the gradient can flow through them (optionally)
-            self.frameskipped_critic_updates[0][1] += obs_maxent_reward
+            # self.frameskipped_critic_updates[0].reward += obs_maxent_reward.item()
 
-            total_reward: torch.Tensor = sum(update[1] for update in self.frameskipped_critic_updates)
-            total_intrinsic_reward = sum(update[8] for update in self.frameskipped_critic_updates)
+            total_reward: float = sum(update.reward for update in self.frameskipped_critic_updates)
+            total_intrinsic_reward: float = sum(update.intrinsic_reward for update in self.frameskipped_critic_updates)
 
             if self._learn_critic:
                 if self._accumulate_at_frameskip:
-                    obs_ = self.frameskipped_critic_updates[0][0]
-                    next_obs_ = self.frameskipped_critic_updates[-1][2]
-                    obs_agent_action_ = self.frameskipped_critic_updates[0][4]
-                    obs_opponent_action_ = self.frameskipped_critic_updates[0][5] # we assume the first opponent action, as it's technically the last one we see
-                    next_obs_agent_policy_ = self.frameskipped_critic_updates[-1][6]
-                    next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
+                    obs_ = self.frameskipped_critic_updates[0].obs
+                    next_obs_ = self.frameskipped_critic_updates[-1].next_obs
+                    obs_agent_action_ = self.frameskipped_critic_updates[0].obs_agent_action
+                    obs_opponent_action_ = self.frameskipped_critic_updates[0].obs_opponent_action # we assume the first opponent action, as it's technically the last one we see
+                    next_obs_agent_policy_ = self.frameskipped_critic_updates[-1].next_obs_agent_policy
+                    next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1].next_obs_opponent_policy
 
                     # This will detach the reward from the computational graph, we only care about that for the actor update
-                    total_reward_ = total_reward.item()
-                    self.extrinsic_td_error, self.intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, total_reward_, total_intrinsic_reward, terminated)
+                    self.extrinsic_td_error, self.intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, total_reward, total_intrinsic_reward, terminated)
 
                 else:
                     # They were None previously. They have None only when an update doesn't occur,
@@ -780,10 +821,17 @@ class A2CQLearner(A2CLearnerBase):
 
                     # We perform the updates in reverse order so that the future reward is propagated back to the oldest retained updates
                     for frameskipped_update in reversed(self.frameskipped_critic_updates):
-                        obs_, reward_, next_obs_, terminated_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, intrinsic_reward_ = frameskipped_update
-
-                        reward_ = reward_.item() if isinstance(reward_, torch.Tensor) else reward_
-                        extrinsic_td_error, intrinsic_td_error = self._update_critics(obs_, next_obs_, obs_agent_action_, obs_opponent_action_, next_obs_agent_policy_, next_obs_opponent_policy_, reward_, intrinsic_reward_, terminated_)
+                        extrinsic_td_error, intrinsic_td_error = self._update_critics(
+                            obs=frameskipped_update.obs,
+                            next_obs=frameskipped_update.next_obs,
+                            agent_action=frameskipped_update.obs_agent_action,
+                            opponent_action=frameskipped_update.obs_opponent_action,
+                            next_agent_policy=frameskipped_update.next_obs_agent_policy,
+                            next_opponent_policy=frameskipped_update.next_obs_opponent_policy,
+                            reward=frameskipped_update.reward,
+                            intrinsic_reward=frameskipped_update.intrinsic_reward,
+                            terminated=frameskipped_update.terminated,
+                        )
                         self.extrinsic_td_error += extrinsic_td_error
                         self.intrinsic_td_error += intrinsic_td_error
 
@@ -791,13 +839,13 @@ class A2CQLearner(A2CLearnerBase):
 
             # The agent only performed an action at the beginning of frameskipping. It doesn't make sense to update at any other observation.
             if self._learn_actor:
-                obs_ = self.frameskipped_critic_updates[0][0]
-                next_obs_ = self.frameskipped_critic_updates[-1][2]
-                obs_agent_action_ = self.frameskipped_critic_updates[0][4]
-                obs_opponent_action_ = self.frameskipped_critic_updates[0][5]
-                next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1][7]
-                if not self._maxent_gradient_flow:
-                    total_reward = total_reward.detach()
+                obs_ = self.frameskipped_critic_updates[0].obs
+                next_obs_ = self.frameskipped_critic_updates[-1].next_obs
+                obs_agent_action_ = self.frameskipped_critic_updates[0].obs_agent_action
+                obs_opponent_action_ = self.frameskipped_critic_updates[0].obs_opponent_action
+                next_obs_opponent_policy_ = self.frameskipped_critic_updates[-1].next_obs_opponent_policy
+                if isinstance(next_obs_opponent_policy_, str):
+                    next_obs_opponent_policy_ = None # the next obs opponent policy will be built within the advantage() method in cases where it should be None (Q_LEARNING and UNIFORM updates)
 
                 extrinsic_advantage = self.advantage(obs_, next_obs_, total_reward, terminated, obs_agent_action_, obs_opponent_action_, next_obs_opponent_policy_, critic=self.critic)
                 if self.intrinsic_critic is not None:
@@ -805,6 +853,8 @@ class A2CQLearner(A2CLearnerBase):
                 else:
                     intrinsic_advantage = 0.0
 
+                if obs_agent_action_ is None:
+                    raise RuntimeError("the agent's action at the current observation should be something, not 'None'")
                 self._update_actor(obs_, obs_opponent_action_, obs_agent_action_, extrinsic_advantage + intrinsic_advantage)
 
             self.frameskipped_critic_updates.clear()

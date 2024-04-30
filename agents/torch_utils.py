@@ -1,5 +1,6 @@
 from collections import deque
-import torch
+import torch as T
+import torch.nn.functional as F
 import torch.multiprocessing as mp
 import logging
 from logging.handlers import RotatingFileHandler
@@ -19,12 +20,14 @@ from footsies_gym.envs.footsies import FootsiesEnv
 def create_layered_network(
     input_dim: int,
     output_dim: int,
-    hidden_layer_sizes: list[int],
-    hidden_layer_activation: nn.Module,
+    hidden_layer_sizes: list[int] | None,
+    hidden_layer_activation: type[nn.Module] | None,
 ):
     """Create a multi-layered network. Each integer in `hidden_layer_sizes` represents a layer of the given size. `hidden_layer_activation` is the activation function applied at every hidden layer"""
     if hidden_layer_sizes is None:
         hidden_layer_sizes = []
+    if hidden_layer_activation is None:
+        hidden_layer_activation = nn.LeakyReLU
 
     if len(hidden_layer_sizes) == 0:
         layers = nn.Sequential(nn.Linear(input_dim, output_dim))
@@ -101,7 +104,7 @@ def hogwild(
         n_threads: int = 1,
         base_seed: int = 1,
         is_footsies: bool = False,
-        logging_wrapper: Callable[[FootsiesAgentTorch], TrainingLoggerWrapper] | None = None,
+        logging_wrapper: Callable[[FootsiesAgentTorch], TrainingLoggerWrapper[FootsiesAgentTorch]] | None = None,
         **train_kwargs,
     ):
         # Change the logging destination! logging using multiprocessing into the same file is not supported (but into the console works?)
@@ -123,12 +126,15 @@ def hogwild(
         worker_logger = logging.getLogger(f"main.worker.{rank}")
 
         # Set up process
-        torch.manual_seed(base_seed + rank)
+        T.manual_seed(base_seed + rank)
         # Avoid CPU oversubscription
-        torch.set_num_threads(n_threads)
+        T.set_num_threads(n_threads)
 
+        # Wrap the agent with the logger wrapper if that's to be done
         if logging_wrapper is not None and rank == 0:
-            agent = logging_wrapper(agent)
+            final_agent = logging_wrapper(agent)
+        else:
+            final_agent = agent
 
         # We need to set different FOOTSIES instances with different ports for each worker
         if is_footsies:
@@ -159,7 +165,7 @@ def hogwild(
         train_kwargs["progress_bar"] = False
 
         worker_logger.info(f"[%s] Started training", rank)
-        training_method(agent, env, **train_kwargs)
+        training_method(final_agent, env, **train_kwargs)
 
     processes = []
     for rank in range(n_workers):
@@ -189,8 +195,8 @@ class InputClip(nn.Module):
         self.maximum = maximum
         self.leaky_coef = leaky_coef
 
-    def forward(self, x: torch.Tensor):
-        return torch.clip(
+    def forward(self, x: T.Tensor):
+        return T.clip(
             x,
             min=self.minimum + self.leaky_coef * (x - 5),
             max=self.maximum + self.leaky_coef * (x + 5),
@@ -202,8 +208,8 @@ class ProbabilityDistribution(nn.Module):
         """Makes input sum to 1"""
         super().__init__()
 
-    def forward(self, x: torch.Tensor):
-        return x / torch.sum(x)
+    def forward(self, x: T.Tensor):
+        return x / T.sum(x)
 
 
 class DebugStoreRecent(nn.Module):
@@ -212,7 +218,7 @@ class DebugStoreRecent(nn.Module):
         super().__init__()
         self.stored = None
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: T.Tensor):
         self.stored = x
         return x
 
@@ -224,7 +230,7 @@ class ToMatrix(nn.Module):
         self.rows = rows
         self.cols = cols
     
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: T.Tensor):
         return x.view(-1, self.rows, self.cols)
 
 
@@ -239,11 +245,11 @@ class AggregateModule(nn.Module):
         for name, module in modules.items():
             self.add_module(name, module)
     
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor]:
+    def forward(self, x: T.Tensor) -> tuple[T.Tensor]:
         return tuple(module(x) for module in self.children())
 
 
-def observation_invert_perspective_flattened(obs: torch.Tensor) -> torch.Tensor:
+def observation_invert_perspective_flattened(obs: T.Tensor) -> T.Tensor:
     """Invert the observation's perspective. The observation should be a flattened torch tensor"""
     inverted = obs.clone().detach()
     
@@ -289,24 +295,24 @@ def epoched(timesteps: int | None = None, epochs: int | None = None, minibatch_s
     - `minibatch_size`: the size of the accumulated data partitions
     """
     class ArgumentDataset(Dataset):
-        def __init__(self, args: list[tuple[torch.Tensor, ...]]):
+        def __init__(self, args: list[tuple[T.Tensor, ...]]):
             # Convert all arguments to tensors.
             # We squeeze the first dimension of those that are already tensors to avoid having the dataloader unnecessarily add another batch dimension.
-            self.args = [[(torch.tensor(a) if not isinstance(a, torch.Tensor) else a.squeeze(0)) for a in arg] for arg in args]
+            self.args = [[(T.tensor(a) if not isinstance(a, T.Tensor) else a.squeeze(0)) for a in arg] for arg in args]
             
         def __len__(self) -> int:
             return len(self.args)
 
-        def __getitem__(self, idx) -> list[torch.Tensor]:
+        def __getitem__(self, idx) -> list[T.Tensor]:
             return self.args[idx]
 
     def epoched_decorator(learning_method: Callable[..., None]):
-        updates: list[tuple[torch.Tensor, ...]] = []
+        updates: list[tuple[T.Tensor, ...]] = []
         dataset: Dataset | None = None
         dataloader: DataLoader | None = None
 
         @wraps(learning_method)
-        def wrapped(self, *args: torch.Tensor, **kwargs: torch.Tensor):
+        def wrapped(self, *args: T.Tensor, **kwargs: T.Tensor):
             nonlocal updates
             nonlocal dataset
             nonlocal dataloader
@@ -344,24 +350,24 @@ class ImitationLearner:
         
         self.policy = policy
         self.action_dim = action_dim
-        self.optimizer = torch.optim.SGD(self.policy.parameters(), maximize=False, lr=learning_rate) # type: ignore
+        self.optimizer = T.optim.SGD(self.policy.parameters(), maximize=False, lr=learning_rate) # type: ignore
         # NOTE: because of this loss, combinatory actions are not supported
         self.loss_fn = nn.KLDivLoss(reduction="batchmean")
 
-    def action_as_onehot(self, action: torch.Tensor) -> torch.Tensor:
+    def action_as_onehot(self, action: T.Tensor) -> T.Tensor:
         """Transform the action tensor into a one-hot encoded version"""
-        return torch.nn.functional.one_hot(action, num_classes=self.action_dim).float()
+        return F.one_hot(action, num_classes=self.action_dim).float()
 
-    def action_as_combination(self, action: torch.Tensor) -> torch.Tensor:
+    def action_as_combination(self, action: T.Tensor) -> T.Tensor:
         """Transform the action tensor into a tensor where actions are treated as being combinatory"""
-        return torch.hstack([(action & 2**i) != 0 for i in range(self.action_dim)]).float()
+        return T.hstack([(action & 2**i) != 0 for i in range(self.action_dim)]).float()
                             
-    def learn(self, obs: torch.Tensor, action: torch.Tensor, frozen_representation: bool = False) -> float:
+    def learn(self, obs: T.Tensor, action: T.Tensor, frozen_representation: bool = False) -> float:
         """Update policy by imitating the action at the given observation. Returns the loss"""
         self.optimizer.zero_grad()
 
         if frozen_representation:
-            with torch.no_grad():
+            with T.no_grad():
                 rep = self.policy.representation(obs)
             probs = self.policy.from_representation(rep)
 
@@ -384,12 +390,12 @@ class ActionHistoryAugmentation:
         self.history = deque([0] * n, maxlen=n)
         self.history_len = n
     
-    def __call__(self, obs: torch.Tensor, action: int | None) -> torch.Tensor:
+    def __call__(self, obs: T.Tensor, action: int | None) -> T.Tensor:
         if action is not None and (not self.distinct or (self.history[-1] != action)):
             self.history.append(action)
         
-        action_oh = nn.functional.one_hot(torch.tensor(self.history), num_classes=self.action_dim).reshape(1, -1).float()
-        return torch.hstack((obs, action_oh))
+        action_oh = F.one_hot(T.tensor(self.history), num_classes=self.action_dim).reshape(1, -1).float()
+        return T.hstack((obs, action_oh))
 
     def reset(self):
         self.history.clear()
@@ -401,13 +407,13 @@ class TimeSinceLastCommitAugmentation:
         self.steps = steps
         self.t = 0.0
     
-    def __call__(self, obs: torch.Tensor, action: int | None) -> torch.Tensor:
+    def __call__(self, obs: T.Tensor, action: int | None) -> T.Tensor:
         if action is not None:
             commital = ActionMap.is_simple_action_commital(action)
             self.t = 0.0 if commital else (self.t + 1) % self.steps
         
-        t_tensor = torch.tensor([[self.t / self.steps]]).float()
-        return torch.hstack((obs, t_tensor))
+        t_tensor = T.tensor([[self.t / self.steps]]).float()
+        return T.hstack((obs, t_tensor))
 
     def reset(self):
         self.t = 0.0

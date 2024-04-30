@@ -24,6 +24,8 @@ class TestState:
 
 
 T = TypeVar("T", bound=FootsiesAgentBase)
+CustomEvaluator = Tuple[str, Callable[[], float]]
+CustomEvaluatorOverTestStates = Tuple[str, Callable[[List[TestState]], float]]
 
 class TrainingLoggerWrapper(FootsiesAgentBase, Generic[T]):
     def __init__(
@@ -39,10 +41,8 @@ class TrainingLoggerWrapper(FootsiesAgentBase, Generic[T]):
         truncation: bool = False,
         episode_length: bool = False,
         network_histograms: List[nn.Module] | None = None,
-        custom_evaluators: List[Tuple[str, Callable[[], float]]] | None = None,
-        custom_evaluators_over_test_states: List[
-            Tuple[str, Callable[[List[TestState]], float]]
-        ] | None = None,
+        custom_evaluators: List[CustomEvaluator] | None = None,
+        custom_evaluators_over_test_states: List[CustomEvaluatorOverTestStates] | None = None,
         test_states_number: int = 10_000,
         step_start_value: int = 0,
         episode_start_value: int = 0,
