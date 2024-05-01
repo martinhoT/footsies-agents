@@ -11,13 +11,16 @@ from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run
 from dataclasses import dataclass
 from functools import partial
 from main import main
-from copy import deepcopy
 from dataclasses import replace
+from stable_baselines3.common.base_class import BaseAlgorithm
+from gymnasium import Env
 
+
+AgentCustom = FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentBase | BaseAlgorithm]
 
 @dataclass
 class AgentCustomRun:
-    agent:      FootsiesAgentBase
+    agent:      AgentCustom
     opponent:   Callable[[dict, dict], tuple[bool, bool, bool]] | None
 
 
@@ -51,7 +54,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
         with mp.Pool(processes=processes) as pool:
             custom_loop_partial = partial(custom_loop, timesteps=timesteps)
 
-            args: list[tuple[FootsiesAgentBase, str, int, type[Observer], Callable[[dict, dict], tuple[bool, bool, bool]] | None, int]] = []
+            args: list[tuple[AgentCustom, str, int, type[Observer], Callable[[dict, dict], tuple[bool, bool, bool]] | None, int]] = []
             for i, (run_name, missing_seeds) in enumerate(missing.items()):
                 run_args = runs[run_name]
 

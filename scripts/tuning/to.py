@@ -8,44 +8,41 @@ from typing import cast
 from gymnasium.spaces import Discrete
 from agents.logger import TrainingLoggerWrapper
 
-def create_arch_suggestions(trial: optuna.Trial, label: str) -> tuple[type[nn.Module], list[int]]:
-    activation_fn = eval(trial.suggest_categorical(f"{label}_activation", ["nn.ReLU", "nn.LeakyReLU", "nn.Tanh"]))
-    hs = eval(trial.suggest_categorical(f"{label}_hs", [
-        "[64, 64]",
-        "[128, 128]",
-        "[64, 64, 64]",
-    ]))
 
-    return activation_fn, hs
-
-def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneAgent]:
+def create_model_from_parameters(env: Env,
+    actor_lr: float,
+    critic_lr: float,
+    actor_entropy_coef: float,
+    critic_arch_hs: str,
+    critic_arch_activation: str,
+    actor_arch_hs: str,
+    actor_arch_activation: str,
+    opponent_model_arch_hs: str = "[64, 64]",
+    opponent_model_arch_activation: str = "nn.LeakyReLU",
+    game_model_arch_hs: str = "[64, 64]",
+    game_model_arch_activation: str = "nn.LeakyReLU",
+    actor_gradient_clipping: float = 0.5,
+    critic_target_update_rate: int = 1000,
+) -> TrainingLoggerWrapper[TheOneAgent]:
 
     assert env.observation_space.shape is not None
     assert isinstance(env.action_space, Discrete)
 
-    critic_arch_activation, critic_arch_hs = create_arch_suggestions(trial, "critic")
-    actor_arch_activation, actor_arch_hs = create_arch_suggestions(trial, "actor")
-    # opponent_model_arch_activation, opponent_model_arch_hs = create_arch_suggestions(trial, "opponent_model")
-    opponent_model_arch_activation, opponent_model_arch_hs = nn.LeakyReLU, [64, 64]
-    # game_model_arch_activation, game_model_arch_hs = create_arch_suggestions(trial, "game_model")
-    game_model_arch_activation, game_model_arch_hs = nn.LeakyReLU, [64, 64]
+    critic_arch_hs_evaled = eval(critic_arch_hs)
+    critic_arch_activation_evaled = eval(critic_arch_activation, {"nn": nn})
+    actor_arch_hs_evaled = eval(actor_arch_hs)
+    actor_arch_activation_evaled = eval(actor_arch_activation, {"nn": nn})
+    opponent_model_arch_hs_evaled = eval(opponent_model_arch_hs)
+    opponent_model_arch_activation_evaled = eval(opponent_model_arch_activation, {"nn": nn})
+    game_model_arch_hs_evaled = eval(game_model_arch_hs)
+    game_model_arch_activation_evaled = eval(game_model_arch_activation, {"nn": nn})
 
-    actor_lr = trial.suggest_float("actor_lr", 1e-5, 1e-1)
-    critic_lr = trial.suggest_float("critic_lr", 1e-5, 1e-1)
-
-    actor_entropy_coef = trial.suggest_float("actor_entropy_coef", 0.0, 0.3)
-    # actor_gradient_clipping = trial.suggest_float("actor_gradient_clipping", 0.0, 1.0)
-    actor_gradient_clipping = 0.5
-
-    # critic_target_update_rate = trial.suggest_int("critic_target_update_rate", 500, 10500, step=500)
-    critic_target_update_rate = 1000
 
     agent, loggables = to_(
         observation_space_size=env.observation_space.shape[0],
         action_space_size=int(env.action_space.n),
 
         # Important modifiers
-        remove_special_moves=True,
         use_reaction_time=False,
         use_game_model=True,
         game_model_method="differences",
@@ -88,14 +85,14 @@ def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneA
         act_with_qvalues=False,
 
         # Can only be specified programatically
-        critic_arch_hs=critic_arch_hs,
-        critic_arch_activation=critic_arch_activation,
-        actor_arch_hs=actor_arch_hs,
-        actor_arch_activation=actor_arch_activation,
-        opponent_model_arch_hs=opponent_model_arch_hs,
-        opponent_model_arch_activation=opponent_model_arch_activation,
-        game_model_arch_hs=game_model_arch_hs,
-        game_model_arch_activation=game_model_arch_activation,
+        critic_arch_hs=critic_arch_hs_evaled,
+        critic_arch_activation=critic_arch_activation_evaled,
+        actor_arch_hs=actor_arch_hs_evaled,
+        actor_arch_activation=actor_arch_activation_evaled,
+        opponent_model_arch_hs=opponent_model_arch_hs_evaled,
+        opponent_model_arch_activation=opponent_model_arch_activation_evaled,
+        game_model_arch_hs=game_model_arch_hs_evaled,
+        game_model_arch_activation=game_model_arch_activation_evaled,
     )
 
     loggables["network_histograms"].clear()
@@ -118,6 +115,33 @@ def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneA
         **loggables,
     )
 
+
+
+def create_arch_suggestions(trial: optuna.Trial, label: str) -> tuple[str, str]:
+    activation_fn = trial.suggest_categorical(f"{label}_activation", ["nn.ReLU", "nn.LeakyReLU", "nn.Tanh"])
+    hs = trial.suggest_categorical(f"{label}_hs", [
+        "[64, 64]",
+        "[128, 128]",
+        "[64, 64, 64]",
+    ])
+
+    return activation_fn, hs
+
+
+def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneAgent]:
+    critic_arch_activation, critic_arch_hs = create_arch_suggestions(trial, "critic")
+    actor_arch_activation, actor_arch_hs = create_arch_suggestions(trial, "actor")
+
+    return create_model_from_parameters(env,
+        actor_lr=trial.suggest_float("actor_lr", 1e-5, 1e-1),
+        critic_lr=trial.suggest_float("critic_lr", 1e-5, 1e-1),
+        actor_entropy_coef=trial.suggest_float("actor_entropy_coef", 0.0, 0.3),
+        critic_arch_hs=critic_arch_hs,
+        critic_arch_activation=critic_arch_activation,
+        actor_arch_hs=actor_arch_hs,
+        actor_arch_activation=actor_arch_activation,
+    )
+    
 
 def objective(agent: TrainingLoggerWrapper[TheOneAgent], env: Env) -> float:
     return agent.win_rate

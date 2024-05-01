@@ -5,29 +5,21 @@ from stable_baselines3 import A2C
 from gymnasium import Env
 from torch import nn
 
-def define_model(trial: optuna.Trial, env: Env) -> BaseAlgorithm:
 
-    activation_fn = eval(trial.suggest_categorical("activation_fn", ["nn.ReLU", "nn.LeakyReLU", "nn.Tanh"]))
-    pi_arch = eval(trial.suggest_categorical("pi_arch", [
-        "[64, 64]",
-        "[128, 128]",
-        "[64, 64, 64]",
-    ]))
-    vf_arch = eval(trial.suggest_categorical("vf_arch", [
-        "[64, 64]",
-        "[128, 128]",
-        "[64, 64, 64]",
-    ]))
-
+def create_model_from_parameters(env: Env, activation_fn: str, pi_arch: str, vf_arch: str, learning_rate: float, gae_lambda: float, ent_coef: float, gamma: float) -> A2C:
+    activation_fn = eval(activation_fn, {"nn": nn})
+    pi_arch = eval(pi_arch)
+    vf_arch = eval(vf_arch)
+    
     return A2C(
         # Base
         policy="MlpPolicy",
         env=env,
         
         # Hyperparameters
-        learning_rate=trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True),
-        gae_lambda=trial.suggest_float("gae_lambda", 0.0, 1.0),
-        ent_coef=trial.suggest_float("ent_coef", 0.0, 1.0),
+        learning_rate=learning_rate,
+        gae_lambda=gae_lambda,
+        ent_coef=ent_coef,
         policy_kwargs={
             "activation_fn": activation_fn,
             "net_arch": {
@@ -35,12 +27,32 @@ def define_model(trial: optuna.Trial, env: Env) -> BaseAlgorithm:
                 "vf": vf_arch,
             }
         },
-        gamma=trial.suggest_float("gamma", 0.0, 1.0),
+        gamma=gamma,
 
         # Always the same
         normalize_advantage=True,
         max_grad_norm=0.5,
         use_sde=False,
+    )
+
+
+def define_model(trial: optuna.Trial, env: Env) -> A2C:
+    return create_model_from_parameters(env,
+        activation_fn=trial.suggest_categorical("activation_fn", ["nn.ReLU", "nn.LeakyReLU", "nn.Tanh"]),
+        pi_arch=trial.suggest_categorical("pi_arch", [
+            "[64, 64]",
+            "[128, 128]",
+            "[64, 64, 64]",
+        ]),
+        vf_arch=trial.suggest_categorical("vf_arch", [
+            "[64, 64]",
+            "[128, 128]",
+            "[64, 64, 64]",
+        ]),
+        learning_rate=trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True),
+        gae_lambda=trial.suggest_float("gae_lambda", 0.0, 1.0),
+        ent_coef=trial.suggest_float("ent_coef", 0.0, 1.0),
+        gamma=trial.suggest_float("gamma", 0.0, 1.0),                        
     )
 
 
@@ -50,4 +62,6 @@ def objective(agent: BaseAlgorithm, env: Env) -> float:
         deterministic=True,
     )
 
-    return reward_mean # type: ignore
+    assert isinstance(reward_mean, float)
+
+    return reward_mean

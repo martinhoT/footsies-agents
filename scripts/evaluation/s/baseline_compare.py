@@ -1,137 +1,66 @@
-# %% Make sure we are running in the project's root
-
-from os import chdir
-chdir("/home/martinho/projects/footsies-agents")
-
-# %% Imports
-
 from os import path
-from main import load_agent_parameters
+from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustomRun
+from scripts.evaluation.plotting import plot_data
+from scripts.evaluation.custom_loop import WinRateObserver
+from typing import Any, Callable
+from scripts.tuning.sb3_a2c import create_model_from_parameters as create_a2c_with_parameters
+from scripts.tuning.sb3_dqn import create_model_from_parameters as create_dqn_with_parameters
+from scripts.tuning.sb3_ppo import create_model_from_parameters as create_ppo_with_parameters
+from scripts.tuning.to import create_model_from_parameters as create_agent_with_parameters
+from agents.base import FootsiesAgentBase
+from stable_baselines3.common.base_class import BaseAlgorithm
+from functools import partial
+from gymnasium import Env
 
-# %% Check if all necessary runs have been made
 
-agent_ref = "f_opp_recurrent_no_mask"
-baseline_ppo = "sb3_ppo"
-baseline_a2c = "sb3_a2c"
-baseline_dqn = "sb3_dqn"
+def get_best_params(study_name: str) -> dict[str, Any]:
+    import optuna
+    study = optuna.load_study(study_name=study_name, storage=f"sqlite:///scripts/tuning/{study_name}.db")
+    return study.best_trial.params
 
-neededs = [agent_ref, baseline_ppo, baseline_a2c, baseline_dqn]
 
-all_good = True
-for needed in neededs:
-    data_path = path.join("saved", needed)
-    if not path.exists(data_path):
-        all_good = False
-        print(f"Please run the runner script for '{needed}'")
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
+    result_path = path.splitext(__file__)[0]
 
-if not all_good:
-    exit(1)
+    runs_raw: dict[str, Callable[[Env], FootsiesAgentBase | BaseAlgorithm]] = {
+        "compare_ppo": partial(create_ppo_with_parameters, **get_best_params("sb3_ppo")),
+        "compare_a2c": partial(create_a2c_with_parameters, **get_best_params("sb3_a2c")),
+        "compare_dqn": partial(create_dqn_with_parameters, **get_best_params("sb3_dqn")),
+        "compare_agent": partial(create_agent_with_parameters, **get_best_params("to")),
+    }
 
-# %% Check if those runs had the correct arguments (they need to be similar)
+    runs = {k: AgentCustomRun(
+        agent=agent_initializer,
+        opponent=None
+    ) for k, agent_initializer in runs_raw.items()}
 
-agent_ref_parameters = load_agent_parameters(agent_ref)
-baseline_ppo_parameters = load_agent_parameters(baseline_ppo)
-baseline_a2c_parameters = load_agent_parameters(baseline_a2c)
-baseline_dqn_parameters = load_agent_parameters(baseline_dqn)
+    dfs = get_data_custom_loop(
+        result_path=result_path,
+        runs=runs,
+        observer_type=WinRateObserver,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
 
-correct_any_parameters = {
-    "learning_rate": 1e-4,
-    "gamma": 0.9,
-}
-correct_a2c_ppo_parameters = {
-    "normalize_advantage": False,
-    "ent_coef": 0.04, # don't know if this is necessarily equivalent to ours!!!
-    "max_grad_norm": 0.5,
-    "use_sde": False,
-    "gae_lambda": "|DEFAULT|" # note that in order to be equivalent to my method it should be 0
-}
-correct_a2c_parameters = {
-    "use_rms_prop": False, # to match PPO in using Adam, even though I'm not using it
-}
-correct_ppo_parameters = {
-    "n_epochs": 10,
-}
-correct_dqn_ppo_parameters = {
-    "batch_size": 64,
-}
-correct_dqn_parameters = {
-    # just use the defaults, the method is barely comparable
-}
-
-for parameter, value in correct_any_parameters.items():
-    if value == "|DEFAULT|":
-        continue
-    assert baseline_ppo_parameters[parameter] == value
-    assert baseline_a2c_parameters[parameter] == value
-    assert baseline_dqn_parameters[parameter] == value
-
-for parameter, value in correct_a2c_ppo_parameters.items():
-    if value == "|DEFAULT|":
-        continue
-    assert baseline_ppo_parameters[parameter] == value
-    assert baseline_a2c_parameters[parameter] == value
-
-for parameter, value in correct_a2c_parameters.items():
-    if value == "|DEFAULT|":
-        continue
-    assert baseline_a2c_parameters[parameter] == value
-
-for parameter, value in correct_ppo_parameters.items():
-    if value == "|DEFAULT|":
-        continue
-    assert baseline_ppo_parameters[parameter] == value
-
-for parameter, value in correct_dqn_ppo_parameters.items():
-    if value == "|DEFAULT|":
-        continue
-    assert baseline_ppo_parameters[parameter] == value
-    assert baseline_dqn_parameters[parameter] == value
-
-for parameter, value in correct_dqn_parameters.items():
-    if value == "|DEFAULT|":
-        continue
-    assert baseline_dqn_parameters[parameter] == value
-
-assert agent_ref_parameters["critic_discount"] == correct_any_parameters["gamma"]
-assert agent_ref_parameters["actor_lr"] == correct_any_parameters["learning_rate"]
-assert agent_ref_parameters["critic_lr"] == correct_any_parameters["learning_rate"]
-assert agent_ref_parameters["actor_entropy_coef"] == correct_a2c_ppo_parameters["ent_coef"]
-assert agent_ref_parameters["actor_gradient_clipping"] == correct_a2c_ppo_parameters["max_grad_norm"]
-
-# %% Check if, from all runs, the data was exported to CSV, and load it
-
-import pandas as pd
-
-all_good = True
-datas: list[pd.DataFrame] = []
-for needed in neededs:
-    data_path = path.join("saved", needed, "win_rate.csv")
-    if not path.exists(data_path):
-        all_good = False
-        print(f"Please save the data regarding win rates for '{needed}'")
+    if dfs is None:
+        return
     
-    elif all_good:
-        data = pd.read_csv(data_path)
-        # Only read a portion of the data
-        data = data[data["Step"] <= 5e6]
-        datas.append(data)
+    plot_data(
+        dfs=dfs,
+        title="Win rate over the last 100 episodes against the in-game AI",
+        fig_path=result_path,
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Win rate",
+        run_name_mapping={
+            "compare_agent": "Ours",
+            "compare_ppo": "PPO",
+            "compare_a2c": "A2C",
+            "compare_dqn": "DQN",
+        }
+    )
 
-if not all_good:
-    exit(1)
-
-# %% Plot the data
-
-import matplotlib.pyplot as plt
-
-result_path, _ = path.splitext(__file__)
-
-# Smooth the values (make exponential moving average) and plot them
-for data in datas:
-    data["ValueExp"] = data["Value"].ewm(alpha=0.1).mean()
-    data.plot.line(x="Step", y="ValueExp")
-
-plt.legend(["Ours", "PPO", "A2C", "DQN"])
-plt.title("Win rate over the last 100 episodes against the in-game bot")
-plt.xlabel("Episode")
-plt.ylabel("Win rate")
-plt.savefig(result_path)
+if __name__ == "__main__":
+    import tyro
+    tyro.cli(main)

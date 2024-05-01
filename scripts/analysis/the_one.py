@@ -1,5 +1,6 @@
 import torch
 import dearpygui.dearpygui as dpg
+from torch import nn
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.normalization import FootsiesNormalized
@@ -132,13 +133,14 @@ def main(
         agent, loggables = to_(
             env.observation_space.shape[0],
             int(env.action_space.n),
-
-            actor_entropy_coef=0.0,
-            critic_agent_update="expected_sarsa",
-            critic_opponent_update="expected_sarsa",
-            maxent=0.01,
-            maxent_gradient_flow=True,
-            use_opponent_model=True,
+            actor_entropy_coef=0.20,
+            use_game_model=False,
+            critic_arch_hs=[128, 128, 128],
+            critic_arch_activation=nn.LeakyReLU,
+            actor_arch_hs=[128, 128],
+            actor_arch_activation=nn.LeakyReLU,
+            critic_lr=1e-3,
+            actor_lr=1e-3,
         )
     
     else:

@@ -10,10 +10,13 @@ from data import FootsiesDataset, FootsiesTorchDataset
 from torch.utils.data import DataLoader
 from agents.game_model.agent import GameModelAgent
 from agents.mimic.agent import MimicAgent
+from gymnasium import Env
+from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.callbacks import BaseCallback
 
 
 class Observer:
-    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
+    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase | BaseAlgorithm):
         pass
 
     @property
@@ -23,6 +26,32 @@ class Observer:
     @staticmethod
     def attributes() -> tuple[str, ...]:
         raise NotImplementedError("this observer didn't implement the 'attributes' property")
+
+
+class ObserverSB3Callback(BaseCallback):
+    def __init__(self, observer: Observer, verbose: int = 0):
+        super().__init__(verbose)
+
+        self.observer = observer
+    
+    def _on_step(self) -> bool:
+        truncated = self.locals["infos"][0]["TimeLimit.truncated"]
+        terminated = not truncated and bool(self.locals["dones"].item())
+
+        self.observer.update(
+            step=self.num_timesteps,
+            obs=self.locals["obs_tensor"],
+            next_obs=self.locals["new_obs"],
+            reward=self.locals["rewards"][0].item(),
+            terminated=terminated,
+            truncated=truncated,
+            info={},
+            next_info=self.locals["infos"][0],
+            agent=self.model,
+        )
+
+        # Never stop early
+        return True
 
 
 class WinRateObserver(Observer):
@@ -104,7 +133,7 @@ class MimicObserver(Observer):
 T = TypeVar("T", bound=Observer)
 
 def custom_loop(
-    agent: FootsiesAgentBase,
+    agent: FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentBase | BaseAlgorithm],
     label: str,
     id_: int,
     observer_type: type[T],
@@ -113,8 +142,6 @@ def custom_loop(
     timesteps: int = 1000000,
 ) -> T:
 
-    process_id: int = mp.current_process()._identity[0] - 1
-
     port_start = 11000 + 1000 * id_
     port_stop = 11000 + (1000) * (id_ + 1)
     env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop)
@@ -122,6 +149,39 @@ def custom_loop(
     footsies_env.set_opponent(opponent)
 
     observer = observer_type()
+
+    if isinstance(agent, Callable):
+        agent = agent(env)
+
+    if isinstance(agent, FootsiesAgentBase):
+        return custom_loop_footsies(
+            agent=agent,
+            env=env,
+            label=label,
+            id_=id_,
+            observer=observer,
+            initial_seed=initial_seed,
+            timesteps=timesteps,
+        )
+    
+    else:
+        return custom_loop_sb3(
+            agent=agent,
+            observer=observer,
+            timesteps=timesteps
+        )
+
+def custom_loop_footsies(
+    agent: FootsiesAgentBase,
+    env: Env,
+    label: str,
+    id_: int,
+    observer: T,
+    initial_seed: int | None = 0,
+    timesteps: int = int(1e6),
+) -> T:
+
+    process_id: int = mp.current_process()._identity[0] - 1
 
     seed = initial_seed
     terminated, truncated = True, True
@@ -148,6 +208,21 @@ def custom_loop(
 
         obs, info = next_obs, next_info
     
+    return observer
+
+
+def custom_loop_sb3(
+    agent: BaseAlgorithm,
+    observer: T,
+    timesteps: int = int(1e6),
+) -> T:
+    
+    agent.learn(
+        total_timesteps=timesteps,
+        callback=ObserverSB3Callback(observer),
+        log_interval=None, # type: ignore
+    )
+
     return observer
 
 
