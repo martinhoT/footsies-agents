@@ -1,6 +1,7 @@
 import torch
 import dearpygui.dearpygui as dpg
 import numpy as np
+from typing import cast
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
@@ -11,7 +12,7 @@ from agents.action import ActionMap
 from agents.a2c.a2c import A2CQLearner
 from agents.a2c.agent import A2CAgent
 from agents.ql.ql import QFunctionNetwork, QFunctionTable
-from main import load_agent
+from main import import_agent, load_agent, load_agent_parameters
 
 
 SIMPLE_ACTION_LABELS_GEN = lambda labels, n: tuple((move.name, i / n + (1 / (n * 2))) for i, move in enumerate(labels))
@@ -33,8 +34,8 @@ class PlayerActionMatrix:
         self.opponent_action_dim = opponent_action_dim
         self.add_color_scale = add_color_scale
         self.auto_scale = auto_scale
-        self.color_scale = None
-        self.series = None
+        self.color_scale: int | str = ""
+        self.series: int | str = ""
 
     def setup(self, title: str, value_range: tuple[float, float] = (-1.0, 1.0)):
         sx, sy = value_range
@@ -69,7 +70,7 @@ class PolicyDistributionPlot:
     def __init__(
         self,
         action_dim: int,
-        bar_width: int = 0.2,
+        bar_width: float = 0.2,
     ):
         self.bar_width = bar_width
         
@@ -77,9 +78,9 @@ class PolicyDistributionPlot:
         self.x = np.arange(action_dim)
 
         # DPG items
-        self.x_axis = None
-        self.y_axis = None
-        self.series = None
+        self.x_axis: int | str = ""
+        self.y_axis: int | str = ""
+        self.series: int | str = ""
     
     def setup(self, title: str = "Policy distribution", width: int = 1050):
         y = np.zeros((self.action_dim,))
@@ -92,7 +93,7 @@ class PolicyDistributionPlot:
             self.y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Probability")
             dpg.set_axis_limits(self.y_axis, 0.0, 1.0)
         
-            self.series = dpg.add_bar_series(self.x + 1.0, y, weight=self.bar_width * 2, parent=self.y_axis)
+            self.series = dpg.add_bar_series((self.x + 1.0).tolist(), y.tolist(), weight=self.bar_width * 2, parent=self.y_axis)
             dpg.bind_colormap(plot, dpg.mvPlotColormap_Default)
 
     def update(self, distribution: np.ndarray):
@@ -124,9 +125,9 @@ class QLearnerAnalyserManager:
         self.current_observation = None
 
         # DPG items
-        self.attribute_modifier_window = None
-        self.current_observation_index = None
-        self.current_action = None
+        self.attribute_modifier_window: int | str = ""
+        self.current_observation_index: int | str = ""
+        self.current_action: int | str = ""
 
     def add_custom_elements(self, analyser: Analyser):
         with dpg.window(label="Attribute modifier", show=False) as self.attribute_modifier_window:
@@ -177,7 +178,7 @@ class QLearnerAnalyserManager:
         self.policy_plot.update(policy_distribution)
 
     def on_state_update(self, analyser: Analyser):
-        obs: torch.Tensor = analyser.current_observation
+        obs = cast(torch.Tensor, analyser.current_observation)
 
         # Make the agent learn first before presenting results, it's less confusing and we can immediately see the results
         if self.online_learning and analyser.most_recent_transition is not None:
@@ -191,28 +192,16 @@ class QLearnerAnalyserManager:
             if not isinstance(obs, torch.Tensor) or not isinstance(next_obs, torch.Tensor):
                 raise RuntimeError("the online learning portion of the A2C analyser assumes the environment is providing PyTorch tensors as observations, but that is not the case!")
 
-            # If the agent is performing custom actions, we skip over `act` and `update` and pass information directly to the learner.
-            # NOTE: not recommended, since during `act` the agent performs important operations that affect the learning update.
-            if analyser.use_custom_action:
-                p1_simple = next_info["p1_simple"]
-                p2_simple = next_info["p2_simple"]
-
-                # Avoid using special moves if they weren't specified
-                if p1_simple is not None:
-                    p1_simple = min(p1_simple, self.action_dim - 1)
-                    
-                self.learner.learn(obs, next_obs, reward, terminated, truncated, obs_agent_action=p1_simple, obs_opponent_action=p2_simple)
-            # Otherwise, assume the agent is performing `act`.
-            else:
-                self.agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
+            self.agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
         if isinstance(self.learner.critic, QFunctionNetwork):
             q_values = self.learner.critic.q(obs, use_target_network=self.show_target_network)
         else:
             q_values = self.learner.critic.q(obs)
-        self.q_table_plot.update(q_values)
-        if self.q_table_update_frequency_plot is not None:
-            self.q_table_update_frequency_plot.update(self.agent._critic.update_frequency(obs))
+        self.q_table_plot.update(q_values.numpy(force=True))
+        if self.q_table_update_frequency_plot is not None and isinstance(self.agent.learner.critic, QFunctionTable):
+            update_frequency = self.agent.learner.critic.update_frequency(obs)
+            self.q_table_update_frequency_plot.update(update_frequency.numpy(force=True))
 
         if isinstance(self.learner.critic, QFunctionTable) and self.current_observation_index is not None:
             dpg.set_value(self.current_observation_index, str(self.learner.critic._obs_idx(obs)))
@@ -242,26 +231,8 @@ if __name__ == "__main__":
         )
     )
 
-    agent = A2CAgent(
-        observation_space_size=env.observation_space.shape[0],
-        action_space_size=env.action_space.n,
-        use_simple_actions=True,
-        use_q_table=True,
-        use_q_network=False,
-        consider_opponent_action=True,
-        actor_hidden_layer_sizes_specification="64,64",
-        actor_hidden_layer_activation_specification="ReLU",
-        critic_hidden_layer_sizes_specification="128,128",
-        critic_hidden_layer_activation_specification="ReLU",
-        **{
-            "a2c.policy_cumulative_discount": False,
-            "critic.discount": 1.0,
-            "critic.learning_rate": 0.001,
-            "a2c.actor_entropy_loss_coef": 0.1,
-            "a2c.actor_optimizer.lr": 0.001,
-        }
-    )
-
+    parameters = load_agent_parameters("a2c_agent")
+    agent = cast(A2CAgent, import_agent("a2c", env, parameters)[0])
     load_agent(agent, "a2c_qlearner_il")
 
     def spammer():
@@ -287,7 +258,7 @@ if __name__ == "__main__":
     analyser = Analyser(
         env=env,
         # p1_action_source=lambda o, i: next(p1),
-        p1_action_source=lambda o, i: agent.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=manager.get_predicted_opponent_action()),
+        p1_action_source=lambda o, i: agent.act(torch.from_numpy(o).float().unsqueeze(0), i, predicted_opponent_action=None),
         custom_elements_callback=manager.add_custom_elements,
         custom_state_update_callback=manager.on_state_update,
     )

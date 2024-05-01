@@ -27,3 +27,4 @@ def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str, exp_facto
     if ylabel is not None:
         plt.ylabel(ylabel)
     plt.savefig(fig_path)
+    plt.clf()

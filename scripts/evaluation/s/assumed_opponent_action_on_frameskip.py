@@ -7,8 +7,8 @@ from typing import Literal
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     runs_raw: dict[str, Literal["last", "none", "stand"]] = {
-        "assumed_opponent_action_on_frameskip_last": "last",
         "assumed_opponent_action_on_frameskip_none": "none",
+        "assumed_opponent_action_on_frameskip_last": "last",
         "assumed_opponent_action_on_frameskip_stand": "stand",
     }
     

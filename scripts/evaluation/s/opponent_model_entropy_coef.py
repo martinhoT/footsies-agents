@@ -40,6 +40,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         ),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
+
     dfs = get_data(
         data="win_rate",
         runs=runs_curriculum,
@@ -106,10 +107,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     # Losses on dataset
     runs_dataset_raw = {
-        "opp_entropy_coef_004_opp":   {"entropy_coef": 0.04},
-        "opp_entropy_coef_008_opp":   {"entropy_coef": 0.08},
-        "opp_entropy_coef_016_opp":   {"entropy_coef": 0.16},
-        "opp_entropy_coef_032_opp":   {"entropy_coef": 0.32},
+        "opp_entropy_coef_004_opp": {"entropy_coef": 0.04},
+        "opp_entropy_coef_008_opp": {"entropy_coef": 0.08},
+        "opp_entropy_coef_016_opp": {"entropy_coef": 0.16},
+        "opp_entropy_coef_032_opp": {"entropy_coef": 0.32},
     }
     
     dummy_env, _ = create_eval_env()
@@ -133,21 +134,26 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     if dfs is None:
         return
-    
-    plot_data(
-        dfs=dfs,
-        title=f"Opponent model loss on the dataset",
-        fig_path=f"{result_basename}_loss_dataset",
-        exp_factor=0.9,
-        xlabel="Time step",
-        ylabel="Loss",
-        run_name_mapping={
-            "opp_entropy_coef_004_opp":   "$\\beta = 0.04$",
-            "opp_entropy_coef_008_opp":   "$\\beta = 0.08$",
-            "opp_entropy_coef_016_opp":   "$\\beta = 0.16$",
-            "opp_entropy_coef_032_opp":   "$\\beta = 0.32$",
-        }
-    )
+
+    for player in ["p1", "p2"]:
+        title_suffix = f" ({player.upper()})"
+        attr_name = f"{player}_loss"
+
+        plot_data(
+            dfs=dfs,
+            title=f"Opponent model loss on the dataset" + title_suffix,
+            fig_path=f"{result_basename}_loss_dataset_{player}",
+            exp_factor=0.9,
+            xlabel="Time step",
+            ylabel="Loss",
+            run_name_mapping={
+                "opp_entropy_coef_004_opp":   "$\\beta = 0.04$",
+                "opp_entropy_coef_008_opp":   "$\\beta = 0.08$",
+                "opp_entropy_coef_016_opp":   "$\\beta = 0.16$",
+                "opp_entropy_coef_032_opp":   "$\\beta = 0.32$",
+            },
+            attr_name=attr_name,
+        )
 
 if __name__ == "__main__":
     import tyro

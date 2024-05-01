@@ -119,7 +119,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
                 "gm_residual_gm":     "Residual",
                 "gm_normal_gm":       "Normal",
                 "gm_differences_gm":  "Differences",
-            }
+            },
+            attr_name="loss" + data_label,
         )
 
 if __name__ == "__main__":

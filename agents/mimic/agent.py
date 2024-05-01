@@ -1,20 +1,16 @@
 import os
-import numpy as np
 import torch as T
 import logging
-from copy import deepcopy
 from torch import nn
 from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
-from gymnasium import Env
-from typing import Any, Callable, List, Tuple
+from typing import Any, List
 from agents.logger import TestState
 from agents.mimic.mimic import PlayerModel
 
 LOGGER = logging.getLogger("main.mimic.agent")
 
 
-# TODO: there are three different ways we can predict actions: primitive actions discretized, primitive actions as tuple, and moves. Are all supported?
 class MimicAgent(FootsiesAgentBase):
     def __init__(
         self,
@@ -54,6 +50,8 @@ class MimicAgent(FootsiesAgentBase):
         self.n_moves = action_dim if by_primitive_actions else ActionMap.n_simple()
 
         self._test_observations = None
+        self._test_p2_observations = None
+        self._test_p2_observations = None
         self._test_p1_actions = None
         self._test_p2_actions = None
         self._test_observations_partitioned = None
@@ -151,30 +149,54 @@ class MimicAgent(FootsiesAgentBase):
     def _initialize_test_states(self, test_states: List[TestState]):
         if self._test_observations is None:
             # Only consider observations in which an action was performed (this is not the case, for instance, when the environment terminates)
-            test_observations, test_p1_actions, test_p2_actions = zip(*[(s.observation, s.info["p1_simple"], s.info["p2_simple"]) for s in test_states if not (s.terminated or s.truncated)])
+            test_observations = [s.observation for s in test_states if not (s.terminated or s.truncated)]
             self._test_observations = T.vstack(test_observations)
+
+            test_p1_observations, test_p1_actions = zip(*[(s.observation, s.info["p1_simple"]) for s in test_states if not (s.terminated or s.truncated) and s.info["p1_simple"] is not None])
+            test_p2_observations, test_p2_actions = zip(*[(s.observation, s.info["p2_simple"]) for s in test_states if not (s.terminated or s.truncated) and s.info["p2_simple"] is not None])
+            self._test_p1_observations = T.vstack(test_p1_observations)
+            self._test_p2_observations = T.vstack(test_p2_observations)
             self._test_p1_actions = T.tensor(test_p1_actions, dtype=T.long).view(-1, 1)
             self._test_p2_actions = T.tensor(test_p2_actions, dtype=T.long).view(-1, 1)
             
             # We assume the test state were obtained sequentially.
             # NOTE: episode length doesn't count the terminal state, which is not kept.
-            episode_lengths = []
-            length = 0
-            for test_state in test_states:
-                if (test_state.terminated or test_state.truncated) and length > 0:
-                    episode_lengths.append(length)
-                    length = 0
+            actions_n_per_episode = [0]
+            p1_actions_n_per_episode = [0]
+            p2_actions_n_per_episode = [0]
+            for s in test_states:
+                if (s.terminated or s.truncated):
+                    if actions_n_per_episode[-1] > 0:
+                        actions_n_per_episode.append(0)
+                    
+                    if s.info["p1_simple"] is not None and p1_actions_n_per_episode[-1] > 0:
+                        p1_actions_n_per_episode.append(0)
+                    
+                    if s.info["p2_simple"] is not None and p2_actions_n_per_episode[-1] > 0:
+                        p2_actions_n_per_episode.append(0)
     
                 else:
-                    length += 1
+                    actions_n_per_episode[-1] += 1
+
+                    if s.info["p1_simple"] is not None:
+                        p1_actions_n_per_episode[-1] += 1
+                    
+                    if s.info["p2_simple"] is not None:
+                        p2_actions_n_per_episode[-1] += 1
+
+            # In case the last episode didn't complete fully, we remove it
+            if actions_n_per_episode[-1] == 0:
+                actions_n_per_episode.pop()
+            if p1_actions_n_per_episode[-1] == 0:
+                p1_actions_n_per_episode.pop()
+            if p2_actions_n_per_episode[-1] == 0:
+                p2_actions_n_per_episode.pop()
             
-            # In case the last episode didn't complete fully, and so wasn't added inside the loop
-            if length > 0:
-                episode_lengths.append(length)
-            
-            self._test_observations_partitioned = T.split(self._test_observations, episode_lengths)
-            self._test_p1_actions_partitioned = T.split(self._test_p1_actions, episode_lengths)
-            self._test_p2_actions_partitioned = T.split(self._test_p2_actions, episode_lengths)
+            self._test_observations_partitioned = T.split(self._test_observations, actions_n_per_episode)
+            self._test_p1_observations_partitioned = T.split(self._test_p1_observations, p1_actions_n_per_episode)
+            self._test_p2_observations_partitioned = T.split(self._test_p2_observations, p2_actions_n_per_episode)
+            self._test_p1_actions_partitioned = T.split(self._test_p1_actions, p1_actions_n_per_episode)
+            self._test_p2_actions_partitioned = T.split(self._test_p2_actions, p2_actions_n_per_episode)
 
     def evaluate_divergence_between_players(self, test_states: List[TestState]) -> float:
         """
@@ -183,9 +205,9 @@ class MimicAgent(FootsiesAgentBase):
         If both players are the same, it's expected that this divergence is 0.
         """
         self._initialize_test_states(test_states)
-        assert self._test_observations
-        assert self.p1_model
-        assert self.p2_model
+        assert self._test_observations is not None
+        assert self.p1_model is not None
+        assert self.p2_model is not None
 
         with T.no_grad():
             p1_probs = self.p1_model.network.log_probabilities(self._test_observations)[0].detach()
@@ -197,7 +219,7 @@ class MimicAgent(FootsiesAgentBase):
     def evaluate_decision_entropy(self, test_states: List[TestState], p1: bool) -> float:
         """Evaluate the entropy of the predicted probability distribution at the given test states."""
         self._initialize_test_states(test_states)
-        assert self._test_observations
+        assert self._test_observations is not None
 
         return self.decision_entropy(self._test_observations, p1=p1).mean().item()
 
@@ -209,14 +231,16 @@ class MimicAgent(FootsiesAgentBase):
         Should be as close to 1 as possible.
         """
         self._initialize_test_states(test_states)
-        assert self._test_observations_partitioned
-        assert self._test_p2_actions_partitioned
 
         model = self.p1_model if p1 else self.p2_model
-        assert model
+        observations = self._test_p1_observations_partitioned if p1 else self._test_p2_observations_partitioned
+        actions = self._test_p1_actions_partitioned if p1 else self._test_p2_actions_partitioned
+        assert model is not None
+        assert observations is not None
+        assert actions is not None
 
         total_score = 0
-        for (observations, p2_actions) in zip(self._test_observations_partitioned, self._test_p2_actions_partitioned):
+        for (observations, p2_actions) in zip(observations, actions):
             probs, _ = model.network.probabilities(observations, None)
             p2_score = probs.gather(1, p2_actions).sum().item()
 

@@ -1,3 +1,4 @@
+from typing import cast
 import torch
 import dearpygui.dearpygui as dpg
 from gymnasium.wrappers.flatten_observation import FlattenObservation
@@ -17,8 +18,9 @@ class GameModelAnalyserManager:
     def __init__(self, agent: GameModelAgent):
         self.agent = agent
 
-        self._complete_prediction_group = None
-        self._specific_prediction_group = None
+        # DPG items
+        self._complete_prediction_group: int | str = ""
+        self._specific_prediction_group: int | str = ""
 
     p1_guard_predicted = editable_dpg_value("p1_guard_predicted")
     p2_guard_predicted = editable_dpg_value("p2_guard_predicted")
@@ -45,9 +47,12 @@ class GameModelAnalyserManager:
     )
 
     complete_prediction_method = editable_dpg_value("complete_prediction_method")
-    selected_game_model: tuple[int, GameModel] = property(
-        fget=lambda self: eval(dpg.get_value("selected_game_model")),
-        fset=lambda self, value: dpg.set_value("selected_game_model", repr(value))
+    selected_game_model = cast(
+        tuple[int, GameModel],
+        property(
+            fget=lambda self: eval(dpg.get_value("selected_game_model")),
+            fset=lambda self, value: dpg.set_value("selected_game_model", repr(value))
+        )
     )
     predict_time_steps_ahead = editable_dpg_value("predict_time_steps_ahead")
     predicted_time_steps_ahead = editable_dpg_value("predicted_time_steps_ahead")
@@ -141,8 +146,10 @@ class GameModelAnalyserManager:
             next_obs = game_model.predict(observation, agent_action ,opponent_action)
         next_obs = next_obs.squeeze(0)
 
-        p1_move = ActionMap.move_from_move_index(next_obs[2:17].argmax().item())
-        p2_move = ActionMap.move_from_move_index(next_obs[17:32].argmax().item())
+        p1_move_index = int(next_obs[2:17].argmax().item())
+        p2_move_index = int(next_obs[17:32].argmax().item())
+        p1_move = ActionMap.move_from_move_index(p1_move_index)
+        p2_move = ActionMap.move_from_move_index(p2_move_index)
 
         self.p1_guard_predicted = round(next_obs[0].item() * 3)
         self.p2_guard_predicted = round(next_obs[1].item() * 3)
@@ -159,10 +166,10 @@ class GameModelAnalyserManager:
 
     def on_state_update(self, analyser: Analyser):
         if analyser.most_recent_transition is not None:
-            _, _, _, _, _, info, next_info = analyser.most_recent_transition
+            obs, _, _, _, _, info, next_info = analyser.most_recent_transition
             agent_action, opponent_action = ActionMap.simples_from_transition_ori(info, next_info)
 
-            self.predict_next_state(analyser, agent_action, opponent_action)
+            self.predict_next_state(obs, agent_action, opponent_action)
 
 
 if __name__ == "__main__":
@@ -185,6 +192,7 @@ if __name__ == "__main__":
         ),
         f=lambda o: torch.from_numpy(o).float().unsqueeze(0)
     )
+    assert env.observation_space.shape
 
     agent = GameModelAgent(
         game_model=GameModel(

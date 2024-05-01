@@ -266,8 +266,6 @@ class ExperimentArgs:
     """The number of trials to attempt. If `None`, will run indefinitely (may send SIGTERM to finish the study)"""
     time_steps_before_eval: int = 50000
     """The number of time steps to train on before evaluating the current model"""
-    curriculum: bool = False
-    """Whether to evaluate the agent's performance on the curriculum"""
     curriculum_objective: bool = True
     """If using the curriculum, whether to use the objective function designed specifically for it, instead of any custom one"""
     pruning: bool = True

@@ -20,7 +20,7 @@ from tqdm import tqdm
 from itertools import count
 from copy import deepcopy
 from functools import partial
-from typing import Callable, Iterable, cast
+from typing import Callable, Iterable, cast, Any
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.base import FootsiesAgentBase, FootsiesAgentTorch
 from agents.diayn import DIAYN, DIAYNWrapper
@@ -182,11 +182,12 @@ def train(
     - `initial_seed`: the environment seed that will be passed to the first `reset()` call
     """
     try:
-        LOGGER.info("Using an opponent manager")
         opponent_manager = extract_opponent_manager(env)
     except ValueError:
         LOGGER.info("Not using an opponent manager")
         opponent_manager = None
+    else:
+        LOGGER.info("Using an opponent manager")
 
     if n_episodes is not None and n_timesteps is not None:
         raise ValueError(f"either 'n_episodes' ({n_episodes}) or 'n_timesteps' ({n_timesteps}) is allowed to be specified, not both")
@@ -220,7 +221,6 @@ def train(
             
             terminated = False
             truncated = False
-            result = 0.5 # by default, the game is a draw
             while not (terminated or truncated):
                 action = agent.act(obs, info)
                 next_obs, reward, terminated, truncated, next_info = env.step(action)
@@ -256,13 +256,7 @@ def train(
 
                 timestep_counter += 1
 
-            # Determine the final game result, to provide to the self-play manager
-            if terminated and (reward != 0.0):
-                result = 1 if reward > 0.0 else 0
-            elif truncated and (info["guard"][0] != info["guard"][1]):
-                result = 1 if info["guard"][0] > info["guard"][1] else 0
-
-            LOGGER.debug("Episode finished with result %s, with termination (%s) or truncation (%s)", result, terminated, truncated)
+            LOGGER.debug("Episode finished with reward %s and info %s, with termination (%s) or truncation (%s)", reward, info, terminated, truncated)
 
             if opponent_manager is not None and opponent_manager.exhausted:
                 LOGGER.info("Opponent pool exhausted, quitting training")
@@ -290,11 +284,12 @@ def train(
             opponent_manager.close()
 
 
-def create_env(args: EnvArgs, log_dir: str = "runs", agent: FootsiesAgentBase | None = None) -> Env:
+def create_env(args: EnvArgs, log_dir: str | None = "runs") -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
+        opponent = (lambda o, i: (False, False, False)) if args.self_play.enabled or args.curriculum.enabled else None        
         env = FootsiesEnv(
-            opponent=lambda o, i: (False, False, False), # always define a dummy opponent
+            opponent=opponent,
             **args.kwargs, # type: ignore
         )
 
@@ -336,29 +331,19 @@ def create_env(args: EnvArgs, log_dir: str = "runs", agent: FootsiesAgentBase | 
             env = FootsiesFrameSkipped(env)
         
         if args.self_play.enabled:
-            if not isinstance(agent, FootsiesAgentBase):
-                raise ValueError("self-play with a non-FOOTSIES agent is not supported")
-            
-            footsies_env = cast(FootsiesEnv, env.unwrapped)
-            snapshot_method = lambda: agent.extract_opponent(env)
-            starter_opponent = snapshot_method()
-
-            # Set a good default agent for self-play
-            footsies_env.set_opponent(starter_opponent.act)
-            opponent_manager = SelfPlayManager(
-                snapshot_method=snapshot_method,
+            self_play_manager = SelfPlayManager(
+                snapshot_method=None,
                 max_opponents=args.self_play.max_opponents,
                 snapshot_interval=args.self_play.snapshot_interval,
                 switch_interval=args.self_play.switch_interval,
                 mix_bot=args.self_play.mix_bot,
                 log_elo=True,
                 log_dir=log_dir,
-                log_interval=1,
-                starter_opponent=starter_opponent,
+                starter_opponent=None, # default opponent is in-game bot initially
             )
 
             if args.self_play.add_curriculum_opps:
-                opponent_manager.populate_with_curriculum_opponents(
+                self_play_manager.populate_with_curriculum_opponents(
                     Idle(),
                     Backer(),
                     NSpammer(),
@@ -370,20 +355,21 @@ def create_env(args: EnvArgs, log_dir: str = "runs", agent: FootsiesAgentBase | 
                 )
 
             LOGGER.info("Activated self-play")
+
+            env = OpponentManagerWrapper(env, self_play_manager)
         
         elif args.curriculum.enabled:
-            opponent_manager = CurriculumManager(
+            curriculum_manager = CurriculumManager(
                 win_rate_threshold=args.curriculum.win_rate_threshold,
                 win_rate_over_episodes=args.curriculum.win_rate_over_episodes,
                 episode_threshold=args.curriculum.episode_threshold,
                 log_dir=log_dir,
+                csv_save=log_dir is not None,
             )
 
-            starter_opponent = opponent_manager.current_opponent.act if opponent_manager.current_opponent is not None else opponent_manager.current_opponent
-            footsies_env = cast(FootsiesEnv, env.unwrapped)
-            footsies_env.set_opponent(starter_opponent)
-
             LOGGER.info("Activated curriculum learning")
+
+            env = OpponentManagerWrapper(env, curriculum_manager)
 
     else:
         env = gym.make(
@@ -585,6 +571,21 @@ def main(args: MainArgs):
         
     else:
         intrinsic_reward_scheme = None
+
+    # We need to treat self-play differently, we can't set the snapshot method in create_env
+    if args.env.self_play.enabled:
+        if isinstance(agent, BaseAlgorithm):
+            raise ValueError("it is not possible to use self-play with an SB3 agent")
+        
+        self_play_manager = extract_opponent_manager(env)
+
+        if not isinstance(self_play_manager, SelfPlayManager):
+            raise RuntimeError("even though it was requested, the environment does not have the self-play manager set, or it could not be found")
+        
+        snapshot_method = partial(agent.extract_opponent, env=env)
+        self_play_manager.set_snapshot_method(snapshot_method)
+
+    # Train
 
     if isinstance(agent, BaseAlgorithm):
         try:

@@ -631,6 +631,8 @@ class A2CQLearner(A2CLearnerBase):
             # Change agent's policy to be uniform
             elif self._agent_update_style == self.UpdateStyle.UNIFORM:
                 next_obs_agent_policy = "uniform"
+            else:
+                raise ValueError(f"the agent update style has an invalid value {self._agent_update_style}")
         
         return next_obs_agent_policy
 
@@ -657,6 +659,8 @@ class A2CQLearner(A2CLearnerBase):
             # Change opponent's policy to be uniform
             elif self._opponent_update_style == self.UpdateStyle.UNIFORM:
                 res = "uniform"
+            else:
+                raise ValueError(f"the opponent update style has an invalid value {self._opponent_update_style}")
             
         return res
 

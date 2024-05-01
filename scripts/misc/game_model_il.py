@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from agents.action import ActionMap
 from tqdm import tqdm
 from models import game_model_
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter # type: ignore
 import tyro
 
 

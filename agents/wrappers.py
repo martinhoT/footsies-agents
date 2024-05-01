@@ -46,8 +46,8 @@ class AppendSimpleHistoryWrapper(Wrapper):
             action = ActionMap.simple_from_transition(
                 previous_player_move_index=self.prev_obs["move"][0 if self.p1 else 1],
                 previous_opponent_move_index=self.prev_obs["move"][1 if self.p1 else 0],
-                previous_player_move_progress=self.prev_obs["move_frame"][0 if self.p1 else 1],
-                previous_opponent_move_progress=self.prev_obs["move_frame"][1 if self.p1 else 0],
+                previous_player_move_frame=self.prev_obs["move_frame"][0 if self.p1 else 1],
+                previous_opponent_move_frame=self.prev_obs["move_frame"][1 if self.p1 else 0],
                 player_move_index=obs["move"][0 if self.p1 else 1],
             )
 
@@ -387,7 +387,7 @@ class OpponentManagerWrapper(Wrapper):
         super().__init__(env)
 
         self.env = env
-        self.footsies_env: FootsiesEnv = cast(FootsiesEnv, env.unwrapped)
+        self.footsies_env = cast(FootsiesEnv, env.unwrapped)
         self._opponent_manager = opponent_manager
     
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict]:

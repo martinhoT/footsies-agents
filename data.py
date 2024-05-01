@@ -3,11 +3,11 @@ import gzip
 import os
 import struct
 from torch.utils.data import Dataset
-from typing import Any, Callable, Generator, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from gymnasium import Env
-from gymnasium.wrappers import FlattenObservation
+from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
@@ -115,7 +115,7 @@ class FootsiesEpisode:
         ), pointer
 
     @staticmethod
-    def fromfile(file: BufferedIOBase) -> "FootsiesEpisode":
+    def fromfile(file: BufferedIOBase) -> "FootsiesEpisode | None":
         """Deserialize an episode from a file"""
         n_steps_bytes = file.read(4)
         if len(n_steps_bytes) == 0:
@@ -171,16 +171,16 @@ class FootsiesEpisode:
     def __iter__(self) -> Iterator[FootsiesTransition]:
         for i, ((obs, next_obs), reward, p1_action, p2_action) in enumerate(zip(pairwise(self.observations), self.rewards, self.p1_actions, self.p2_actions)):
             terminated = i >= self.steps - 1
-            yield obs, next_obs, reward, p1_action, p2_action, terminated
+            yield FootsiesTransition(obs, next_obs, reward, p1_action, p2_action, terminated)
     
-    def __getitem__(self, idx: int) -> tuple[FootsiesTransition]:
+    def __getitem__(self, idx: int) -> FootsiesTransition:
         obs = self.observations[idx, :]
         next_obs = self.observations[idx + 1, :]
         reward = self.rewards[idx, 0]
         p1_action = self.p1_actions[idx, 0]
         p2_action = self.p2_actions[idx, 0]
         terminated = idx >= self.steps - 1
-        return obs, next_obs, reward, p1_action, p2_action, terminated
+        return FootsiesTransition(obs, next_obs, reward, p1_action, p2_action, terminated)
 
     def __len__(self) -> int:
         return self.steps
@@ -189,9 +189,9 @@ class FootsiesEpisode:
 @dataclass(slots=True, repr=False)
 class FootsiesDataset:
     """Dataset of transitions on the FOOTSIES environment."""
-    episodes:           tuple[FootsiesEpisode]
+    episodes:           list[FootsiesEpisode]
 
-    transitions:        tuple[FootsiesTransition]   = field(default_factory=tuple, init=False)
+    transitions:        tuple[FootsiesTransition, ...] = field(default_factory=tuple, init=False)
 
     def __post_init__(self):
         self.transitions = tuple(transition for episode in self.episodes for transition in episode)
@@ -232,7 +232,7 @@ class FootsiesDataset:
             def __init__(self, opponent_actions: list[int]):
                 self.action_iterator = iter(opponent_actions)
 
-            def __call__(self, obs: dict):
+            def __call__(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
                 try:
                     action = next(self.action_iterator)
                 except StopIteration:
@@ -272,8 +272,8 @@ class FootsiesDataset:
         battle_state.p2State.guardHealth = initial_obs["guard"][1].item()
         battle_state.p1State.currentActionID = initial_obs["move"][0].item()
         battle_state.p2State.currentActionID = initial_obs["move"][1].item()
-        battle_state.p1State.moveFrame = initial_obs["move_frame"][0].item()
-        battle_state.p2State.moveFrame = initial_obs["move_frame"][1].item()
+        battle_state.p1State.currentActionFrame = initial_obs["move_frame"][0].item()
+        battle_state.p2State.currentActionFrame = initial_obs["move_frame"][1].item()
         footsies_env.load_battle_state(battle_state)
 
         for recorded_obs, p1_action in zip(list(e.observations[1:, :]), list(e.p1_actions.flatten())):
@@ -328,7 +328,7 @@ class DataCollector:
     def __init__(
         self,
         env: Env,
-        action_source: Callable[[np.ndarray], Any] = None,
+        action_source: Callable[[np.ndarray], Any] | None = None,
     ):
         """
         Class for collecting play data from the FOOTSIES environment.
@@ -346,20 +346,20 @@ class DataCollector:
         """
         Sample a trajectory from the environment.
         """
-        obs = self.env.reset()
+        obs, _ = self.env.reset()
         terminated, truncated = False, False,
         while not (terminated or truncated):
             action = self.action_source(obs)
             obs, reward, terminated, truncated, info = self.env.step(action)
-            yield obs, reward, info
+            yield obs, float(reward), info
 
     def collect(self, episodes: int) -> FootsiesDataset:
-        episodes = [
+        episode_list = [
             FootsiesEpisode.trajectory(self.sample_trajectory())
             for _ in range(episodes)
         ]
 
-        return FootsiesDataset(episodes)
+        return FootsiesDataset(episode_list)
     
     def stop(self):
         self.env.close()

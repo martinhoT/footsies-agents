@@ -67,7 +67,7 @@ class TheOneAnalyserManager:
             self.game_model_manager.on_state_update(analyser)
 
         if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
-            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
+            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition.as_tuple()
             self.r += reward
             
             # Ignore hitstop/freeze

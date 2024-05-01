@@ -13,8 +13,8 @@ class Heatmap:
         data: np.ndarray,
         xlabel: str = "x",
         ylabel: str = "y",
-        xticks: List[str] = None,
-        yticks: List[str] = None,
+        xticks: List[str] | None = None,
+        yticks: List[str] | None = None,
         title: str = "Heatmap",
     ):
         fig, ax = plt.subplots()

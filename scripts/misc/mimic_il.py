@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from agents.action import ActionMap
 from tqdm import tqdm
 from models import mimic_
-from torch.utils.tensorboard import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter # type: ignore
 from agents.torch_utils import ActionHistoryAugmentation, TimeSinceLastCommitAugmentation
 from typing import Literal
 import tyro
@@ -39,10 +39,10 @@ def main(
     time_augment_p1 = TimeSinceLastCommitAugmentation(120)
     time_augment_p2 = TimeSinceLastCommitAugmentation(120)
 
-    append_action_augment_p1.enabled = history_p1
-    append_action_augment_p2.enabled = history_p2
-    time_augment_p1.enabled = time_p1
-    time_augment_p2.enabled = time_p2
+    append_action_augment_p1_enabled = history_p1
+    append_action_augment_p2_enabled = history_p2
+    time_augment_p1_enabled = time_p1
+    time_augment_p2_enabled = time_p2
 
     dataset = FootsiesDataset.load("footsies-dataset")
     dataset = FootsiesTorchDataset(dataset)
@@ -52,10 +52,10 @@ def main(
 
     mimic, _ = mimic_(
         observation_space_size=36
-            + append_action_augment_p1.enabled * append_action_augment_p1.action_dim * append_action_augment_p1.history.maxlen
-            + append_action_augment_p2.enabled * append_action_augment_p2.action_dim * append_action_augment_p2.history.maxlen
-            + time_augment_p1.enabled * 1
-            + time_augment_p2.enabled * 1,
+            + append_action_augment_p1_enabled * append_action_augment_p1.action_dim * history_p1_size
+            + append_action_augment_p2_enabled * append_action_augment_p2.action_dim * history_p2_size
+            + time_augment_p1_enabled * 1
+            + time_augment_p2_enabled * 1,
         action_space_size=9,
         dynamic_loss_weights=dynamic_loss_weights,
         dynamic_loss_weights_max=10.0,
@@ -70,8 +70,11 @@ def main(
     )
 
     # 5% of the dataset
-    test_states_frac = 0.05
-    test_states = [(torch.as_tensor(t[0]).float().unsqueeze(0), t[3]) for t in dataset if random.random() < test_states_frac]
+    # test_states_frac = 0.05
+    # test_states = [(torch.as_tensor(t[0]).float().unsqueeze(0), t[3]) for t in dataset if random.random() < test_states_frac]
+
+    assert mimic.p1_model
+    assert mimic.p2_model
 
     step = 0
     p1_action_prev = 0
@@ -82,13 +85,13 @@ def main(
 
             p1_action, p2_action = ActionMap.simples_from_transition_torch(obs, next_obs)
 
-            if append_action_augment_p1.enabled:
+            if append_action_augment_p1_enabled:
                 obs = append_action_augment_p1(obs, p1_action_prev)
-            if append_action_augment_p2.enabled:
+            if append_action_augment_p2_enabled:
                 obs = append_action_augment_p2(obs, p2_action_prev)
-            if time_augment_p1.enabled:
+            if time_augment_p1_enabled:
                 obs = time_augment_p1(obs, p1_action_prev)
-            if time_augment_p2.enabled:
+            if time_augment_p2_enabled:
                 obs = time_augment_p2(obs, p2_action_prev)
             
             p1_loss = mimic.p1_model.update(obs, p1_action, terminated)

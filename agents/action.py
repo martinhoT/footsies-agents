@@ -1,5 +1,5 @@
-import torch
-from typing import Iterable
+import torch as T
+from typing import Sequence
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 
 
@@ -22,7 +22,7 @@ class ActionMap:
     SIMPLE_ACTIONS: list[FootsiesMove] = [FootsiesMove.STAND, FootsiesMove.FORWARD, FootsiesMove.BACKWARD, FootsiesMove.DASH_FORWARD, FootsiesMove.DASH_BACKWARD, FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL]
 
     # Assuming player on the left side
-    SIMPLE_AS_MOVE_TO_PRIMITIVE_MAP: dict[FootsiesMove, Iterable[tuple[bool, bool, bool]]] = {
+    SIMPLE_AS_MOVE_TO_PRIMITIVE_MAP: dict[FootsiesMove, Sequence[tuple[bool, bool, bool]]] = {
         # STAND clears the possibility of performing a dash by inputting backward and forward
         FootsiesMove.STAND:         ((True, True, False),),
         FootsiesMove.FORWARD:       ((False, True, False),),
@@ -35,9 +35,9 @@ class ActionMap:
         FootsiesMove.N_SPECIAL:     tuple(((False, False, True) for _ in range(59))) + ((False, False, False),),
         FootsiesMove.B_SPECIAL:     tuple(((False, False, True) for _ in range(59))) + ((False, True, False),),
     }
-    SIMPLE_AS_MOVE_TO_DISCRETE_MAP: dict[FootsiesMove, Iterable[int]] = None
-    SIMPLE_TO_PRIMITIVE_MAP: dict[int, Iterable[tuple[bool, bool, bool]]] = None
-    SIMPLE_TO_DISCRETE_MAP: dict[int, Iterable[int]] = None
+    SIMPLE_AS_MOVE_TO_DISCRETE_MAP: dict[FootsiesMove, Sequence[int]] = {}
+    SIMPLE_TO_PRIMITIVE_MAP: dict[int, Sequence[tuple[bool, bool, bool]]] = {}
+    SIMPLE_TO_DISCRETE_MAP: dict[int, Sequence[int]] = {}
     
     # TODO: is this DAMAGE -> STAND conversion valid? Will it not disturb training of STAND? evaluate that
     # This mapping maps a FOOTSIES move to an action move that may have caused it. For DAMAGE, we assume the player did nothing
@@ -60,27 +60,27 @@ class ActionMap:
         FootsiesMove.DEAD:              FootsiesMove.STAND,
         FootsiesMove.WIN:               FootsiesMove.STAND,
     }
-    SIMPLE_FROM_MOVE_MAP: dict[FootsiesMove, int] = None
-    SIMPLE_FROM_MOVE_INDEX_MAP: dict[int, int] = None
+    SIMPLE_FROM_MOVE_MAP: dict[FootsiesMove, int] = {}
+    SIMPLE_FROM_MOVE_INDEX_MAP: dict[int, int] = {}
 
     # Actions that have a set duration, and cannot be performed instantly. These actions are candidates for frame skipping
     TEMPORAL_ACTIONS = set(SIMPLE_ACTIONS) - {FootsiesMove.STAND, FootsiesMove.FORWARD, FootsiesMove.BACKWARD}
-    TEMPORAL_ACTIONS_INT: set[int] = None
+    TEMPORAL_ACTIONS_INT: set[int] = set()
     # Moves that signify a player is hit. The opponent is able to cancel into another action in these cases. Note that GUARD_PROXIMITY is not included
     HIT_GUARD_STATES = {FootsiesMove.DAMAGE, FootsiesMove.GUARD_STAND, FootsiesMove.GUARD_CROUCH, FootsiesMove.GUARD_M, FootsiesMove.GUARD_BREAK}
-    HIT_GUARD_STATES_INT: set[int] = None
+    HIT_GUARD_STATES_INT: set[int] = set()
     # Neutral moves on which players can act, since they are instantaneous (I think guard proximity also counts?)
     NEUTRAL_STATES = {FootsiesMove.STAND, FootsiesMove.BACKWARD, FootsiesMove.FORWARD, FootsiesMove.GUARD_PROXIMITY}
     # Temporal moves that can be canceled into other moves
     # NOTE: the method `is_in_hitstop_torch` hardcodes this set and assumes to contain these moves. If it is to be updated, update that method as well
     TEMPORAL_STATES_CANCELABLE = {FootsiesMove.N_ATTACK, FootsiesMove.B_ATTACK}
-    TEMPORAL_STATES_CANCELABLE_INT: set[int] = None
+    TEMPORAL_STATES_CANCELABLE_INT: set[int] = set()
     # Simple actions that are performable in hitstop
     PERFORMABLE_SIMPLES_IN_HITSTOP = {FootsiesMove.STAND, FootsiesMove.N_ATTACK}
-    PERFORMABLE_SIMPLES_IN_HITSTOP_INT: set[int] = None
+    PERFORMABLE_SIMPLES_IN_HITSTOP_INT: set[int] = set()
     # Simple actions that are technically special moves (i.e. require a sequence of primitive actions to perform)
     SIMPLE_SPECIAL_MOVES = {FootsiesMove.DASH_FORWARD, FootsiesMove.DASH_BACKWARD, FootsiesMove.N_SPECIAL, FootsiesMove.B_SPECIAL}
-    SIMPLE_SPECIAL_MOVES_INT: set[int] = None
+    SIMPLE_SPECIAL_MOVES_INT: set[int] = set()
 
     ## Conversions between actions
 
@@ -95,22 +95,22 @@ class ActionMap:
         return (primitive[0] << 0) + (primitive[1] << 1) + (primitive[2] << 2)
 
     @staticmethod
-    def simple_as_move_to_discrete(simple: FootsiesMove) -> Iterable[int]:
+    def simple_as_move_to_discrete(simple: FootsiesMove) -> Sequence[int]:
         """Covert a simple action (as a `FootsiesMove`) into a sequence of discrete (integer) actions."""
         return ActionMap.SIMPLE_AS_MOVE_TO_DISCRETE_MAP[simple]
     
     @staticmethod
-    def simple_as_move_to_primitive(simple: FootsiesMove) -> Iterable[tuple[bool, bool, bool]]:
+    def simple_as_move_to_primitive(simple: FootsiesMove) -> Sequence[tuple[bool, bool, bool]]:
         """Convert a simple action (as a `Footsiesmove`) into a sequence of primitive (boolean combination) actions."""
         return ActionMap.SIMPLE_AS_MOVE_TO_PRIMITIVE_MAP[simple]
 
     @staticmethod
-    def simple_to_discrete(simple: int) -> Iterable[int]:
+    def simple_to_discrete(simple: int) -> Sequence[int]:
         """Convert a simple action (as an integer) into a sequence of discrete (integer) actions."""
         return ActionMap.SIMPLE_TO_DISCRETE_MAP[simple]
     
     @staticmethod
-    def simple_to_primitive(simple: int) -> Iterable[tuple[bool, bool, bool]]:
+    def simple_to_primitive(simple: int) -> Sequence[tuple[bool, bool, bool]]:
         """Convert a simple action (as an integer) into a sequence of primitive (boolean combination) actions."""
         return ActionMap.SIMPLE_TO_PRIMITIVE_MAP[simple]
 
@@ -160,12 +160,12 @@ class ActionMap:
 
     # NOTE: the very first frame of temporal actions is the action that originated that temporal action
     @staticmethod
-    def simple_from_transition(previous_player_move_index: int, previous_opponent_move_index: int, previous_player_move_progress: float, previous_opponent_move_progress: float, player_move_index: int) -> int:
+    def simple_from_transition(previous_player_move_index: int, previous_opponent_move_index: int, previous_player_move_frame: int, previous_opponent_move_frame: int, player_move_index: int) -> int | None:
         """Correctly infer the simple action that was effectively performed in a game transition. If the action was ineffectual, return `None`. This is the method that should be used for obtaining simple actions from gameplay."""
         previous_player_move = FOOTSIES_MOVE_INDEX_TO_MOVE[previous_player_move_index]
         previous_opponent_move = FOOTSIES_MOVE_INDEX_TO_MOVE[previous_opponent_move_index]
         player_move = FOOTSIES_MOVE_INDEX_TO_MOVE[player_move_index]
-        was_actionable = ActionMap.is_state_actionable(previous_player_move, previous_opponent_move, previous_player_move_progress, previous_opponent_move_progress)
+        was_actionable = ActionMap.is_state_actionable(previous_player_move, previous_opponent_move, previous_player_move_frame, previous_opponent_move_frame)
         
         # The player should have been able to perform an action, otherwise no simple action was effectively performed
         if was_actionable:
@@ -185,7 +185,7 @@ class ActionMap:
         return None
     
     @staticmethod
-    def simples_from_transition_ori(obs: dict, next_obs: dict) -> tuple[int, int]:
+    def simples_from_transition_ori(obs: dict, next_obs: dict) -> tuple[int | None, int | None]:
         """Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as original observations. If an action was ineffectual, return `None`. This is a convenience method that should be used for obtaining simple actions from gameplay."""
         p1_move_frame = obs["move_frame"][0]
         p2_move_frame = obs["move_frame"][1]
@@ -197,22 +197,22 @@ class ActionMap:
         obs_agent_action = ActionMap.simple_from_transition(
             previous_player_move_index=p1_move_index,
             previous_opponent_move_index=p2_move_index,
-            previous_player_move_progress=p1_move_frame,
-            previous_opponent_move_progress=p2_move_frame,
+            previous_player_move_frame=p1_move_frame,
+            previous_opponent_move_frame=p2_move_frame,
             player_move_index=p1_next_move_index,
         )
         obs_opponent_action = ActionMap.simple_from_transition(
             previous_player_move_index=p2_move_index,
             previous_opponent_move_index=p1_move_index,
-            previous_player_move_progress=p2_move_frame,
-            previous_opponent_move_progress=p1_move_frame,
+            previous_player_move_frame=p2_move_frame,
+            previous_opponent_move_frame=p1_move_frame,
             player_move_index=p2_next_move_index,
         )
 
         return obs_agent_action, obs_opponent_action
     
     @staticmethod
-    def simples_from_transition_torch(obs: torch.Tensor, next_obs: torch.Tensor) -> tuple[int, int]:
+    def simples_from_transition_torch(obs: T.Tensor, next_obs: T.Tensor) -> tuple[int | None, int | None]:
         """
         Correctly infer the simple actions from player 1 and 2 that were performed in the given game transition as PyTorch tensors.
         If an action was ineffectual, return `None`.
@@ -222,24 +222,28 @@ class ActionMap:
         if obs.size(0) > 1 or next_obs.size(0) > 1:
             raise ValueError("batched observations are not supported for this method")
 
+        p1_move_index = int(T.argmax(obs[0, 2:17]).item())
+        p2_move_index = int(T.argmax(obs[0, 17:32]).item())
+        p1_move = ActionMap.move_from_move_index(p1_move_index)
+        p2_move = ActionMap.move_from_move_index(p2_move_index)
+        p1_next_move_index = int(T.argmax(next_obs[0, 2:17]).item())
+        p2_next_move_index = int(T.argmax(next_obs[0, 17:32]).item())
         p1_move_progress = obs[0, 32].item()
         p2_move_progress = obs[0, 33].item()
-        p1_move_index = torch.argmax(obs[0, 2:17]).item()
-        p2_move_index = torch.argmax(obs[0, 17:32]).item()
-        p1_next_move_index = torch.argmax(next_obs[0, 2:17]).item()
-        p2_next_move_index = torch.argmax(next_obs[0, 17:32]).item()
+        p1_move_frame = round(p1_move_progress * p1_move.value.duration)
+        p2_move_frame = round(p2_move_progress * p2_move.value.duration)
         obs_agent_action = ActionMap.simple_from_transition(
             previous_player_move_index=p1_move_index,
             previous_opponent_move_index=p2_move_index,
-            previous_player_move_progress=p1_move_progress,
-            previous_opponent_move_progress=p2_move_progress,
+            previous_player_move_frame=p1_move_frame,
+            previous_opponent_move_frame=p2_move_frame,
             player_move_index=p1_next_move_index,
         )
         obs_opponent_action = ActionMap.simple_from_transition(
             previous_player_move_index=p2_move_index,
             previous_opponent_move_index=p1_move_index,
-            previous_player_move_progress=p2_move_progress,
-            previous_opponent_move_progress=p1_move_progress,
+            previous_player_move_frame=p2_move_frame,
+            previous_opponent_move_frame=p1_move_frame,
             player_move_index=p2_next_move_index,
         )
 
@@ -286,23 +290,23 @@ class ActionMap:
         opponent_move_state = FOOTSIES_MOVE_INDEX_TO_MOVE[opponent_move_index]
         return ActionMap.is_in_hitstop(player_move_state, opponent_move_state, opponent_move_frame)
 
-    _TEMPORAL_STATES_CANCELABLE_TORCH: torch.Tensor = None
-    _HIT_GUARD_STATES_TORCH: torch.Tensor = None
+    _TEMPORAL_STATES_CANCELABLE_TORCH: T.Tensor = T.tensor(0)
+    _HIT_GUARD_STATES_TORCH: T.Tensor = T.tensor(0)
 
     @staticmethod
-    def is_in_hitstop_torch(obs: torch.Tensor, p1: bool = True) -> torch.Tensor:
+    def is_in_hitstop_torch(obs: T.Tensor, p1: bool = True) -> T.Tensor:
         """Whether the player, at the given PyTorch tensor observation, is in hitstop. Supports a batch of observations."""
         idx = 0 if p1 else 1
         
         player_move_index = obs[:, 2 + idx * 15:17 + idx * 15].argmax(dim=-1)
         opponent_move_index = obs[:, 17 - idx * 15:32 - idx * 15].argmax(dim=-1)
 
-        agent_in_temporal_action = torch.isin(player_move_index, ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH, assume_unique=True)
+        agent_in_temporal_action = T.isin(player_move_index, ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH, assume_unique=True)
 
         # We won't expect floating point errors here, since zero should be exactly zero
         opponent_at_start = obs[:, 33 - idx] == 0.0
 
-        opponent_in_hitguard = torch.isin(opponent_move_index, ActionMap._HIT_GUARD_STATES_TORCH, assume_unique=True)
+        opponent_in_hitguard = T.isin(opponent_move_index, ActionMap._HIT_GUARD_STATES_TORCH, assume_unique=True)
 
         return agent_in_temporal_action & opponent_at_start & opponent_in_hitguard
 
@@ -332,7 +336,7 @@ class ActionMap:
         return ActionMap.is_state_actionable(player_move_state, opponent_move_state, player_move_frame, opponent_move_frame)
 
     @staticmethod
-    def is_state_actionable_torch(obs: torch.Tensor, p1: bool = True) -> torch.Tensor:
+    def is_state_actionable_torch(obs: T.Tensor, p1: bool = True) -> bool:
         """Whether the player, at the current move state, is able to perform an action, from the given PyTorch observation. No batch support."""
         if obs.size(0) > 1:
             raise ValueError("batched observations are not supported for this method")
@@ -340,13 +344,13 @@ class ActionMap:
         idx = 0 if p1 else 1
         player_move_progress = obs[0, 32 + idx]
         opponent_move_progress = obs[0, 33 - idx]
-        player_move_index = obs[0, 2 + idx * 15:17 + idx * 15].argmax(dim=-1)
-        opponent_move_index = obs[0, 17 - idx * 15:32 - idx * 15].argmax(dim=-1)
+        player_move_index = int(obs[0, 2 + idx * 15:17 + idx * 15].argmax(dim=-1).item())
+        opponent_move_index = int(obs[0, 17 - idx * 15:32 - idx * 15].argmax(dim=-1).item())
         player_move_state = ActionMap.move_from_move_index(player_move_index)
         opponent_move_state = ActionMap.move_from_move_index(opponent_move_index)
         
-        player_move_frame = (player_move_progress * player_move_state.value.duration).round().item()
-        opponent_move_frame = (opponent_move_progress * opponent_move_state.value.duration).round().item()
+        player_move_frame = int((player_move_progress * player_move_state.value.duration).round().item())
+        opponent_move_frame = int((opponent_move_progress * opponent_move_state.value.duration).round().item())
 
         return ActionMap.is_state_actionable(player_move_state, opponent_move_state, player_move_frame, opponent_move_frame)
         
@@ -396,7 +400,7 @@ ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP_INT = {
 ActionMap.SIMPLE_SPECIAL_MOVES_INT = {
     ActionMap.SIMPLE_ACTIONS.index(simple) for simple in ActionMap.SIMPLE_SPECIAL_MOVES
 }
-ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH = torch.tensor(list(ActionMap.TEMPORAL_STATES_CANCELABLE_INT)).long()
-ActionMap._HIT_GUARD_STATES_TORCH = torch.tensor(list(ActionMap.HIT_GUARD_STATES_INT)).long()
+ActionMap._TEMPORAL_STATES_CANCELABLE_TORCH = T.tensor(list(ActionMap.TEMPORAL_STATES_CANCELABLE_INT)).long()
+ActionMap._HIT_GUARD_STATES_TORCH = T.tensor(list(ActionMap.HIT_GUARD_STATES_INT)).long()
 
 assert all(v is not None for v in vars(ActionMap).values())

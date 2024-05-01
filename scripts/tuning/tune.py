@@ -10,7 +10,7 @@ from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.monitor import Monitor
 from main import create_env, save_agent, setup_logger
 from opponents.curriculum import CurriculumManager
-from agents.wrappers import OpponentManagerWrapper
+from main import extract_opponent_manager
 
 
 DefineModelFunction = Callable[[optuna.Trial, Env], FootsiesAgentBase | BaseAlgorithm]
@@ -116,6 +116,9 @@ class TrialManager:
 
 # NOTE: limitation, the different processes running this script should not be finding ports for FOOTSIES at the same time. As such, the processes should start up sequentially
 def main(args: ExperimentArgs):
+    if args.env.self_play.enabled:
+        raise ValueError("self-play is not supported for tuning")
+
     module_name = args.agent.name.replace(".", "_")
 
     optimize_module_str = ".".join(("scripts", "tuning", module_name))
@@ -126,35 +129,32 @@ def main(args: ExperimentArgs):
     define_model_function: DefineModelFunction = optimize_module.define_model
     # If we are training using the curriculum, then our objective is completely different
     objective_function: ObjectiveFunction | None
-    if args.curriculum and args.curriculum_objective:
+    if args.env.curriculum.enabled and args.curriculum_objective:
         objective_function = None
     else:
         objective_function = optimize_module.objective
 
+    # Override curriculum arguments
+    args.env.curriculum.episode_threshold = 1000
+    args.env.curriculum.win_rate_threshold = 0.8
+    args.env.curriculum.win_rate_over_episodes = 20
+    
     ports = FootsiesEnv.find_ports(start=20000)
     args.env.kwargs.setdefault("game_port", ports["game_port"])
     args.env.kwargs.setdefault("opponent_port", ports["opponent_port"])
     args.env.kwargs.setdefault("remote_control_port", ports["remote_control_port"])
     
     args.env.kwargs.setdefault("game_path", "../Footsies-Gym/Build/FOOTSIES.x86_64")
-    if args.curriculum:
-        args.env.kwargs.setdefault("opponent", lambda o, i: (False, False, False)) # type: ignore
 
-    env = create_env(args.env)
+    env = create_env(args.env, log_dir=None)
 
-    if args.curriculum:
-        curriculum = CurriculumManager(
-            win_rate_threshold=0.8,
-            win_rate_over_episodes=20,
-            episode_threshold=1000,
-            log_dir=None,
-            csv_save=False,
-        )
-
-        env = OpponentManagerWrapper(env, opponent_manager=curriculum)
-
+    curriculum = extract_opponent_manager(env)
+    if curriculum is None:
+        if args.env.curriculum.enabled:
+            raise RuntimeError("the environment was not created with an opponent manager when one was requested, or it could not be found")
     else:
-        curriculum = None
+        if not isinstance(curriculum, CurriculumManager):
+            raise RuntimeError("the environment's opponent manager is not the curriculum one")
 
     # Wrap with a Monitor wrapper if using an SB3 agent, or else they may complain on evaluation
     if args.agent.is_sb3:

@@ -4,21 +4,16 @@ import random
 import logging
 from torch import nn
 from torch.distributions import Categorical
-from copy import deepcopy
-from agents.base import FootsiesAgentTorch
-from gymnasium import Env
-from typing import Any, Callable, Tuple
+from agents.base import FootsiesAgentBase
 from agents.a2c.a2c import A2CQLearner, ValueNetwork
 from agents.logger import TestState
 from agents.ql.ql import QFunction, QFunctionTable, QFunctionNetwork
-from agents.torch_utils import AggregateModule, observation_invert_perspective_flattened
-from agents.action import ActionMap
-from collections import deque
+from agents.torch_utils import AggregateModule
 
 LOGGER = logging.getLogger("main.a2c.agent")
 
 
-class A2CAgent(FootsiesAgentTorch):
+class A2CAgent(FootsiesAgentBase):
     def __init__(
         self,
         learner: A2CQLearner,

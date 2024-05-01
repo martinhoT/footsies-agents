@@ -160,7 +160,7 @@ class DIAYNWrapper(gymnasium.Wrapper):
         self,
         env: gymnasium.Env,
         diayn: DIAYN,
-        log_dir: str = None,
+        log_dir: str | None = None,
         log_interval: int = 1000,
     ):
         """

@@ -45,7 +45,7 @@ def footsies_env_root():
         sync_mode="synced_non_blocking",
         fast_forward=False,
         dense_reward=False,
-        opponent=lambda o: (False, False, False),
+        opponent=lambda o, i: (False, False, False),
     )
     
     # Set in-game bot as default opponent

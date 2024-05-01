@@ -96,18 +96,23 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     if dfs is None:
         return
     
-    plot_data(
-        dfs=dfs,
-        title=f"Opponent model loss on the dataset",
-        fig_path=f"{result_basename}_loss_dataset",
-        exp_factor=0.9,
-        xlabel="Time step",
-        ylabel="Loss",
-        run_name_mapping={
-            "opp_no_dynamic_weights_opp":   "No dynamic weights",
-            "opp_yes_dynamic_weights_opp":  "Dynamic weights",
-        }
-    )
+    for player in ["p1", "p2"]:
+        title_suffix = f" ({player.upper()})"
+        attr_name = f"{player}_loss"
+
+        plot_data(
+            dfs=dfs,
+            title=f"Opponent model loss on the dataset" + title_suffix,
+            fig_path=f"{result_basename}_loss_dataset_{player}",
+            exp_factor=0.9,
+            xlabel="Time step",
+            ylabel="Loss",
+            run_name_mapping={
+                "opp_no_dynamic_weights_opp":   "No dynamic weights",
+                "opp_yes_dynamic_weights_opp":  "Dynamic weights",
+            },
+            attr_name=attr_name,
+        )
 
 if __name__ == "__main__":
     import tyro

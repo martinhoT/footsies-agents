@@ -3,7 +3,7 @@ import dearpygui.dearpygui as dpg
 import pprint
 import threading
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable, cast
 from gymnasium import Env, ObservationWrapper
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
@@ -16,20 +16,34 @@ from dataclasses import dataclass
 from agents.wrappers import FootsiesSimpleActions
 
 
-@dataclass
+@dataclass(slots=True)
 class AnalyserState:
     battle_state: FootsiesBattleState
 
-    previous_original_observation: dict
+    previous_original_observation: dict | None
     current_original_observation: dict
-    previous_observation: "any"
-    current_observation: "any"
+    previous_observation: Any
+    current_observation: Any
 
-    previous_info: dict
+    previous_info: dict | None
     current_info: dict
     reward: float
     terminated: bool
     truncated: bool
+
+
+@dataclass(slots=True)
+class AnalyserTransition:
+    obs:                Any
+    next_obs:           Any
+    reward:             float
+    terminated:         bool
+    truncated:          bool
+    previous_info:      dict[str, Any]
+    current_info:       dict[str, Any]
+
+    def as_tuple(self) -> tuple[Any, Any, float, bool, bool, dict[str, Any], dict[str, Any]]:
+        return (self.obs, self.next_obs, self.reward, self.terminated, self.truncated, self.previous_info, self.current_info)
 
 
 def editable_dpg_value(item: int | str):
@@ -40,7 +54,7 @@ def editable_dpg_value(item: int | str):
 
 
 # NOTE: assumes no other wrapper that transforms the observation space other than observation wrapper is used (like FrameSkipped)
-def transformed_observation_from_root(env: Env, root_obs: "any") -> "any":
+def transformed_observation_from_root(env: Env, root_obs: Any) -> Any:
     observation_wrappers: list[ObservationWrapper] = []
     current_env = env
 
@@ -48,7 +62,7 @@ def transformed_observation_from_root(env: Env, root_obs: "any") -> "any":
         if isinstance(current_env, ObservationWrapper):
             observation_wrappers.append(current_env)
 
-        current_env = current_env.env
+        current_env = current_env.env # type: ignore
 
     obs = root_obs
     for observation_wrapper in reversed(observation_wrappers):
@@ -61,11 +75,11 @@ class Analyser:
     
     def __init__(self,
         env: Env,
-        p1_action_source: Callable[["any", dict], "any"],
-        custom_elements_callback: Callable[["Analyser"], None], # function that will be called when the main DPG window is being created, allowing the addition of custom elements
-        custom_state_update_callback: Callable[["Analyser"], None], # function that will be called when the battle state is updated (either through the 'Advance' button or by manipulation)
+        p1_action_source: Callable[[Any, dict], Any],
+        custom_elements_callback: Callable[["Analyser"], None] = lambda a: None, # function that will be called when the main DPG window is being created, allowing the addition of custom elements
+        custom_state_update_callback: Callable[["Analyser"], None] = lambda a: None, # function that will be called when the battle state is updated (either through the 'Advance' button or by manipulation)
     ):
-        footsies_env: FootsiesEnv = env.unwrapped
+        footsies_env = cast(FootsiesEnv, env.unwrapped)
         if footsies_env.sync_mode != "synced_non_blocking":
             raise ValueError("the FOOTSIES environment sync mode is not 'synced_non_blocking', using other modes is not appropriate")
         if footsies_env.render_mode != "human":
@@ -97,7 +111,7 @@ class Analyser:
             if isinstance(current_env, FootsiesNormalized):
                 normalized_observations = True
     
-            current_env = current_env.env
+            current_env = current_env.env # type: ignore
 
         if self.action_type is None:
             self.action_type = "primitive"
@@ -108,12 +122,12 @@ class Analyser:
         # Store the current and previous environment information.
         # The current and previous observations are those that are transformed and to be passed to the agent.
         # The original current and previous observations are internal and supposed to be used by the analyser, which shouldn't care about which wrappers are being used.
-        self.current_original_observation = None
-        self.current_observation = None
-        self.current_info = None
-        self.previous_original_observation = None
-        self.previous_observation = None
-        self.previous_info = None
+        self.current_original_observation: dict[str, Any] = {}
+        self.current_observation: Any = None
+        self.current_info: dict[str, Any] = {}
+        self.previous_original_observation: dict[str, Any] | None = None
+        self.previous_observation: Any | None = None
+        self.previous_info: dict[str, Any] | None = None
 
         self.requires_reset = True
 
@@ -127,10 +141,10 @@ class Analyser:
         self.advancing = False
 
         # DPG items
-        self.dpg_saved_battle_state_list: int | str = None
-        self.dpg_advance_button: int | str = None
-        self.dpg_keep_advancing_button: int | str = None
-        self.dpg_stop_advancing_button: int | str = None
+        self.dpg_saved_battle_state_list: int | str = ""
+        self.dpg_advance_button: int | str = ""
+        self.dpg_keep_advancing_button: int | str = ""
+        self.dpg_stop_advancing_button: int | str = ""
 
         self.text_output_formatter = pprint.PrettyPrinter(indent=1)
 
@@ -203,7 +217,7 @@ class Analyser:
         else:
             raise RuntimeError(f"'action_type' has an invalid value '{self.action_type}', expected one of ('discrete', 'simple', 'primitive')")
 
-    def update_state(self, observation: "any", original_observation: dict, info: dict, reward: float, terminated: bool, truncated: bool, *, previous_observation: "any" = None, previous_original_observation: dict = None, previous_info: dict = None):
+    def update_state(self, observation: Any, original_observation: dict, info: dict, reward: float, terminated: bool, truncated: bool, *, previous_observation: Any | None = None, previous_original_observation: dict | None = None, previous_info: dict | None = None):
         # Observation
         self.previous_original_observation = self.current_original_observation if previous_original_observation is None else previous_original_observation
         self.previous_observation = self.current_observation if previous_observation is None else previous_observation
@@ -261,14 +275,14 @@ class Analyser:
 
         if self.requires_reset:
             # We need to reset these variables or else we will report an inter-episode transition which doesn't make sense.
-            self.current_info = None
+            self.current_info = {}
             self.current_observation = None
-            self.current_original_observation = None
+            self.current_original_observation = {}
 
             self.episode_counter += 1
             obs, info = self.env.reset()
 
-            reward = 0
+            reward = 0.0
             self.requires_reset = False
 
         else:
@@ -277,6 +291,7 @@ class Analyser:
 
             current_action = self.current_action
             obs, reward, terminated, truncated, info = self.env.step(current_action)
+            reward = float(reward)
 
             self.requires_reset = terminated or truncated
 
@@ -332,56 +347,56 @@ class Analyser:
         return battle_state
 
     @property
-    def most_recent_transition(self) -> tuple["any", "any", float, bool, bool, dict, dict] | None:
+    def most_recent_transition(self) -> AnalyserTransition | None:
         """The most recent environment transition tuple `(obs, next_obs, reward, terminated, truncated, info, next_info)`. If there hasn't been such a transition yet, return `None`."""
-        if self.previous_observation is not None:
-            return (self.previous_observation, self.current_observation, self.reward, self.terminated, self.truncated, self.previous_info, self.current_info)
+        if self.previous_observation is not None and self.previous_info is not None:
+            return AnalyserTransition(self.previous_observation, self.current_observation, self.reward, self.terminated, self.truncated, self.previous_info, self.current_info)
         return None
 
-    p1_guard_prev: int = editable_dpg_value("p1_guard_prev")
-    p2_guard_prev: int = editable_dpg_value("p2_guard_prev")
-    p1_position_prev: float = editable_dpg_value("p1_position_prev")
-    p2_position_prev: float = editable_dpg_value("p2_position_prev")
-    p1_move_prev: FootsiesMove = property(
+    p1_guard_prev = cast(int, editable_dpg_value("p1_guard_prev"))
+    p2_guard_prev = cast(int, editable_dpg_value("p2_guard_prev"))
+    p1_position_prev = cast(float, editable_dpg_value("p1_position_prev"))
+    p2_position_prev = cast(float, editable_dpg_value("p2_position_prev"))
+    p1_move_prev = cast(FootsiesMove, property(
         fget=lambda self: FootsiesMove[dpg.get_value("p1_move_prev")],
         fset=lambda self, value: dpg.set_value("p1_move_prev", value.name)
-    )
-    p2_move_prev: FootsiesMove = property(
+    ))
+    p2_move_prev = cast(FootsiesMove, property(
         fget=lambda self: FootsiesMove[dpg.get_value("p2_move_prev")],
         fset=lambda self, value: dpg.set_value("p2_move_prev", value.name)
-    )
-    p1_move_progress_prev: float = editable_dpg_value("p1_move_progress_prev")
-    p2_move_progress_prev: float = editable_dpg_value("p2_move_progress_prev")
+    ))
+    p1_move_progress_prev = cast(float, editable_dpg_value("p1_move_progress_prev"))
+    p2_move_progress_prev = cast(float, editable_dpg_value("p2_move_progress_prev"))
 
-    p1_guard: int = editable_dpg_value("p1_guard")
-    p2_guard: int = editable_dpg_value("p2_guard")
-    p1_position: float = editable_dpg_value("p1_position")
-    p2_position: float = editable_dpg_value("p2_position")
-    p1_move: FootsiesMove = property(
+    p1_guard = cast(int, editable_dpg_value("p1_guard"))
+    p2_guard = cast(int, editable_dpg_value("p2_guard"))
+    p1_position = cast(float, editable_dpg_value("p1_position"))
+    p2_position = cast(float, editable_dpg_value("p2_position"))
+    p1_move = cast(FootsiesMove, property(
         fget=lambda self: FootsiesMove[dpg.get_value("p1_move")],
         fset=lambda self, value: dpg.set_value("p1_move", value.name)
-    )
-    p2_move: FootsiesMove = property(
+    ))
+    p2_move = cast(FootsiesMove, property(
         fget=lambda self: FootsiesMove[dpg.get_value("p2_move")],
         fset=lambda self, value: dpg.set_value("p2_move", value.name)
-    )
-    p1_move_progress: float = editable_dpg_value("p1_move_progress")
-    p2_move_progress: float = editable_dpg_value("p2_move_progress")
+    ))
+    p1_move_progress = cast(float, editable_dpg_value("p1_move_progress"))
+    p2_move_progress = cast(float, editable_dpg_value("p2_move_progress"))
 
-    action_left: bool = editable_dpg_value("action_left")
-    action_right: bool = editable_dpg_value("action_right")
-    action_attack: bool = editable_dpg_value("action_attack")
-    simple_action: int = property(
+    action_left = cast(bool, editable_dpg_value("action_left"))
+    action_right = cast(bool, editable_dpg_value("action_right"))
+    action_attack = cast(bool, editable_dpg_value("action_attack"))
+    simple_action = cast(int, property(
         fget=lambda self: ActionMap.simple_from_move(FootsiesMove[dpg.get_value("simple_action")]),
         fset=lambda self, value: dpg.set_value("simple_action", ActionMap.simple_as_move(value).name),
-    )
-    use_custom_action: bool = editable_dpg_value("use_custom_action")
-    reward: float = editable_dpg_value("reward")
-    frame: int = editable_dpg_value("frame")
-    win_rate: float = editable_dpg_value("win_rate")
-    terminated: bool = editable_dpg_value("terminated")
-    truncated: bool = editable_dpg_value("truncated")
-    text_output: str = editable_dpg_value("text_output")
+    ))
+    use_custom_action = cast(bool, editable_dpg_value("use_custom_action"))
+    reward = cast(float, editable_dpg_value("reward"))
+    frame = cast(int, editable_dpg_value("frame"))
+    win_rate = cast(float, editable_dpg_value("win_rate"))
+    terminated = cast(bool, editable_dpg_value("terminated"))
+    truncated = cast(bool, editable_dpg_value("truncated"))
+    text_output = cast(str, editable_dpg_value("text_output"))
 
     def start(self, state_change_apply_immediately: bool = False, debug: bool = False):
         dpg.create_context()
@@ -426,23 +441,23 @@ class Analyser:
 
                 with dpg.table_row():
                     dpg.add_text("Guard")
-                    dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
-                    dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p1_guard", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="p2_guard", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
                 
                 with dpg.table_row():
                     dpg.add_text("Position")
-                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p1_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
-                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p2_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p1_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="p2_position", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
 
                 with dpg.table_row():
                     dpg.add_text("Move")
-                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p1_move", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
-                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p2_move", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p1_move", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="p2_move", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
 
                 with dpg.table_row():
                     dpg.add_text("Move progress")
-                    dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
-                    dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None)
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p1_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="p2_move_progress", callback=(lambda: self.load_battle_state(self.custom_battle_state, require_update=False)) if state_change_apply_immediately else None) # type: ignore
 
             if not state_change_apply_immediately:
                 dpg.add_button(label="Apply", callback=lambda: self.load_battle_state(self.custom_battle_state, require_update=False))
@@ -542,5 +557,5 @@ if __name__ == "__main__":
         )
     )
 
-    analyser = Analyser(env=env, p1_action_source=lambda: 0)
+    analyser = Analyser(env=env, p1_action_source=lambda o, i: 0)
     analyser.start()
