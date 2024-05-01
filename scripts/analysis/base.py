@@ -14,6 +14,7 @@ from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE, FOOTSI
 from agents.action import ActionMap
 from dataclasses import dataclass
 from agents.wrappers import FootsiesSimpleActions
+from collections import deque
 
 
 @dataclass(slots=True)
@@ -135,7 +136,7 @@ class Analyser:
 
         self.saved_battle_states: list[AnalyserState] = []
         self.episode_counter = -1
-        self.wins_counter = 0
+        self.wins: deque[bool] = deque([], maxlen=100)
 
         # Allow advance() to be performed continuously on a separate thread
         self.advancing = False
@@ -224,7 +225,7 @@ class Analyser:
         self.current_original_observation = original_observation
         self.current_observation = observation
 
-        if self.previous_original_observation is not None:
+        if self.previous_original_observation:
             self.p1_guard_prev = self.previous_original_observation["guard"][0]
             self.p2_guard_prev = self.previous_original_observation["guard"][1]
             self.p1_move_prev = ActionMap.move_from_move_index(self.previous_original_observation["move"][0])
@@ -299,8 +300,8 @@ class Analyser:
         self.update_state(obs, original_observation, info, reward, terminated, truncated)
         
         if terminated:
-            self.wins_counter += (reward > 0)
-            self.win_rate = self.wins_counter / (self.episode_counter + 1)
+            self.wins.append(reward > 0)
+            self.win_rate = sum(self.wins) / len(self.wins)
 
         self.custom_state_update_callback(self)
         self._custom_battle_state_cached = None

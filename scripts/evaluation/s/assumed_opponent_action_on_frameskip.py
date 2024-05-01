@@ -17,7 +17,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
         env_args=quick_env_args(
             footsies_wrapper_simple=FootsiesSimpleActionsArgs(
                 enabled=True,
-                allow_agent_special_moves=True,
+                allow_agent_special_moves=False,
                 assumed_agent_action_on_nonactionable="last",
                 assumed_opponent_action_on_nonactionable=assumed_action,
             )

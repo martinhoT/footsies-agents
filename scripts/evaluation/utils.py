@@ -1,6 +1,5 @@
 import torch
-from itertools import islice
-from typing import Iterable, Any
+from typing import Any
 from gymnasium import Env
 from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.flatten_observation import FlattenObservation
@@ -71,7 +70,7 @@ def quick_env_args(**kwargs) -> EnvArgs:
         "footsies_wrapper_norm": True,
         "footsies_wrapper_norm_guard": True,
         "footsies_wrapper_acd": False,
-        "footsies_wrapper_simple": FootsiesSimpleActionsArgs(),
+        "footsies_wrapper_simple": FootsiesSimpleActionsArgs(allow_agent_special_moves=False),
         "footsies_wrapper_fs": False,
         "footsies_wrapper_adv": False,
         "footsies_wrapper_phasic": False,

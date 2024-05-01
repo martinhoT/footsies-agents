@@ -8,7 +8,7 @@ from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
 from enum import Enum
 from agents.action import ActionMap
-from collections import deque, namedtuple
+from collections import deque
 from dataclasses import dataclass
 
 LOGGER = logging.getLogger("main.a2c")

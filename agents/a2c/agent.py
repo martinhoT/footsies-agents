@@ -61,7 +61,7 @@ class A2CAgent(FootsiesAgentBase):
 
     def act(self, obs: T.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> int:
         # If we can't perform an action, don't even attempt one.
-        if not info["p1_is_actionable"]:
+        if not info["p1_is_actionable"] or not info["agent_simple_completed"]:
             return 0
         
         # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic.
@@ -123,7 +123,7 @@ class A2CAgent(FootsiesAgentBase):
         return self._learner
 
     @property
-    def current_action(self) -> int | None:
+    def current_action(self) -> int:
         return self._current_action
 
     @property

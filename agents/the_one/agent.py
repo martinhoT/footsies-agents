@@ -129,7 +129,7 @@ class TheOneAgent(FootsiesAgentBase):
             self.reaction_time_emulator.register(obs, info)
         
         # Act, if that makes sense.
-        if not info["p1_is_actionable"]:
+        if not info["p1_is_actionable"] or not info["agent_simple_completed"]:
             return 0
         
         # Correct the observation if needed.
