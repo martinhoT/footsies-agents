@@ -7,7 +7,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
-from scripts.analysis.analysis import Analyser
+from scripts.analysis.base import Analyser
 from agents.action import ActionMap
 from agents.a2c.a2c import A2CQLearner
 from agents.a2c.agent import A2CAgent
@@ -182,7 +182,7 @@ class QLearnerAnalyserManager:
 
         # Make the agent learn first before presenting results, it's less confusing and we can immediately see the results
         if self.online_learning and analyser.most_recent_transition is not None:
-            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition
+            obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition.as_tuple()
             # Clone the observations, detached from the graph (clone() is differentiable, so we use detach()), 
             # don't get internal references in the analyser since those can change dynamically
             # (e.g. by loading battle states), which messes up the gradient computation graph

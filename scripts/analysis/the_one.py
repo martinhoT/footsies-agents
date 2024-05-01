@@ -3,12 +3,12 @@ import dearpygui.dearpygui as dpg
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.normalization import FootsiesNormalized
-from scripts.analysis.analysis import Analyser
+from scripts.analysis.base import Analyser
 from agents.action import ActionMap
 from main import load_agent
-from scripts.analysis.analyse_a2c_qlearner import QLearnerAnalyserManager
-from scripts.analysis.analyse_opponent_model import MimicAnalyserManager
-from scripts.analysis.analyse_game_model import GameModelAnalyserManager
+from scripts.analysis.a2c_qlearner import QLearnerAnalyserManager
+from scripts.analysis.opponent_model import MimicAnalyserManager
+from scripts.analysis.game_model import GameModelAnalyserManager
 from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger, load_agent, load_agent_parameters, import_agent

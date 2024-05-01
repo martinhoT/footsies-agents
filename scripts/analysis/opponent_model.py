@@ -11,7 +11,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDiscretized
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove
-from scripts.analysis.analysis import Analyser
+from scripts.analysis.base import Analyser
 from agents.mimic.agent import MimicAgent as OpponentModelAgent
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
 from agents.action import ActionMap

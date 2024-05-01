@@ -8,10 +8,10 @@ from footsies_gym.wrappers.action_comb_disc import FootsiesActionCombinationsDis
 from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.moves import FootsiesMove, FOOTSIES_MOVE_INDEX_TO_MOVE
 from agents.game_model.game_model import GameModel, GameModelNetwork
-from scripts.analysis.analysis import Analyser
+from scripts.analysis.base import Analyser
 from agents.game_model.agent import GameModelAgent
 from agents.action import ActionMap
-from scripts.analysis.analysis import editable_dpg_value
+from scripts.analysis.base import editable_dpg_value
 
 
 class GameModelAnalyserManager:
@@ -166,7 +166,7 @@ class GameModelAnalyserManager:
 
     def on_state_update(self, analyser: Analyser):
         if analyser.most_recent_transition is not None:
-            obs, _, _, _, _, info, next_info = analyser.most_recent_transition
+            obs, _, _, _, _, info, next_info = analyser.most_recent_transition.as_tuple()
             agent_action, opponent_action = ActionMap.simples_from_transition_ori(info, next_info)
 
             self.predict_next_state(obs, agent_action, opponent_action)
