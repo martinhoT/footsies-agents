@@ -54,6 +54,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     reaction_time_constant: bool = False,
     action_masking: bool = False,
     game_model_skippers_every: int = 5,
+    game_model_single_skipper: int = 1,
     consider_opponent_at_all: bool = True,
 
     # Probably should be kept as-is
@@ -232,7 +233,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             by_differences=by_differences,
         )
 
-        steps_n = list(range(REACTION_TIME_MIN, REACTION_TIME_MAX + 1, game_model_skippers_every)) if game_model_skippers else None
+        steps_n = list(range(REACTION_TIME_MIN, REACTION_TIME_MAX + 1, game_model_skippers_every)) if game_model_skippers else [game_model_single_skipper]
 
         game_model_agent = GameModelAgent(
             game_model,

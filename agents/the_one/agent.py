@@ -1,9 +1,9 @@
-from copy import deepcopy
 import torch as T
 import logging
 import random
 import warnings
 from torch import nn
+from copy import deepcopy
 from agents.base import FootsiesAgentOpponent
 from gymnasium import Env
 from agents.base import FootsiesAgentBase
@@ -12,6 +12,7 @@ from agents.a2c.agent import A2CAgent
 from agents.mimic.agent import MimicAgent
 from agents.game_model.agent import GameModelAgent
 from agents.wrappers import FootsiesSimpleActions
+from time import process_time_ns
 
 LOGGER = logging.getLogger("main.the_one")
 
@@ -104,6 +105,8 @@ class TheOneAgent(FootsiesAgentBase):
         self._test_observations = None
         self._cumulative_reaction_time = 0
         self._cumulative_reaction_time_n = 0
+        self._recent_act_elapsed_time_ns: int = 0
+        self._recent_act_elapsed_time_ns_n: int = 0
 
         # Initial reset
         self.reset()
@@ -112,6 +115,8 @@ class TheOneAgent(FootsiesAgentBase):
     # NOTE: during hitstop, the agent is acting in the first frame of hitstop; that means it does not matter how long the hitstop is, the agent won't be able to react to it
     @T.no_grad
     def act(self, obs: T.Tensor, info: dict) -> int:
+        start_ns = process_time_ns()
+
         # Do some pre-processing.
         # Save the opponent's executed action. This is only really needed in case we are using the rollback prediction strategy.
         # Don't store None as the previous action, so that at the end of a temporal action we still have a reference to the action
@@ -157,6 +162,9 @@ class TheOneAgent(FootsiesAgentBase):
         
         action = self.a2c.act(obs, info, predicted_opponent_action=predicted_opponent_action)
         self._recently_predicted_opponent_action = predicted_opponent_action
+
+        self._recent_act_elapsed_time_ns += process_time_ns() - start_ns
+        self._recent_act_elapsed_time_ns_n += 1
         return action
 
     # NOTE: reaction time is not used here, it's only used for acting not for learning.
@@ -293,12 +301,22 @@ class TheOneAgent(FootsiesAgentBase):
         if self.opp is not None:
             self.opp.save(folder_path)
 
-    def evaluate_average_reaction_time(self) -> float:
+    def evaluate_average_reaction_time(self) -> float | None:
         res = (
             self._cumulative_reaction_time / self._cumulative_reaction_time_n
-        ) if self._cumulative_reaction_time_n != 0 else 0
+        ) if self._cumulative_reaction_time_n != 0 else None
 
         self._cumulative_reaction_time = 0
         self._cumulative_reaction_time_n = 0
+
+        return res
+    
+    def evaluate_act_elapsed_time_sn(self) -> float | None:
+        res = (
+            self._recent_act_elapsed_time_ns / self._recent_act_elapsed_time_ns_n
+        ) if self._recent_act_elapsed_time_ns_n != 0 else None
+
+        self._recent_act_elapsed_time_ns = 0
+        self._recent_act_elapsed_time_ns_n = 0
 
         return res

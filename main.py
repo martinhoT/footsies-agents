@@ -201,7 +201,7 @@ def train(
 
     training_iterator: Iterable[int]
     if progress_bar:
-        total = n_episodes if n_episodes is not None else n_timesteps / 180 if n_timesteps is not None else None
+        total = n_episodes if n_episodes is not None else n_timesteps / 140 if n_timesteps is not None else None
         training_iterator = tqdm(base_training_iterator,
             total=total,
             unit="ep",

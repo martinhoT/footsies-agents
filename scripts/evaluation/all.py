@@ -14,6 +14,7 @@ from scripts.evaluation.s.hitstop_freeze import main as hitstop_freeze
 from scripts.evaluation.s.opponent_model_dynamic_loss import main as opponent_model_dynamic_loss
 from scripts.evaluation.s.opponent_model_entropy_coef import main as opponent_model_entropy_coef
 from scripts.evaluation.s.opponent_model_recurrent import main as opponent_model_recurrent
+from scripts.evaluation.s.reaction_time import main as reaction_time
 from scripts.evaluation.s.self_play import main as self_play
 from scripts.evaluation.s.sparse_vs_dense_reward_curriculum import main as sparse_vs_dense_reward_curriculum
 from scripts.evaluation.s.sparse_vs_dense_reward import main as sparse_vs_dense_reward
@@ -47,6 +48,7 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
     "opponent_model_entropy_coef":          opponent_model_entropy_coef,
     "opponent_model_recurrent":             opponent_model_recurrent,
+    "reaction_time":                        reaction_time,
     "self_play":                            self_play,
     "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
     "sparse_vs_dense_reward":               sparse_vs_dense_reward,

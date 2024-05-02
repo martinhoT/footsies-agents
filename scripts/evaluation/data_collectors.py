@@ -7,7 +7,7 @@ from agents.game_model.agent import GameModelAgent
 from agents.mimic.agent import MimicAgent
 from args import MainArgs
 from os import path
-from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run
+from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run, PreCustomLoop
 from dataclasses import dataclass
 from functools import partial
 from main import main
@@ -22,6 +22,7 @@ AgentCustom = FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentB
 class AgentCustomRun:
     agent:      AgentCustom
     opponent:   Callable[[dict, dict], tuple[bool, bool, bool]] | None
+    pre_loop:   PreCustomLoop | None = None
 
 
 def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], observer_type: type[Observer], seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
@@ -54,7 +55,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
         with mp.Pool(processes=processes) as pool:
             custom_loop_partial = partial(custom_loop, timesteps=timesteps)
 
-            args: list[tuple[AgentCustom, str, int, type[Observer], Callable[[dict, dict], tuple[bool, bool, bool]] | None, int]] = []
+            args: list[tuple[AgentCustom, str, int, type[Observer], Callable[[dict, dict], tuple[bool, bool, bool]] | None, int, PreCustomLoop | None]] = []
             for i, (run_name, missing_seeds) in enumerate(missing.items()):
                 run_args = runs[run_name]
 
@@ -62,7 +63,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
                     missing_seeds = list(range(seeds))
 
                 for seed in missing_seeds:
-                    a = (run_args.agent, run_name, i * seeds + seed, observer_type, run_args.opponent, seed)
+                    a = (run_args.agent, run_name, i * seeds + seed, observer_type, run_args.opponent, seed, run_args.pre_loop)
                     args.append(a)            
 
             observers_flat: list[Observer] = pool.starmap(custom_loop_partial, args)

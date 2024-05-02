@@ -1,4 +1,5 @@
-import torch
+import random
+import torch as T
 import multiprocessing as mp
 from collections import deque
 from typing import Callable, TypeVar
@@ -13,10 +14,14 @@ from agents.mimic.agent import MimicAgent
 from gymnasium import Env
 from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.callbacks import BaseCallback
+from abc import ABC, abstractmethod
+from typing import Protocol
+from footsies_gym.envs.footsies import FootsiesEnv
 
 
-class Observer:
-    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase | BaseAlgorithm):
+class Observer(ABC):
+    @abstractmethod
+    def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase | BaseAlgorithm):
         pass
 
     @property
@@ -26,6 +31,9 @@ class Observer:
     @staticmethod
     def attributes() -> tuple[str, ...]:
         raise NotImplementedError("this observer didn't implement the 'attributes' property")
+
+    def enough(self) -> bool:
+        return False
 
 
 class ObserverSB3Callback(BaseCallback):
@@ -50,8 +58,8 @@ class ObserverSB3Callback(BaseCallback):
             agent=self.model,
         )
 
-        # Never stop early
-        return True
+        # We should continue while the observer says that we have not collected enough data
+        return not self.observer.enough()
 
 
 class WinRateObserver(Observer):
@@ -61,15 +69,14 @@ class WinRateObserver(Observer):
         self._idxs = []
         self._values = []
 
-    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
+    def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
         if terminated or truncated:
             won = (reward > 0) if terminated else (next_info["guard"][0] > next_info["guard"][1])
             self._wins.append(won)
 
         if step % self._log_frequency == 0:
             self._idxs.append(step)
-            win_rate = sum(self._wins) / len(self._wins) if self._wins else 0.5
-            self._values.append(win_rate)
+            self._values.append(self.win_rate)
 
     @property
     def data(self) -> tuple[list[int], tuple[list[float], ...]]:
@@ -78,6 +85,10 @@ class WinRateObserver(Observer):
     @staticmethod
     def attributes() -> tuple[str, ...]:
         return ("win_rate",)
+    
+    @property
+    def win_rate(self) -> float:
+        return sum(self._wins) / len(self._wins) if self._wins else 0.5
 
 
 class GameModelObserver(Observer):
@@ -86,7 +97,7 @@ class GameModelObserver(Observer):
         self._idxs = []
         self._values = []
 
-    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: GameModelAgent):
+    def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: GameModelAgent):
         if step % self._log_frequency == 0:
             self._idxs.append(step)
             self._values.append((
@@ -112,7 +123,7 @@ class MimicObserver(Observer):
         self._idxs = []
         self._values = []
 
-    def update(self, step: int, obs: torch.Tensor, next_obs: torch.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: MimicAgent):
+    def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: MimicAgent):
         if step % self._log_frequency == 0:
             self._idxs.append(step)
             self._values.append((
@@ -129,29 +140,36 @@ class MimicObserver(Observer):
         return ("p1_loss", "p2_loss")
 
 
+class PreCustomLoop(Protocol):
+    def __call__(self, agent: FootsiesAgentBase | BaseAlgorithm, env: Env, footsies_env: FootsiesEnv, seed: int | None) -> None:
+        ...
 
-T = TypeVar("T", bound=Observer)
+
+O = TypeVar("O", bound=Observer)
 
 def custom_loop(
     agent: FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentBase | BaseAlgorithm],
     label: str,
     id_: int,
-    observer_type: type[T],
+    observer_type: type[O],
     opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None,
     initial_seed: int | None = 0,
+    pre_loop: PreCustomLoop | None = None, # this is a loop that is run before the main one, but on which data won't be collected
     timesteps: int = 1000000,
-) -> T:
+) -> O:
 
-    port_start = 11000 + 1000 * id_
-    port_stop = 11000 + (1000) * (id_ + 1)
+    port_start = 11000 + 25 * id_
+    port_stop = 11000 + 25 * (id_ + 1)
     env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop)
-
-    footsies_env.set_opponent(opponent)
-
-    observer = observer_type()
 
     if isinstance(agent, Callable):
         agent = agent(env)
+
+    if pre_loop is not None:
+        pre_loop(agent, env, footsies_env, initial_seed)
+
+    footsies_env.set_opponent(opponent)
+    observer = observer_type()
 
     if isinstance(agent, FootsiesAgentBase):
         return custom_loop_footsies(
@@ -176,12 +194,15 @@ def custom_loop_footsies(
     env: Env,
     label: str,
     id_: int,
-    observer: T,
+    observer: O,
     initial_seed: int | None = 0,
     timesteps: int = int(1e6),
-) -> T:
+) -> O:
 
     process_id: int = mp.current_process()._identity[0] - 1
+
+    T.manual_seed(initial_seed)
+    random.seed(initial_seed)
 
     seed = initial_seed
     terminated, truncated = True, True
@@ -206,6 +227,9 @@ def custom_loop_footsies(
         agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
         observer.update(step, obs, next_obs, reward, terminated, truncated, info, next_info, agent)
 
+        if observer.enough():
+            break
+
         obs, info = next_obs, next_info
     
     return observer
@@ -213,10 +237,13 @@ def custom_loop_footsies(
 
 def custom_loop_sb3(
     agent: BaseAlgorithm,
-    observer: T,
+    observer: O,
     timesteps: int = int(1e6),
-) -> T:
+    seed: int = 0,
+) -> O:
     
+    agent.set_random_seed(seed)
+
     agent.learn(
         total_timesteps=timesteps,
         callback=ObserverSB3Callback(observer),
@@ -229,16 +256,16 @@ def custom_loop_sb3(
 def dataset_run(
     agent: MimicAgent | GameModelAgent,
     label: str,
-    observer_type: type[T],
+    observer_type: type[O],
     seed: int | None = 0,
     epochs: int = 100,
     shuffle: bool = True,
-) -> T:
+) -> O:
     if not shuffle and seed is not None:
         raise ValueError("using a seed without shuffling is inconsequential, if no shuffling is to be performed please set the seed to `None`")
 
     # This is needed in case we are going to shuffle the dataset
-    torch.manual_seed(seed)
+    T.manual_seed(seed)
 
     process_id: int = mp.current_process()._identity[0] - 1
 

@@ -1,47 +1,57 @@
-import multiprocessing as mp
+import random
+import torch as T
 from os import path
+from agents.base import FootsiesAgentBase
 from scripts.evaluation.utils import create_eval_env
+from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustomRun
+from scripts.evaluation.plotting import plot_data
+from scripts.evaluation.custom_loop import WinRateObserver, PreCustomLoop
 from models import to_
 from itertools import combinations
 from copy import deepcopy
 from opponents.curriculum import Idle, Backer, NSpammer, BSpammer, NSpecialSpammer, BSpecialSpammer, WhiffPunisher, CurriculumOpponent
-from typing import cast, Callable
+from typing import cast, Callable, Literal
 from agents.the_one.agent import TheOneAgent
 from dataclasses import dataclass
 from opponents.base import Opponent
 from tqdm import trange
 from agents.action import ActionMap
+from gymnasium.spaces import Discrete
+from functools import partial
+from gymnasium import Env
+from footsies_gym.envs.footsies import FootsiesEnv
+import seaborn as sns
+
 
 OPPONENT_MAP: dict[str, Callable[[], CurriculumOpponent | None]] = {
-    "idle": Idle,
-    "backer": Backer,
-    "n_spammer": NSpammer,
-    "b_spammer": BSpammer,
-    "n_special_spammer": NSpecialSpammer,
-    "b_special_spammer": BSpecialSpammer,
-    "whiff_punisher": WhiffPunisher,
-    "bot": lambda: None,
+    "Idle": Idle,
+    "Backer": Backer,
+    "NSpammer": NSpammer,
+    "BSpammer": BSpammer,
+    "NSpecialSpammer": NSpecialSpammer,
+    "BSpecialSpammer": BSpecialSpammer,
+    "WhiffPunisher": WhiffPunisher,
+    "Bot": lambda: None,
 }
 
 @dataclass
-class AgentRun:
+class AgentTrainingRegime:
     name:                   str
     agent:                  TheOneAgent
-    training_opponent:      Opponent | None
+    training_opponent:      Opponent | None | Literal["Blank"]
     evaluation_opponent:    Opponent | None
 
 
-def train_agent_against_opponent(agent: TheOneAgent, opponent: Opponent | None, id_: int, label: str = "", timesteps: int = int(1e6), initial_seed: int | None = 0):
-    port_start = 11000 + 1000 * id_
-    port_stop = 11000 + (1000) * (id_ + 1)
-    env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop)
-
+def train_agent_against_opponent(agent: TheOneAgent, env: Env, footsies_env: FootsiesEnv, initial_seed: int | None, opponent: Opponent | None, timesteps: int = int(1e6), label: str = ""):
+    T.manual_seed(initial_seed)
+    random.seed(initial_seed)
+    
     o = opponent.act if opponent is not None else None
     footsies_env.set_opponent(o)
 
     seed = initial_seed
     terminated, truncated = True, True
-    for step in trange(timesteps, desc=label, unit="step", dynamic_ncols=True, colour="#FF9E64"):
+    for _ in trange(timesteps, desc=label, unit="step", dynamic_ncols=True, colour="#FF9E64"):
         if (terminated or truncated):
             obs, info = env.reset(seed=seed)
             terminated, truncated = False, False
@@ -49,17 +59,42 @@ def train_agent_against_opponent(agent: TheOneAgent, opponent: Opponent | None, 
 
         action = agent.act(obs, info)
         next_obs, reward, terminated, truncated, next_info = env.step(action)
+        reward = float(reward)
 
         # Skip hitstop freeze
         in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
         while in_hitstop and obs.isclose(next_obs).all():
             action = agent.act(obs, info)
             next_obs, r, terminated, truncated, next_info = env.step(action)
+            r = float(r)
             reward += r
 
         agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
         obs, info = next_obs, next_info
+
+
+class EnoughFightingObserver(WinRateObserver):
+    def __init__(self, log_frequency: int = 1000, last: int = 100, win_rate_threshold: float = 0.7):
+        super().__init__(log_frequency=log_frequency, last=last)
+        self._win_rate_threshold = win_rate_threshold
+        self._step_counter = 0
+    
+    def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
+        super().update(step, obs, next_obs, reward, terminated, truncated, info, next_info, agent)
+        self._step_counter = step
+
+    @property
+    def data(self) -> tuple[list[int], tuple[list[float], ...]]:
+        return [0], ([self._step_counter],)
+
+    @staticmethod
+    def attributes() -> tuple[str, ...]:
+        return ("time_taken",)
+
+    def enough(self) -> bool:
+        return self.win_rate > self._win_rate_threshold
+
 
 def main(
     seeds: int = 10,
@@ -67,52 +102,89 @@ def main(
     processes: int = 4,
     y: bool = False,
 ):
+    result_path = path.splitext(__file__)[0]
+
     dummy_env, _  = create_eval_env()
+    assert dummy_env.observation_space.shape
+    assert isinstance(dummy_env.action_space, Discrete)
 
     agent, _ = to_(
         observation_space_size=dummy_env.observation_space.shape[0],
         action_space_size=dummy_env.action_space.n,
     )
 
-    opponent_labels = ["blank", "idle", "backer", "n_spammer", "b_spammer", "n_special_spammer", "b_special_spammer", "whiff_punisher", "bot"]
+    opponent_labels = ["Blank", "NSpammer", "BSpammer", "NSpecialSpammer", "WhiffPunisher", "Bot"]
 
-    agent_runs: list[AgentRun] = [
-        AgentRun(
+    agent_regimes: list[AgentTrainingRegime] = []
+    for training_opponent, evaluation_opponent in combinations(opponent_labels, 2):
+        if evaluation_opponent == "Blank":
+            continue
+        
+        if training_opponent == "Blank":
+            training_opponent = "Blank"
+        else:
+            training_opponent = OPPONENT_MAP[training_opponent]()
+        
+        evaluation_opponent = OPPONENT_MAP[evaluation_opponent]()
+
+        agent_regime = AgentTrainingRegime(
             name=f"{training_opponent}_to_{evaluation_opponent}",
             agent=deepcopy(agent),
-            training_opponent=OPPONENT_MAP[training_opponent](),
-            evaluation_opponent=OPPONENT_MAP[evaluation_opponent](),
+            training_opponent=training_opponent,
+            evaluation_opponent=evaluation_opponent,
         )
-        for training_opponent, evaluation_opponent in combinations(opponent_labels, 2)
-        if training_opponent is not "blank"
-    ]
 
-    with mp.Pool(processes=processes) as pool:
-        pool.starmap(train_agent_against_opponent, [run.agent, run.map])
+        agent_regimes.append(agent_regime)
 
-    agents = [(run.name, run.agent, run.evaluation_opponent) for run in agent_runs]
+    runs = {
+        reg.name: AgentCustomRun(
+            agent=reg.agent,
+            opponent=reg.evaluation_opponent.act if reg.evaluation_opponent is not None else reg.evaluation_opponent,
+            pre_loop=cast(PreCustomLoop, partial(train_agent_against_opponent, opponent=reg.training_opponent, timesteps=timesteps, label=reg.name)) if reg.training_opponent != "Blank" else None,
+        ) for reg in agent_regimes
+    }
 
-    get_data(
-        data="win_rate",
-        agents=agents,
-        title="Win rate over the last 100 episodes against the in-game bot",
-        fig_path=path.splitext(__file__)[0],
+    dfs = get_data_custom_loop(
+        result_path=result_path,
+        runs=runs,
+        observer_type=EnoughFightingObserver,
         seeds=seeds,
-        timesteps=1000000,
-        exp_factor=0.9,
-        xlabel="Time step",
-        ylabel="Win rate",
-        run_name_mapping={
-            "discount_1_0":             "$\\gamma = 1.0$",
-            "discount_0_999":           "$\\gamma = 0.999$",
-            "discount_0_99":            "$\\gamma = 0.99$",
-            "discount_0_9":             "$\\gamma = 0.9$",
-            "discount_1_0_correct":     "$\\gamma = 1.0$ (correct)",
-            "discount_0_999_correct":   "$\\gamma = 0.999$ (correct)",
-            "discount_0_99_correct":    "$\\gamma = 0.99$ (correct)",
-            "discount_0_9_correct":     "$\\gamma = 0.9$ (correct)",
-        }
+        timesteps=timesteps,
+        processes=processes,
+        y=y,
     )
+
+    if dfs is None:
+        return
+
+    # Create the matrix first. We exclude "Blank" as an evaluation opponent
+    mtx = T.zeros((len(opponent_labels), len(opponent_labels) - 1))
+    for name, df in dfs.items():
+        training_opponent, evaluation_opponent = name.split("_to_")
+        row = opponent_labels.index(training_opponent)
+        col = opponent_labels.index(evaluation_opponent) - 1
+        assert df["time_takenMean"].size == 1
+        mtx[row, col] = df["time_takenMean"][0] / timesteps
+
+    # Plot the heatmap
+    ax = sns.heatmap(mtx,
+        vmin=0.0,
+        vmax=1.0,
+        cmap="mako", # or "crest" or "viridis"
+        annot=True,
+        fmt=".2f",
+        cbar=True,
+        square=True,
+        xticklabels=opponent_labels[1:],
+        yticklabels=opponent_labels,
+        title="Time taken to adapt to a new opponent after pre-training"
+    ) 
+    ax.set_xlabel("Evaluation opponent")
+    ax.set_ylabel("Training opponent")
+    
+    fig = ax.get_figure()
+    assert fig is not None
+    fig.savefig(result_path)
 
 if __name__ == "__main__":
     import tyro
