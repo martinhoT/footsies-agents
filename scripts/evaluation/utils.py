@@ -93,7 +93,7 @@ def quick_env_args(**kwargs) -> EnvArgs:
     )
 
 
-def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, episodes: int | None = None, timesteps: int | None = int(1e6), self_play_args: SelfPlayArgs | None = None, **kwargs) -> MainArgs:
+def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, episodes: int | None = None, timesteps: int | None = int(1e6), **kwargs) -> MainArgs:
     if env_args is None:
         env_args = quick_env_args()
     
@@ -116,8 +116,6 @@ def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, epi
         hogwild_n_workers=6
     )
     
-    self_play_args = self_play_args if self_play_args is not None else SelfPlayArgs()
-
     main_kwargs = {
         "penalize_truncation": None,
         "intrinsic_reward_scheme_": None,

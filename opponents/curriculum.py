@@ -10,6 +10,8 @@ from agents.action import ActionMap
 from opponents.base import Opponent, OpponentManager
 from torch.utils.tensorboard import SummaryWriter # type: ignore
 from os import path
+from typing import Generator
+from contextlib import contextmanager
 
 LOGGER = logging.getLogger("main.curriculum")
 
@@ -156,8 +158,8 @@ class CurriculumManager(OpponentManager):
         self._episode = 0
 
     def close(self):
-        if self._csv_file_writer is not None:
-            self._csv_file_writer
+        if self._csv_file is not None:
+            self._csv_file.close()
 
 
 class CurriculumOpponent(Opponent):

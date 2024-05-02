@@ -39,7 +39,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
         title="Win rate over the last 100 episodes against the curriculum",
         fig_path=path.splitext(__file__)[0],
         exp_factor=0.9,
-        xlabel="Time step",
+        xlabel="Episode",
         ylabel="Win rate",
         run_name_mapping={
             "actor_entropy_coef_002":   "$\\beta = 0.02$",

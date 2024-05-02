@@ -201,7 +201,7 @@ def train(
 
     training_iterator: Iterable[int]
     if progress_bar:
-        total = n_episodes if n_episodes is not None else n_timesteps / 140 if n_timesteps is not None else None
+        total = n_episodes if n_episodes is not None else n_timesteps // 140 if n_timesteps is not None else None
         training_iterator = tqdm(base_training_iterator,
             total=total,
             unit="ep",
@@ -332,26 +332,25 @@ def create_env(args: EnvArgs, log_dir: str | None = "runs") -> Env:
         
         if args.self_play.enabled:
             self_play_manager = SelfPlayManager(
-                snapshot_method=None,
+                agent=None,
+                env=env,
                 max_opponents=args.self_play.max_opponents,
                 snapshot_interval=args.self_play.snapshot_interval,
                 switch_interval=args.self_play.switch_interval,
                 mix_bot=args.self_play.mix_bot,
-                log_elo=True,
                 log_dir=log_dir,
                 starter_opponent=None, # default opponent is in-game bot initially
+                evaluate_every=args.self_play.evaluate_every,
+                csv_save=log_dir is not None,
             )
 
             if args.self_play.add_curriculum_opps:
                 self_play_manager.populate_with_curriculum_opponents(
-                    Idle(),
-                    Backer(),
                     NSpammer(),
                     BSpammer(),
                     NSpecialSpammer(),
                     BSpecialSpammer(),
                     WhiffPunisher(),
-                    UnsafePunisher(),
                 )
 
             LOGGER.info("Activated self-play")
@@ -582,8 +581,7 @@ def main(args: MainArgs):
         if not isinstance(self_play_manager, SelfPlayManager):
             raise RuntimeError("even though it was requested, the environment does not have the self-play manager set, or it could not be found")
         
-        snapshot_method = partial(agent.extract_opponent, env=env)
-        self_play_manager.set_snapshot_method(snapshot_method)
+        self_play_manager.set_agent(agent)
 
     # Train
 

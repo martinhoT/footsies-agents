@@ -236,6 +236,8 @@ class SelfPlayArgs:
     """How many opponents will the in-game opponent count as, when sampling from the opponent pool. In-game bot won't be sampled if 0"""
     add_curriculum_opps: bool = False
     """Add all opponents that are used for curriculum learning into the self-play's opponent pool"""
+    evaluate_every: int | None = None
+    """The interval in episodes with which to evaluate the agent against *all* past opponents. If `None`, no evaluation is performed"""
 
 
 @dataclass

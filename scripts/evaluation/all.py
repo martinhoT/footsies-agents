@@ -5,7 +5,7 @@ from scripts.evaluation.s.actor_entropy_coef import main as actor_entropy_coef
 from scripts.evaluation.s.adaptation_speed import main as adaptation_speed
 from scripts.evaluation.s.advantage_formula import main as advantage_formula
 from scripts.evaluation.s.assumed_opponent_action_on_frameskip import main as assumed_opponent_action_on_frameskip
-# from scripts.evaluation.s.baseline_compare import main as baseline_compare
+from scripts.evaluation.s.baseline_compare import main as baseline_compare
 from scripts.evaluation.s.consider_opponent_actions import main as consider_opponent_actions
 from scripts.evaluation.s.critic_opponent_update_style import main as critic_opponent_update_style
 from scripts.evaluation.s.discount_factor import main as discount_factor
@@ -39,7 +39,7 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
-    # "baseline_compare":                     baseline_compare,
+    "baseline_compare":                     baseline_compare,
     "consider_opponent_actions":            consider_opponent_actions,
     "critic_opponent_update_style":         critic_opponent_update_style,
     "discount_factor":                      discount_factor,
@@ -59,7 +59,7 @@ EVALUATIONS: dict[str, EvaluationScript] = {
 }
 
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
+def main(seeds: int = 10, processes: int = 4):
     for name, script in EVALUATIONS.items():
         print("-" * 50)
         print(f"{'RUNNING ' + name:^50}")
@@ -68,7 +68,6 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4):
         try:
             script(
                 seeds=seeds,
-                timesteps=timesteps,
                 processes=processes,
                 y=True,
             )
