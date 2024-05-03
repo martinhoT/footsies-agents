@@ -427,6 +427,7 @@ class OpponentManagerWrapper(Wrapper):
         return obs, reward, terminated, truncated, info
 
     def close(self):
+        self.env.close()
         self._opponent_manager.close()
 
     @property

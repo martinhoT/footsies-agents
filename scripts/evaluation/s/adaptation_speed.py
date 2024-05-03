@@ -75,14 +75,17 @@ def train_agent_against_opponent(agent: TheOneAgent, env: Env, footsies_env: Foo
 
 
 class EnoughFightingObserver(WinRateObserver):
-    def __init__(self, log_frequency: int = 1000, last: int = 100, win_rate_threshold: float = 0.7):
-        super().__init__(log_frequency=log_frequency, last=last)
+    def __init__(self, last: int = 100, win_rate_threshold: float = 0.7, win_rate_threshold_over: int = 20):
+        super().__init__(last=last)
         self._win_rate_threshold = win_rate_threshold
+        self._win_rate_threshold_over = win_rate_threshold_over # we need to count the win rate over some episodes or else it doesn't make sense (imagine just winning the first game -> 100% win rate instantly)
         self._step_counter = 0
+        self._episodes = 0
     
     def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
         super().update(step, obs, next_obs, reward, terminated, truncated, info, next_info, agent)
-        self._step_counter = step
+        self._step_counter = step + 1
+        self._episodes += terminated or truncated
 
     @property
     def data(self) -> tuple[list[int], tuple[list[float], ...]]:
@@ -93,7 +96,7 @@ class EnoughFightingObserver(WinRateObserver):
         return ("time_taken",)
 
     def enough(self) -> bool:
-        return self.win_rate > self._win_rate_threshold
+        return self.win_rate > self._win_rate_threshold and self._episodes > self._win_rate_threshold_over
 
 
 def main(
@@ -113,28 +116,29 @@ def main(
         action_space_size=dummy_env.action_space.n,
     )
 
-    opponent_labels = ["Blank", "NSpammer", "BSpammer", "NSpecialSpammer", "WhiffPunisher", "Bot"]
+    opponent_labels = ["Blank", "NSpammer", "BSpammer"]#, "NSpecialSpammer", "WhiffPunisher", "Bot"]
 
     agent_regimes: list[AgentTrainingRegime] = []
-    for training_opponent, evaluation_opponent in combinations(opponent_labels, 2):
-        if evaluation_opponent == "Blank":
-            continue
-        
-        if training_opponent == "Blank":
-            training_opponent = "Blank"
-        else:
-            training_opponent = OPPONENT_MAP[training_opponent]()
-        
-        evaluation_opponent = OPPONENT_MAP[evaluation_opponent]()
+    for training_opponent_label in opponent_labels:
+        for evaluation_opponent_label in opponent_labels:
+            if evaluation_opponent_label == "Blank":
+                continue
+            
+            if training_opponent_label == "Blank":
+                training_opponent = "Blank"
+            else:
+                training_opponent = OPPONENT_MAP[training_opponent_label]()
+            
+            evaluation_opponent = OPPONENT_MAP[evaluation_opponent_label]()
 
-        agent_regime = AgentTrainingRegime(
-            name=f"{training_opponent}_to_{evaluation_opponent}",
-            agent=deepcopy(agent),
-            training_opponent=training_opponent,
-            evaluation_opponent=evaluation_opponent,
-        )
+            agent_regime = AgentTrainingRegime(
+                name=f"{training_opponent_label}_to_{evaluation_opponent_label}",
+                agent=deepcopy(agent),
+                training_opponent=training_opponent,
+                evaluation_opponent=evaluation_opponent,
+            )
 
-        agent_regimes.append(agent_regime)
+            agent_regimes.append(agent_regime)
 
     runs = {
         reg.name: AgentCustomRun(
@@ -160,9 +164,9 @@ def main(
     # Create the matrix first. We exclude "Blank" as an evaluation opponent
     mtx = T.zeros((len(opponent_labels), len(opponent_labels) - 1))
     for name, df in dfs.items():
-        training_opponent, evaluation_opponent = name.split("_to_")
-        row = opponent_labels.index(training_opponent)
-        col = opponent_labels.index(evaluation_opponent) - 1
+        training_opponent_label, evaluation_opponent_label = name.split("_to_")
+        row = opponent_labels.index(training_opponent_label)
+        col = opponent_labels.index(evaluation_opponent_label) - 1
         assert df["time_takenMean"].size == 1
         mtx[row, col] = df["time_takenMean"][0] / timesteps
 
@@ -177,10 +181,10 @@ def main(
         square=True,
         xticklabels=opponent_labels[1:],
         yticklabels=opponent_labels,
-        title="Time taken to adapt to a new opponent after pre-training"
     ) 
     ax.set_xlabel("Evaluation opponent")
     ax.set_ylabel("Training opponent")
+    ax.set_title("Time taken to adapt to a new opponent after pre-training")
     
     fig = ax.get_figure()
     assert fig is not None

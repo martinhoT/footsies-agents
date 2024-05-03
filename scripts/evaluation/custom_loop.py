@@ -155,7 +155,7 @@ def custom_loop(
     opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None,
     initial_seed: int | None = 0,
     pre_loop: PreCustomLoop | None = None, # this is a loop that is run before the main one, but on which data won't be collected
-    timesteps: int = 1000000,
+    timesteps: int = int(1e6),
 ) -> O:
 
     port_start = 11000 + 25 * id_
@@ -172,7 +172,7 @@ def custom_loop(
     observer = observer_type()
 
     if isinstance(agent, FootsiesAgentBase):
-        return custom_loop_footsies(
+        observer = custom_loop_footsies(
             agent=agent,
             env=env,
             label=label,
@@ -183,11 +183,16 @@ def custom_loop(
         )
     
     else:
-        return custom_loop_sb3(
+        observer = custom_loop_sb3(
             agent=agent,
             observer=observer,
             timesteps=timesteps
         )
+
+    env.close()
+
+    return observer
+
 
 def custom_loop_footsies(
     agent: FootsiesAgentBase,
