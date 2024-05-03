@@ -311,9 +311,9 @@ class TheOneAgent(FootsiesAgentBase):
 
         return res
     
-    def evaluate_act_elapsed_time_sn(self) -> float | None:
+    def evaluate_act_elapsed_time_seconds(self) -> float | None:
         res = (
-            self._recent_act_elapsed_time_ns / self._recent_act_elapsed_time_ns_n
+            self._recent_act_elapsed_time_ns / (1e9 * self._recent_act_elapsed_time_ns_n)
         ) if self._recent_act_elapsed_time_ns_n != 0 else None
 
         self._recent_act_elapsed_time_ns = 0

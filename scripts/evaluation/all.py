@@ -39,7 +39,7 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
-    # "baseline_compare":                     baseline_compare,
+    "baseline_compare":                     baseline_compare,
     "consider_opponent_actions":            consider_opponent_actions,
     "critic_opponent_update_style":         critic_opponent_update_style,
     "discount_factor":                      discount_factor,
@@ -48,14 +48,15 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
     "opponent_model_entropy_coef":          opponent_model_entropy_coef,
     "opponent_model_recurrent":             opponent_model_recurrent,
-    # "reaction_time":                        reaction_time,
-    # "self_play":                            self_play,
+    "reaction_time":                        reaction_time,
     "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
     "sparse_vs_dense_reward":               sparse_vs_dense_reward,
     "special_moves":                        special_moves,
     "target_network":                       target_network,
     "transfer_learning":                    transfer_learning,
     "zero_sum":                             zero_sum,
+    # Put self-play as the last one since it's the one that takes the longest to execute
+    "self_play":                            self_play,
 }
 
 

@@ -114,7 +114,7 @@ class ReactionTimeEmulator:
     # Having this "cache" stuff allows the "_prev" variables to not be updated everytime react is called, and only after new registrations.
     @cached_property
     @T.no_grad
-    def react(self) -> tuple[T.Tensor, int, T.Tensor | None]:
+    def react(self) -> tuple[T.Tensor, int, T.Tensor | None | Literal["auto"]]:
         """
         Perform a reaction, receiving a delayed observation (or a corrected one if a multi-step predictor is used) according to the current reaction time.
         
@@ -149,6 +149,9 @@ class ReactionTimeEmulator:
         if self._predictor is not None:
             skipped_state_info_pairs = list(zip(skipped_obs, skipped_info))
             obs, opp_hs = self._predictor.predict(prev_obs_delayed, obs, info, reaction_time, skipped_state_info_pairs)
+        
+        else:
+            opp_hs = "auto"
 
         self._prev_reaction_time = reaction_time
         self._prev_obs = obs
@@ -268,7 +271,8 @@ class MultiStepPredictor:
                 if o_prev is not None and self._opponent.should_reset_context(o_prev, o, False):
                     opp_hs = None
 
-                p2_action, opp_hs = self._opponent.network.probabilities(o, opp_hs)
+                p2_action_dist, opp_hs = self._opponent.network.distribution(o, opp_hs)
+                p2_action = int(p2_action_dist.sample().item())
             
             else:
                 p2_action = self._resolve_opponent_action(p2_action)
@@ -286,6 +290,8 @@ class MultiStepPredictor:
             if isinstance(last_valid_action, int):
                 return last_valid_action
             elif isinstance(last_valid_action, T.Tensor):
+                if last_valid_action.nelement() > 1:
+                    raise ValueError("the last valid action, if a tensor, should not have more than one element (was a distribution provided?)")
                 return int(last_valid_action.item())
             else:
                 raise ValueError("if using the 'last' opponent action assumption, then the provied last valid actions must not be 'None'")

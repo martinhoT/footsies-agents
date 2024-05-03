@@ -109,7 +109,7 @@ def main(
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=True,
-        dense_reward=True,
+        dense_reward=False,
         log_file="out.log",
         log_file_overwrite=True,
         **env_kwargs,

@@ -329,7 +329,46 @@ def create_env(args: EnvArgs, log_dir: str | None = "runs") -> Env:
         if args.footsies_wrapper_fs:
             raise NotImplementedError("don't use the environment's frame skipping wrapper as it's deprecated")
             env = FootsiesFrameSkipped(env)
-        
+
+    else:
+        env = gym.make(
+            args.name,
+            **args.kwargs # type: ignore
+        )
+
+    # Wrap with additional, environment-independent wrappers
+    if args.wrapper_time_limit > 0:
+        env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
+
+    env = FlattenObservation(env)
+
+    # Final FOOTSIES wrappers
+    if args.is_footsies:
+        if args.footsies_wrapper_acd:
+            env = FootsiesActionCombinationsDiscretized(env)
+
+    if args.torch:
+        env = TransformObservation(env, lambda obs: T.from_numpy(obs).float().unsqueeze(0))
+
+    # Final miscellaneous wrappers
+    if args.diayn.enabled:
+        assert env.observation_space.shape
+
+        env = DIAYNWrapper(
+            env,
+            DIAYN(
+                observation_dim=env.observation_space.shape[0],
+                skill_dim=args.diayn.skill_dim,
+                include_baseline=args.diayn.include_baseline,
+                discriminator_learning_rate=args.diayn.discriminator_learning_rate,
+                discriminator_hidden_layer_sizes=args.diayn.discriminator_hidden_layer_sizes,
+                discriminator_hidden_layer_activation=args.diayn.discriminator_hidden_layer_activation,
+            ),
+            log_dir=log_dir,
+        )
+
+    # These should ideally be applied at the end only (mainly the self-play wrapper)
+    if args.is_footsies:
         if args.self_play.enabled:
             self_play_manager = SelfPlayManager(
                 agent=None,
@@ -369,43 +408,6 @@ def create_env(args: EnvArgs, log_dir: str | None = "runs") -> Env:
             LOGGER.info("Activated curriculum learning")
 
             env = OpponentManagerWrapper(env, curriculum_manager)
-
-    else:
-        env = gym.make(
-            args.name,
-            **args.kwargs # type: ignore
-        )
-
-    # Wrap with additional, environment-independent wrappers
-    if args.wrapper_time_limit > 0:
-        env = TimeLimit(env, max_episode_steps=args.wrapper_time_limit)
-
-    env = FlattenObservation(env)
-
-    # Final FOOTSIES wrappers
-    if args.is_footsies:
-        if args.footsies_wrapper_acd:
-            env = FootsiesActionCombinationsDiscretized(env)
-
-    if args.torch:
-        env = TransformObservation(env, lambda obs: T.from_numpy(obs).float().unsqueeze(0))
-
-    # Final miscellaneous wrappers
-    if args.diayn.enabled:
-        assert env.observation_space.shape
-
-        env = DIAYNWrapper(
-            env,
-            DIAYN(
-                observation_dim=env.observation_space.shape[0],
-                skill_dim=args.diayn.skill_dim,
-                include_baseline=args.diayn.include_baseline,
-                discriminator_learning_rate=args.diayn.discriminator_learning_rate,
-                discriminator_hidden_layer_sizes=args.diayn.discriminator_hidden_layer_sizes,
-                discriminator_hidden_layer_activation=args.diayn.discriminator_hidden_layer_activation,
-            ),
-            log_dir=log_dir,
-        )
 
     return env
 

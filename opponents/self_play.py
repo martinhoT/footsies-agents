@@ -41,6 +41,8 @@ class SelfPlayManager(OpponentManager):
     Check the 'Prioritized fictitious self-play' section of the StarCraft II paper for more details on a possible PFSP implementation.
     """
 
+    BASE_ELO = 1200
+
     def __init__(
         self,
         agent: FootsiesAgentBase | None,
@@ -84,7 +86,7 @@ class SelfPlayManager(OpponentManager):
         self.evaluate_every = evaluate_every
 
         self.opponent_pool: deque[SelfPlayOpponentInfo] = deque([], maxlen=max_opponents)
-        self.opponent_history: list[SelfPlayOpponentInfo] = []
+        self.opponent_history: list[SelfPlayOpponentInfo] = [] # the opponent history explicitly includes the in-game bot
         if starter_opponent is not None:
             self._register_opponent(starter_opponent, "Starter opponent")
         self.episode = 0
@@ -92,8 +94,9 @@ class SelfPlayManager(OpponentManager):
         ingame_bot = SelfPlayOpponentInfo(None, "In-game bot")
         self._ingame_bot = ingame_bot
         self._current_opponent = self.opponent_pool[0] if starter_opponent is not None else ingame_bot
-        self._agent_elo = 1200
+        self._agent_elo = self.BASE_ELO
         self._elo_k = 32
+        self.opponent_history.append(ingame_bot)
 
         # Track the wins that the agent had against the current opponent.
         # Only games for the most recent switch are considered.
@@ -105,14 +108,14 @@ class SelfPlayManager(OpponentManager):
         # Logging
         self.summary_writer = SummaryWriter(log_dir=log_dir) if log_dir is not None else None
         if csv_save and log_dir is not None:
-            self._csv_file = open(path.join(log_dir, "performaceelo.csv"), mode="wt")
+            self._csv_file = open(path.join(log_dir, "performanceelo.csv"), mode="wt")
             self._csv_file_writer = csv.writer(self._csv_file, "unix", quoting=csv.QUOTE_MINIMAL)
         else:
             self._csv_file = None
             self._csv_file_writer = None
 
-    def _register_opponent(self, opp: FootsiesAgentOpponent | CurriculumOpponent, name: str) -> SelfPlayOpponentInfo:
-        opponent = SelfPlayOpponentInfo(opp, name)
+    def _register_opponent(self, opp: FootsiesAgentOpponent | CurriculumOpponent, name: str, elo: float = BASE_ELO) -> SelfPlayOpponentInfo:
+        opponent = SelfPlayOpponentInfo(opp=opp, name=name, elo=elo)
         self.opponent_pool.append(opponent)
         self.opponent_history.append(opponent)
         return opponent
@@ -149,7 +152,7 @@ class SelfPlayManager(OpponentManager):
 
         # Perform a snapshot of the agent at the current
         if self.episode % self.snapshot_interval == 0:
-            new_opponent = self._register_opponent(self.agent.extract_opponent(self.env), name=f"Snapshot at episode {self.episode}")
+            new_opponent = self._register_opponent(self.agent.extract_opponent(self.env), name=f"Snapshot at episode {self.episode}", elo=self.elo)
             LOGGER.info("Agent snapshot created at episode %s! (%s)", self.episode, new_opponent)
         
         # Switch to another opponent

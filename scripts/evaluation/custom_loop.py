@@ -41,15 +41,31 @@ class ObserverSB3Callback(BaseCallback):
         super().__init__(verbose)
 
         self.observer = observer
+        
+        # This is only used in the case we cannot determine all observations in a transition.
+        self._stored_obs: T.Tensor | None = None
     
     def _on_step(self) -> bool:
         truncated = self.locals["infos"][0]["TimeLimit.truncated"]
-        terminated = not truncated and bool(self.locals["dones"].item())
+        terminated = not truncated and bool(self.locals["dones"][0].item())
+        new_obs: T.Tensor = self.locals["new_obs"]
+
+        # This is the case for DQN, so we are going to miss the very first transition of each episode.
+        # This differential treatment should not affect the results since we are only wrapping the win rate observer,
+        # which only cares about the end of episodes, and the "step" is obtained correctly.
+        if "obs_tensor" not in self.locals:
+            obs = self._stored_obs
+            self._stored_obs = new_obs
+            if obs is None:
+                return True
+
+        else:
+            obs = self.locals["obs_tensor"]
 
         self.observer.update(
-            step=self.num_timesteps,
-            obs=self.locals["obs_tensor"],
-            next_obs=self.locals["new_obs"],
+            step=self.num_timesteps - 1,
+            obs=obs,
+            next_obs=new_obs,
             reward=self.locals["rewards"][0].item(),
             terminated=terminated,
             truncated=truncated,
@@ -253,6 +269,7 @@ def custom_loop_sb3(
         total_timesteps=timesteps,
         callback=ObserverSB3Callback(observer),
         log_interval=None, # type: ignore
+        progress_bar=True,
     )
 
     return observer

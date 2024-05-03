@@ -21,15 +21,15 @@ def main(seeds: int = 10, timesteps: int = int(1e7), processes: int = 4, y: bool
             env_args=quick_env_args(
                 self_play=SelfPlayArgs(
                     enabled=True,
-                    max_opponents=5,
-                    snapshot_interval=5000,
-                    switch_interval=500,
+                    max_opponents=10,
+                    snapshot_interval=2000,
+                    switch_interval=100,
                     mix_bot=1,
-                    add_curriculum_opps=True,
-                    evaluate_every=500,
-                )
+                    add_curriculum_opps=False,
+                    evaluate_every=100,
+                ),
+                wrapper_time_limit=1000,
             ),
-            wrapper_time_limit=1000,
             timesteps=timesteps,
         )
     }

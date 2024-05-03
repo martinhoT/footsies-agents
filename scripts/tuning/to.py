@@ -13,30 +13,30 @@ def create_model_from_parameters(env: Env,
     actor_lr: float,
     critic_lr: float,
     actor_entropy_coef: float,
-    critic_arch_hs: str,
-    critic_arch_activation: str,
-    actor_arch_hs: str,
-    actor_arch_activation: str,
-    opponent_model_arch_hs: str = "[64, 64]",
-    opponent_model_arch_activation: str = "nn.LeakyReLU",
-    game_model_arch_hs: str = "[64, 64]",
-    game_model_arch_activation: str = "nn.LeakyReLU",
+    critic_hs: str,
+    critic_activation: str,
+    actor_hs: str,
+    actor_activation: str,
+    opponent_model_hs: str = "[64, 64]",
+    opponent_model_activation: str = "nn.LeakyReLU",
+    game_model_hs: str = "[64, 64]",
+    game_model_activation: str = "nn.LeakyReLU",
     actor_gradient_clipping: float = 0.5,
     critic_target_update_rate: int = 1000,
-) -> TrainingLoggerWrapper[TheOneAgent]:
+    loggables_to_update: dict[str, list] | None = None
+) -> TheOneAgent:
 
     assert env.observation_space.shape is not None
     assert isinstance(env.action_space, Discrete)
 
-    critic_arch_hs_evaled = eval(critic_arch_hs)
-    critic_arch_activation_evaled = eval(critic_arch_activation, {"nn": nn})
-    actor_arch_hs_evaled = eval(actor_arch_hs)
-    actor_arch_activation_evaled = eval(actor_arch_activation, {"nn": nn})
-    opponent_model_arch_hs_evaled = eval(opponent_model_arch_hs)
-    opponent_model_arch_activation_evaled = eval(opponent_model_arch_activation, {"nn": nn})
-    game_model_arch_hs_evaled = eval(game_model_arch_hs)
-    game_model_arch_activation_evaled = eval(game_model_arch_activation, {"nn": nn})
-
+    critic_arch_hs_evaled = eval(critic_hs)
+    critic_arch_activation_evaled = eval(critic_activation, {"nn": nn})
+    actor_arch_hs_evaled = eval(actor_hs)
+    actor_arch_activation_evaled = eval(actor_activation, {"nn": nn})
+    opponent_model_arch_hs_evaled = eval(opponent_model_hs)
+    opponent_model_arch_activation_evaled = eval(opponent_model_activation, {"nn": nn})
+    game_model_arch_hs_evaled = eval(game_model_hs)
+    game_model_arch_activation_evaled = eval(game_model_activation, {"nn": nn})
 
     agent, loggables = to_(
         observation_space_size=env.observation_space.shape[0],
@@ -51,7 +51,7 @@ def create_model_from_parameters(env: Env,
         learn="no-gm",
 
         # Opponent modifiers
-        use_opponent_model=False,
+        use_opponent_model=True,
         critic_opponent_update="expected_sarsa",
         consider_explicit_opponent_policy=True,
         opponent_model_dynamic_loss_weights=True,
@@ -97,24 +97,10 @@ def create_model_from_parameters(env: Env,
 
     loggables["network_histograms"].clear()
 
-    return TrainingLoggerWrapper[TheOneAgent](
-        agent,
-        log_frequency=1000,
-        log_dir=None,
-        episode_reward=True,
-        average_reward=True,
-        average_reward_coef=None,
-        win_rate=True,
-        win_rate_over_last=100,
-        truncation=True,
-        episode_length=True,
-        test_states_number=10000,
-        step_start_value=0,
-        episode_start_value=0,
-        csv_save=False,
-        **loggables,
-    )
+    if loggables_to_update is not None:
+        loggables_to_update.update(loggables)
 
+    return agent
 
 
 def create_arch_suggestions(trial: optuna.Trial, label: str) -> tuple[str, str]:
@@ -132,15 +118,37 @@ def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneA
     critic_arch_activation, critic_arch_hs = create_arch_suggestions(trial, "critic")
     actor_arch_activation, actor_arch_hs = create_arch_suggestions(trial, "actor")
 
-    return create_model_from_parameters(env,
+    loggables = {}
+    agent = create_model_from_parameters(env,
         actor_lr=trial.suggest_float("actor_lr", 1e-5, 1e-1),
         critic_lr=trial.suggest_float("critic_lr", 1e-5, 1e-1),
         actor_entropy_coef=trial.suggest_float("actor_entropy_coef", 0.0, 0.3),
-        critic_arch_hs=critic_arch_hs,
-        critic_arch_activation=critic_arch_activation,
-        actor_arch_hs=actor_arch_hs,
-        actor_arch_activation=actor_arch_activation,
+        critic_hs=critic_arch_hs,
+        critic_activation=critic_arch_activation,
+        actor_hs=actor_arch_hs,
+        actor_activation=actor_arch_activation,
+        loggables_to_update=loggables,
     )
+
+    logged_agent = TrainingLoggerWrapper[TheOneAgent](
+        agent,
+        log_frequency=1000,
+        log_dir=None,
+        episode_reward=True,
+        average_reward=True,
+        average_reward_coef=None,
+        win_rate=True,
+        win_rate_over_last=100,
+        truncation=True,
+        episode_length=True,
+        test_states_number=10000,
+        step_start_value=0,
+        episode_start_value=0,
+        csv_save=False,
+        **loggables,
+    )
+
+    return logged_agent
     
 
 def objective(agent: TrainingLoggerWrapper[TheOneAgent], env: Env) -> float:

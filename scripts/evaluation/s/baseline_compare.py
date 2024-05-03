@@ -23,15 +23,15 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
     result_path = path.splitext(__file__)[0]
 
     runs_raw: dict[str, Callable[[Env], FootsiesAgentBase | BaseAlgorithm]] = {
-        "compare_ppo": partial(create_ppo_with_parameters, **get_best_params("sb3_ppo")),
-        "compare_a2c": partial(create_a2c_with_parameters, **get_best_params("sb3_a2c")),
-        "compare_dqn": partial(create_dqn_with_parameters, **get_best_params("sb3_dqn")),
-        "compare_agent": partial(create_agent_with_parameters, **get_best_params("to")),
+        "agent": partial(create_agent_with_parameters, **get_best_params("to")),
+        "ppo": partial(create_ppo_with_parameters, **get_best_params("sb3_ppo")),
+        "a2c": partial(create_a2c_with_parameters, **get_best_params("sb3_a2c")),
+        "dqn": partial(create_dqn_with_parameters, **get_best_params("sb3_dqn")),
     }
 
     runs = {k: AgentCustomRun(
         agent=agent_initializer,
-        opponent=None
+        opponent=None,
     ) for k, agent_initializer in runs_raw.items()}
 
     dfs = get_data_custom_loop(
@@ -39,6 +39,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
         runs=runs,
         observer_type=WinRateObserver,
         seeds=seeds,
+        timesteps=timesteps,
         processes=processes,
         y=y,
     )
@@ -58,7 +59,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
             "compare_ppo": "PPO",
             "compare_a2c": "A2C",
             "compare_dqn": "DQN",
-        }
+        },
+        attr_name="win_rate"
     )
 
 if __name__ == "__main__":

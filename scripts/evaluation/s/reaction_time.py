@@ -5,12 +5,12 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     runs_raw = {
-        "reaction_correction_none": {"use_game_model": False},
-        "reaction_correction_every_1": {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 1},
-        "reaction_correction_every_3": {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 3},
-        "reaction_correction_every_5": {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 5},
-        "reaction_correction_every_15": {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 15},
-        "reaction_correction_skippers": {"use_game_model": True, "game_model_skippers": True, "game_model_skippers_every": 5},
+        "reaction_correction_none":     (1,     {"use_game_model": False}),
+        "reaction_correction_every_1":  (10,    {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 1}),
+        "reaction_correction_every_3":  (4,     {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 3}),
+        "reaction_correction_every_5":  (2.5,   {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 5}),
+        "reaction_correction_every_15": (1,     {"use_game_model": True, "game_model_skippers": False, "game_model_single_skipper": 15}),
+        "reaction_correction_skippers": (1,     {"use_game_model": True, "game_model_skippers": True, "game_model_skippers_every": 5}),
     }
 
     runs = {k: quick_train_args(
@@ -21,8 +21,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
                 **v,
             }
         ),
-        timesteps=timesteps,
-    ) for k, v in runs_raw.items()}
+        timesteps=timesteps / timesteps_divisor,
+    ) for k, (timesteps_divisor, v) in runs_raw.items()}
 
     dfs = get_data(
         data="win_rate",
@@ -53,7 +53,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
     )
 
     dfs = get_data(
-        data="training/act_elapsed_time_ns",
+        data="trainingact_elapsed_time_seconds",
         runs=runs,
         seeds=seeds,
         processes=processes,

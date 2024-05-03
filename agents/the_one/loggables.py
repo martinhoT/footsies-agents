@@ -29,7 +29,7 @@ def get_loggables(agent: TheOneAgent):
     if agent.reaction_time_emulator is not None:
         custom_evaluators.append(("Training/Reaction time", agent.evaluate_average_reaction_time))
 
-    custom_evaluators.append(("Training/Act elapsed time (ns)", agent.evaluate_act_elapsed_time_sn))
+    custom_evaluators.append(("Training/Act elapsed time (seconds)", agent.evaluate_act_elapsed_time_seconds))
 
     return {
         "network_histograms": network_histograms,
