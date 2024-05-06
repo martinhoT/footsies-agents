@@ -9,7 +9,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
     # Against in-game AI
 
     runs_raw = {
-        "no_consider_opponent_actions": {"consider_opponent_at_all": False},
+        "no_consider_opponent_actions": {"consider_opponent_at_all": False, "use_opponent_model": False, "rollback": True, "critic_opponent_update": "uniform"},
         "yes_consider_opponent_actions": {"consider_opponent_at_all": True},
     }
     
@@ -45,7 +45,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
     # Against curriculum
 
     runs_curriculum_raw = {
-        "no_consider_opponent_actions_curriculum": {"consider_opponent_at_all": False},
+        "no_consider_opponent_actions_curriculum": {"consider_opponent_at_all": False, "use_opponent_model": False, "rollback": True, "critic_opponent_update": "uniform"},
         "yes_consider_opponent_actions_curriculum": {"consider_opponent_at_all": True},
     }
     
@@ -79,8 +79,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
         xlabel="Episode",
         ylabel="Win rate",
         run_name_mapping={
-            "no_consider_opponent_actions":     "Do not consider opponent",
-            "yes_consider_opponent_actions":    "Consider opponent",
+            "no_consider_opponent_actions_curriculum":     "Do not consider opponent",
+            "yes_consider_opponent_actions_curriculum":    "Consider opponent",
         },
     )
 

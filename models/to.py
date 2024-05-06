@@ -80,6 +80,10 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     game_model_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
+    # Disable the opponent model when
+    if not consider_opponent_at_all and use_opponent_model:
+        raise ValueError("it does not make sense to not consider the opponent and use an opponent model")
+
     obs_dim = observation_space_size
     action_dim = action_space_size
     opponent_action_dim = ActionMap.n_simple() if consider_opponent_at_all else 1

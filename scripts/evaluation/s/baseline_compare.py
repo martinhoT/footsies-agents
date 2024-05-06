@@ -11,6 +11,9 @@ from agents.base import FootsiesAgentBase
 from stable_baselines3.common.base_class import BaseAlgorithm
 from functools import partial
 from gymnasium import Env
+from models import to_
+from gymnasium.spaces import Discrete
+from agents.the_one.agent import TheOneAgent
 
 
 def get_best_params(study_name: str) -> dict[str, Any]:
@@ -19,11 +22,24 @@ def get_best_params(study_name: str) -> dict[str, Any]:
     return study.best_trial.params
 
 
+def create_the_one_default(env: Env) -> TheOneAgent:
+    assert env.observation_space.shape
+    assert isinstance(env.action_space, Discrete)
+    
+    agent, _ = to_(
+        observation_space_size=env.observation_space.shape[0],
+        action_space_size=int(env.action_space.n),
+    )
+
+    return agent
+
+
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     result_path = path.splitext(__file__)[0]
 
     runs_raw: dict[str, Callable[[Env], FootsiesAgentBase | BaseAlgorithm]] = {
-        "agent": partial(create_agent_with_parameters, **get_best_params("to")),
+        # "agent": partial(create_agent_with_parameters, **get_best_params("to")),
+        "agent": create_the_one_default,
         "ppo": partial(create_ppo_with_parameters, **get_best_params("sb3_ppo")),
         "a2c": partial(create_a2c_with_parameters, **get_best_params("sb3_a2c")),
         "dqn": partial(create_dqn_with_parameters, **get_best_params("sb3_dqn")),

@@ -24,7 +24,7 @@ def create_eval_env(
     
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
-        render_mode=None,
+        render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=True,
         dense_reward=False,
@@ -81,6 +81,7 @@ def quick_env_args(**kwargs) -> EnvArgs:
     inner_kwargs = {
         "game_path": "../Footsies-Gym/Build/FOOTSIES.x86_64",
         "dense_reward": False,
+        "render_mode": "human",
     }
     if "kwargs" in kwargs:
         inner_kwargs.update(kwargs["kwargs"])

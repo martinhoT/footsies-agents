@@ -36,12 +36,10 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
     "action_masking":                       action_masking,
     "actor_entropy_coef":                   actor_entropy_coef,
-    "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
-    "baseline_compare":                     baseline_compare,
-    "consider_opponent_actions":            consider_opponent_actions,
     "critic_opponent_update_style":         critic_opponent_update_style,
+    "consider_opponent_actions":            consider_opponent_actions,
     "discount_factor":                      discount_factor,
     "game_model_method":                    game_model_method,
     "hitstop_freeze":                       hitstop_freeze,
@@ -57,6 +55,8 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "zero_sum":                             zero_sum,
     # Put self-play as the last one since it's the one that takes the longest to execute
     "self_play":                            self_play,
+    "adaptation_speed":                     adaptation_speed,   # BUG: some error must have happened at the end... was stupid and did not look for it
+    "baseline_compare":                     baseline_compare,   # BUG: the training hangs for the agent at the end for some reason
 }
 
 

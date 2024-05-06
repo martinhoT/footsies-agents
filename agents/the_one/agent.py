@@ -160,6 +160,10 @@ class TheOneAgent(FootsiesAgentBase):
             else:
                 predicted_opponent_action = None
         
+        # In case the opponent's considered action dimensionality is actually smaller
+        if predicted_opponent_action is not None:
+            predicted_opponent_action = min(predicted_opponent_action, self.opponent_action_dim - 1)
+
         action = self.a2c.act(obs, info, predicted_opponent_action=predicted_opponent_action)
         self._recently_predicted_opponent_action = predicted_opponent_action
 
