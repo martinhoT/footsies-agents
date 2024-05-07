@@ -1,12 +1,9 @@
 import torch
-from typing import Any
+from typing import Any, cast
 from gymnasium import Env
-from gymnasium.wrappers.transform_observation import TransformObservation
-from gymnasium.wrappers.flatten_observation import FlattenObservation
-from agents.wrappers import FootsiesSimpleActions
 from footsies_gym.envs.footsies import FootsiesEnv
-from footsies_gym.wrappers import FootsiesNormalized
 from args import AgentArgs, CurriculumArgs, DIAYNArgs, EnvArgs, FootsiesSimpleActionsArgs, MainArgs, MiscArgs, SelfPlayArgs
+from main import create_env
 
 
 def dummy_opponent(o: dict, i: dict) -> tuple[bool, bool, bool]:
@@ -22,26 +19,11 @@ def create_eval_env(
     port_stop: int | None = None,
 ) -> tuple[Env[torch.Tensor, int], FootsiesEnv]:
     
-    footsies_env = FootsiesEnv(
-        game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
-        render_mode="human",
-        sync_mode="synced_non_blocking",
-        fast_forward=True,
-        dense_reward=False,
-        opponent=dummy_opponent,
-        **FootsiesEnv.find_ports(start=port_start, stop=port_stop), # type: ignore
-    )
+    ports = FootsiesEnv.find_ports(start=port_start, stop=port_stop)
+    env_args = quick_env_args(kwargs=ports)
 
-    env = TransformObservation(
-        FootsiesSimpleActions(
-            FlattenObservation(
-                FootsiesNormalized(
-                    footsies_env,
-                )
-            )
-        ),
-        obs_to_torch,
-    )
+    env = create_env(env_args)
+    footsies_env = cast(FootsiesEnv, env.unwrapped)
 
     return env, footsies_env
 
@@ -82,6 +64,7 @@ def quick_env_args(**kwargs) -> EnvArgs:
         "game_path": "../Footsies-Gym/Build/FOOTSIES.x86_64",
         "dense_reward": False,
         "render_mode": "human",
+        "sync_mode": "synced_non_blocking",
     }
     if "kwargs" in kwargs:
         inner_kwargs.update(kwargs["kwargs"])

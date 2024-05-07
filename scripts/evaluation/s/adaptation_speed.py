@@ -104,6 +104,7 @@ def main(
     timesteps: int = int(1e6),
     processes: int = 4,
     y: bool = False,
+    small: bool = False,
 ):
     result_path = path.splitext(__file__)[0]
 
@@ -116,7 +117,10 @@ def main(
         action_space_size=dummy_env.action_space.n,
     )
 
-    opponent_labels = ["Blank", "NSpammer", "BSpammer"]#, "NSpecialSpammer", "WhiffPunisher", "Bot"]
+    if small:
+        opponent_labels = ["Blank", "NSpammer", "BSpammer"]
+    else:
+        opponent_labels = ["Blank", "NSpammer", "BSpammer", "NSpecialSpammer", "WhiffPunisher", "Bot"]
 
     agent_regimes: list[AgentTrainingRegime] = []
     for training_opponent_label in opponent_labels:
