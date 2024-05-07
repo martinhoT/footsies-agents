@@ -90,18 +90,20 @@ class FootsiesAgentOpponent(Opponent):
         else:
             self._simple_action_executor = None
             self._simple_action_extractor = None
-        self._simple_action_extractor_should_reset = True
+        self._simple_action_stuff_should_reset = True
 
     def act(self, obs: dict, info: dict) -> tuple[bool, bool, bool]:
         # Invert the perspective, since the agent was trained as if they were on the left side of the screen
         obs = observation_invert_perspective(obs)
         info = observation_invert_perspective(info)
         
-        if self._simple_action_extractor is not None:
-            if self._simple_action_extractor_should_reset:
+        if self._simple_action_extractor is not None and self._simple_action_executor is not None:
+            if self._simple_action_stuff_should_reset:
+                info = self._simple_action_executor.reset(info)
                 info = self._simple_action_extractor.reset(info)
-                self._simple_action_extractor_should_reset = False
+                self._simple_action_stuff_should_reset = False
             else:
+                info = self._simple_action_executor.update(info)
                 info = self._simple_action_extractor.update(info)
 
         for observation_wrapper in reversed(self._observation_wrappers):
@@ -122,9 +124,7 @@ class FootsiesAgentOpponent(Opponent):
 
     def reset(self):
         self._agent.reset()
-        if self._simple_action_executor is not None:
-            self._simple_action_executor.reset()
-        self._simple_action_extractor_should_reset = True
+        self._simple_action_stuff_should_reset = True
 
     @property
     def agent(self) -> FootsiesAgentBase:

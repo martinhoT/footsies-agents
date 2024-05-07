@@ -6,7 +6,7 @@ from torch import nn
 from copy import deepcopy
 from agents.base import FootsiesAgentOpponent
 from gymnasium import Env
-from agents.base import FootsiesAgentBase
+from agents.base import FootsiesAgentTorch
 from agents.the_one.reaction_time import ReactionTimeEmulator, MultiStepPredictor
 from agents.a2c.agent import A2CAgent
 from agents.mimic.agent import MimicAgent
@@ -17,7 +17,7 @@ from time import process_time_ns
 LOGGER = logging.getLogger("main.the_one")
 
 
-class TheOneAgent(FootsiesAgentBase):
+class TheOneAgent(FootsiesAgentTorch):
     def __init__(
         self,
         # Dimensions

@@ -194,10 +194,25 @@ class FootsiesSimpleActionExecutor:
 
         return primitive_action
 
-    def reset(self):
+    def update(self, info: dict) -> dict:
+        info = info.copy()
+
+        info["agent_simple"] = self._simple_action
+        info["agent_simple_completed"] = len(self._simple_action_queue) == 0
+
+        return info
+
+    def reset(self, info: dict) -> dict:
         """Reset the executor state, which should be done everytime the environment terminates/truncates."""
+        info = info.copy()
+
+        info["agent_simple"] = 0
+        info["agent_simple_completed"] = True
+
         self._simple_action = None
         self._simple_action_queue.clear()
+
+        return info
 
 
 class FootsiesSimpleActionExtractor:
@@ -242,6 +257,7 @@ class FootsiesSimpleActionExtractor:
         info["p2_was_actionable"] = False
         info["p1_is_actionable"] = True
         info["p2_is_actionable"] = True
+
         self._current_info = info
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0
@@ -333,10 +349,8 @@ class FootsiesSimpleActions(Wrapper):
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None) -> tuple[Any, dict]:
         obs, info = self.env.reset(seed=seed, options=options)
         
-        self._executor.reset()
+        info = self._executor.reset(info)
         info = self._extractor.reset(info)
-        info["agent_simple"] = 0
-        info["agent_simple_completed"] = True
 
         return obs, info
 
@@ -345,9 +359,8 @@ class FootsiesSimpleActions(Wrapper):
 
         obs, reward, terminated, truncated, info = self.env.step(primitive_action)
 
+        info = self._executor.update(info)
         info = self._extractor.update(info)
-        info["agent_simple"] = self._executor._simple_action
-        info["agent_simple_completed"] = len(self._executor._simple_action_queue) == 0
 
         return obs, reward, terminated, truncated, info
 
