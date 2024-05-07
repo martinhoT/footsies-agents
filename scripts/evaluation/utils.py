@@ -6,10 +6,6 @@ from args import AgentArgs, CurriculumArgs, DIAYNArgs, EnvArgs, FootsiesSimpleAc
 from main import create_env
 
 
-def dummy_opponent(o: dict, i: dict) -> tuple[bool, bool, bool]:
-    return (False, False, False)
-
-
 def obs_to_torch(o) -> torch.Tensor:
     return torch.from_numpy(o).float().unsqueeze(0)
 

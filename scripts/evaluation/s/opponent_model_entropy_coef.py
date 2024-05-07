@@ -31,7 +31,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     # Win rate on normal agent against curriculum
     runs_curriculum = {k: quick_train_args(
-        agent_args=quick_agent_args(k, model="to", kwargs=v),
+        agent_args=quick_agent_args(k + "_curriculum", model="to", kwargs=v),
         env_args=quick_env_args(
             curriculum=CurriculumArgs(
                 enabled=True,

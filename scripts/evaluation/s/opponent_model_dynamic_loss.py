@@ -79,7 +79,11 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     assert isinstance(dummy_env.action_space, Discrete)
 
     runs_dataset = {
-        k: mimic_(**v)[0] # type: ignore
+        k: mimic_(
+            observation_space_size=dummy_env.observation_space.shape[0],
+            action_space_size=int(dummy_env.action_space.n),
+            **v, # type: ignore
+        )[0] 
         for k, v in runs_dataset_raw.items()
     }
 

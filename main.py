@@ -284,10 +284,14 @@ def train(
             opponent_manager.close()
 
 
+def dummy_opponent(o: dict, i: dict) -> tuple[bool, bool, bool]:
+    return (False, False, False)
+
+
 def create_env(args: EnvArgs, log_dir: str | None = "runs") -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
-        opponent = (lambda o, i: (False, False, False)) if args.self_play.enabled or args.curriculum.enabled else None        
+        opponent = dummy_opponent if args.self_play.enabled or args.curriculum.enabled else None        
         env = FootsiesEnv(
             opponent=opponent,
             **args.kwargs, # type: ignore

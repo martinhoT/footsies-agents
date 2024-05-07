@@ -5,13 +5,13 @@ from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_tra
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
     runs_raw = {
-        "sparse_reward": {"kwargs": {"dense_reward": False}},
-        "dense_reward": {"kwargs": {"dense_reward": True}},
+        "sparse_reward": {"dense_reward": False},
+        "dense_reward": {"dense_reward": True},
     }
 
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k),
-        env_args=quick_env_args(**v),
+        env_args=quick_env_args(kwargs=v),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
 

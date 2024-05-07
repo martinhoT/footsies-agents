@@ -17,7 +17,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
                 enabled=True,
                 episode_threshold=1000,
             ),
-            **v,
+            kwargs=v,
         ),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}

@@ -11,7 +11,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
     }
 
     runs = {k: quick_train_args(
-        agent_args=quick_agent_args(k, model="to", kwargs=v),
+        agent_args=quick_agent_args(k, model="to"),
         env_args=quick_env_args(
             footsies_wrapper_simple=FootsiesSimpleActionsArgs(
                 enabled=True,

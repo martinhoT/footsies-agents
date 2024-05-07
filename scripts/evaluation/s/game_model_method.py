@@ -91,7 +91,11 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         title_label = f" ({label})" if label else label
 
         runs_dataset = {
-            k: game_model_(**v)[0]
+            k: game_model_(
+                observation_space_size=dummy_env.observation_space.shape[0],
+                action_space_size=int(dummy_env.action_space.n),
+                **v, # type: ignore
+            )[0]
             for k, v in runs_dataset_raw.items()
         }
 
