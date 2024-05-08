@@ -4,7 +4,7 @@ import os
 import struct
 from torch.utils.data import Dataset
 from typing import Any, Callable, Generator, Iterable, Iterator, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, astuple
 from itertools import pairwise
 from gymnasium import Env
 from gymnasium.wrappers.flatten_observation import FlattenObservation
@@ -14,6 +14,7 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.utils import get_dict_obs_from_vector_obs
 from agents.action import ActionMap
 from io import BufferedIOBase
+from tqdm import tqdm
 
 
 UNFLATTENED_OBSERVATION_SPACE = FootsiesNormalized(FootsiesEnv()).observation_space
@@ -27,12 +28,14 @@ class FootsiesTransition:
     p1_action:      np.ndarray
     p2_action:      np.ndarray
     terminated:     bool
-    info:           dict = field(init=False, default_factory=dict)
-    next_info:      dict = field(init=False, default_factory=dict)
 
-    def __post_init__(self):
-        self.info = get_dict_obs_from_vector_obs(self.obs, unflattenend_observation_space=UNFLATTENED_OBSERVATION_SPACE)
-        self.next_info = get_dict_obs_from_vector_obs(self.next_obs, unflattenend_observation_space=UNFLATTENED_OBSERVATION_SPACE)
+    @property
+    def info(self) -> dict:
+        return get_dict_obs_from_vector_obs(self.obs, unflattenend_observation_space=UNFLATTENED_OBSERVATION_SPACE)
+
+    @property
+    def next_info(self) -> dict:
+        return get_dict_obs_from_vector_obs(self.next_obs, unflattenend_observation_space=UNFLATTENED_OBSERVATION_SPACE)
 
 
 # repr is False to avoid printing the entire episode, which is especially important when debugging
@@ -297,7 +300,7 @@ class FootsiesTorchDataset(Dataset):
         self._distinct = False
         self._update_transitions(distinct=False)
 
-    def __getitem__(self, idx: int) -> FootsiesTransition:
+    def __getitem__(self, idx: int) -> tuple[Any, ...]:
         return self._transitions[idx]
 
     def __len__(self) -> int:
@@ -319,9 +322,9 @@ class FootsiesTorchDataset(Dataset):
     
     def _update_transitions(self, distinct: bool = False):
         if distinct:
-            self._transitions = tuple(set(self.dataset.transitions))
+            self._transitions = tuple(map(astuple, set(self.dataset.transitions)))
         else:
-            self._transitions = self.dataset.transitions
+            self._transitions = tuple(map(astuple, self.dataset.transitions))
 
 
 class DataCollector:

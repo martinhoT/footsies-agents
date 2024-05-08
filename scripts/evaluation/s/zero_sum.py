@@ -40,12 +40,12 @@ class QSumObserver(Observer):
         return ("q_sum",)
 
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     env, _ = create_eval_env()
     assert env.observation_space.shape
     assert isinstance(env.action_space, Discrete)
 
-    # Learnt against the in-game bot
+    # Learnt against the in-game AI
     agent_name = "REF"
     agent_parameters = load_agent_parameters(agent_name)
     agent, _ = to_(

@@ -6,7 +6,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     result_basename = path.splitext(__file__)[0] + name_suffix
 
     run_name_mapping = {
@@ -43,7 +43,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game bot",
+        title="Win rate over the last 100 episodes against the in-game AI",
         fig_path=result_basename + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
@@ -64,7 +64,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Opponent model loss against the in-game bot",
+        title="Opponent model loss against the in-game AI",
         fig_path=result_basename + "_loss",
         exp_factor=0.9,
         xlabel="Time step",
@@ -74,10 +74,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     # Losses on dataset
     runs_dataset_raw = {
-        "opp_normal_opp": {"recurrent": False},
-        "opp_recurrent_end_opp": {"recurrent": True, "reset_context_at": "end"},
-        "opp_recurrent_hit_opp": {"recurrent": True, "reset_context_at": "hit"},
-        "opp_recurrent_neutral_opp": {"recurrent": True, "reset_context_at": "neutral"},
+        "dataset_opp_normal": {"recurrent": False},
+        "dataset_opp_recurrent_end": {"recurrent": True, "reset_context_at": "end"},
+        "dataset_opp_recurrent_hit": {"recurrent": True, "reset_context_at": "hit"},
+        "dataset_opp_recurrent_neutral": {"recurrent": True, "reset_context_at": "neutral"},
     }
     
     dummy_env, _ = create_eval_env()
@@ -85,8 +85,11 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     assert isinstance(dummy_env.action_space, Discrete)
 
     runs_dataset = {
-        k: mimic_(**v)[0]
-        for k, v in runs_dataset_raw.items()
+        k: mimic_(
+            observation_space_size=dummy_env.observation_space.shape[0],
+            action_space_size=int(dummy_env.action_space.n),
+            **v,
+        )[0] for k, v in runs_dataset_raw.items()
     }
 
     dfs = get_data_dataset(
@@ -97,6 +100,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         processes=processes,
         epochs=epochs,
         shuffle=shuffle,
+        y=y,
     )
 
     if dfs is None:
@@ -110,10 +114,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         xlabel="Time step",
         ylabel="Loss",
         run_name_mapping={
-            "opp_normal_opp":               "Non-recurrent",
-            "opp_recurrent_end_opp":        "Recurrent (end)",
-            "opp_recurrent_hit_opp":        "Recurrent (hit)",
-            "opp_recurrent_neutral_opp":    "Recurrent (neutral)"
+            "dataset_normal":               "Non-recurrent",
+            "dataset_recurrent_end":        "Recurrent (end)",
+            "dataset_recurrent_hit":        "Recurrent (hit)",
+            "dataset_recurrent_neutral":    "Recurrent (neutral)"
         }
     )
 

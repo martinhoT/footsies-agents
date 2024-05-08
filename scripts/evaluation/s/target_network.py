@@ -3,18 +3,21 @@ from scripts.evaluation.data_collectors import get_data
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     runs_raw = {
-        "target_network_0": {"critic_target_update_rate": 0},
-        "target_network_100": {"critic_target_update_rate": 100},
-        "target_network_1000": {"critic_target_update_rate": 1000},
-        "target_network_10000": {"critic_target_update_rate": 10000},
+        "target_network_0": 0,
+        "target_network_100": 100,
+        "target_network_1000": 1000,
+        "target_network_10000": 10000,
     }
     
     runs = {k: quick_train_args(
-        agent_args=quick_agent_args(k, model="to", kwargs=v),
+        agent_args=quick_agent_args(k, model="to", kwargs={
+            "critic_opponent_update": "q_learning", # dramatize it
+            "critic_target_update_rate": update_rate,
+        }),
         timesteps=timesteps,
-    ) for k, v in runs_raw.items()}
+    ) for k, update_rate in runs_raw.items()}
 
     dfs = get_data(
         data="win_rate",

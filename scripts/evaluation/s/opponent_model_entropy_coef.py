@@ -7,7 +7,7 @@ from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
 from args import CurriculumArgs
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     result_basename = path.splitext(__file__)[0] + name_suffix
 
     run_name_mapping = {
@@ -30,7 +30,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     ) for k, v in runs_raw.items()}
 
     # Win rate on normal agent against curriculum
-    runs_curriculum = {k: quick_train_args(
+    runs_curriculum = {k + "_curriculum": quick_train_args(
         agent_args=quick_agent_args(k + "_curriculum", model="to", kwargs=v),
         env_args=quick_env_args(
             curriculum=CurriculumArgs(
@@ -59,7 +59,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Win rate",
-        run_name_mapping=run_name_mapping,
+        run_name_mapping={k + "_curriculum": v for k, v in run_name_mapping.items()},
     )
 
     # Win rate on normal agent
@@ -76,7 +76,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game bot",
+        title="Win rate over the last 100 episodes against the in-game AI",
         fig_path=result_basename + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
@@ -97,7 +97,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Opponent model loss against the in-game bot",
+        title="Opponent model loss against the in-game AI",
         fig_path=result_basename + "_loss",
         exp_factor=0.9,
         xlabel="Time step",
@@ -107,10 +107,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     # Losses on dataset
     runs_dataset_raw = {
-        "opp_entropy_coef_004_opp": {"entropy_coef": 0.04},
-        "opp_entropy_coef_008_opp": {"entropy_coef": 0.08},
-        "opp_entropy_coef_016_opp": {"entropy_coef": 0.16},
-        "opp_entropy_coef_032_opp": {"entropy_coef": 0.32},
+        "dataset_opp_entropy_coef_004": {"entropy_coef": 0.04},
+        "dataset_opp_entropy_coef_008": {"entropy_coef": 0.08},
+        "dataset_opp_entropy_coef_016": {"entropy_coef": 0.16},
+        "dataset_opp_entropy_coef_032": {"entropy_coef": 0.32},
     }
     
     dummy_env, _ = create_eval_env()
@@ -130,6 +130,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         processes=processes,
         epochs=epochs,
         shuffle=shuffle,
+        y=y,
     )
 
     if dfs is None:
@@ -147,10 +148,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             xlabel="Time step",
             ylabel="Loss",
             run_name_mapping={
-                "opp_entropy_coef_004_opp":   "$\\beta = 0.04$",
-                "opp_entropy_coef_008_opp":   "$\\beta = 0.08$",
-                "opp_entropy_coef_016_opp":   "$\\beta = 0.16$",
-                "opp_entropy_coef_032_opp":   "$\\beta = 0.32$",
+                "dataset_entropy_coef_004":   "$\\beta = 0.04$",
+                "dataset_entropy_coef_008":   "$\\beta = 0.08$",
+                "dataset_entropy_coef_016":   "$\\beta = 0.16$",
+                "dataset_entropy_coef_032":   "$\\beta = 0.32$",
             },
             attr_name=attr_name,
         )

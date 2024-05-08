@@ -6,7 +6,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     result_basename = path.splitext(__file__)[0] + name_suffix
 
     run_name_mapping = {
@@ -39,7 +39,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game bot",
+        title="Win rate over the last 100 episodes against the in-game AI",
         fig_path=result_basename + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
@@ -60,7 +60,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Opponent model loss against the in-game bot",
+        title="Opponent model loss against the in-game AI",
         fig_path=result_basename + "_loss",
         exp_factor=0.9,
         xlabel="Time step",
@@ -70,8 +70,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     # Losses on dataset
     runs_dataset_raw = {
-        "opp_no_dynamic_weights_opp": {"dynamic_loss_weights": False},
-        "opp_yes_dynamic_weights_opp": {"dynamic_loss_weights": True},
+        "dataset_opp_no_dynamic_weights": {"dynamic_loss_weights": False},
+        "dataset_opp_yes_dynamic_weights": {"dynamic_loss_weights": True},
     }
     
     dummy_env, _ = create_eval_env()
@@ -95,6 +95,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         processes=processes,
         epochs=epochs,
         shuffle=shuffle,
+        y=y,
     )
 
     if dfs is None:
@@ -112,8 +113,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             xlabel="Time step",
             ylabel="Loss",
             run_name_mapping={
-                "opp_no_dynamic_weights_opp":   "No dynamic weights",
-                "opp_yes_dynamic_weights_opp":  "Dynamic weights",
+                "dataset_no_dynamic_weights":   "No dynamic weights",
+                "dataset_yes_dynamic_weights":  "Dynamic weights",
             },
             attr_name=attr_name,
         )

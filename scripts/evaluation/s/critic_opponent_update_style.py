@@ -3,7 +3,7 @@ from scripts.evaluation.data_collectors import get_data
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     runs_raw = {
         "critic_opponent_style_sarsa": {"critic_opponent_update": "sarsa"},
         "critic_opponent_style_expected_sarsa": {"critic_opponent_update": "expected_sarsa"},
@@ -29,7 +29,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game bot",
+        title="Win rate over the last 100 episodes against the in-game AI",
         fig_path=path.splitext(__file__)[0],
         exp_factor=0.9,
         xlabel="Time step",

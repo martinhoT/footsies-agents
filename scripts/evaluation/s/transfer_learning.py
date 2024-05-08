@@ -10,14 +10,14 @@ from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustom
 from gymnasium.spaces import Discrete
 from typing import cast
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     result_path = path.splitext(__file__)[0]
 
     dummy_env, _ = create_eval_env()
     assert dummy_env.observation_space.shape
     assert isinstance(dummy_env.action_space, Discrete)
 
-    # Learnt against the in-game bot
+    # Learnt against the in-game AI
     AGENT_NAME = "REF"
 
     agent_parameters = load_agent_parameters(AGENT_NAME)

@@ -49,7 +49,8 @@ class A2CAgent(FootsiesAgentBase):
             modules["critic"] = self._critic.q_network
         self._model = AggregateModule(modules)
 
-        # For tracking
+        # The action that the agent *consciously* attempted.
+        # The no-op action that the agent sends when it can't do anything is not taken into account here.
         self._current_action: int = 0
 
         # For logging
@@ -61,6 +62,7 @@ class A2CAgent(FootsiesAgentBase):
 
     def act(self, obs: T.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> int:
         # If we can't perform an action, don't even attempt one.
+        # Note that _current_action is not updated.
         if not info["p1_is_actionable"] or not info["agent_simple_completed"]:
             return 0
         
@@ -89,7 +91,7 @@ class A2CAgent(FootsiesAgentBase):
 
     def update(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
         # We always consider the agent's simple action, never the one inferred from the observation.
-        obs_agent_action = next_info["agent_simple"]
+        obs_agent_action = self._current_action
         obs_opponent_action = next_info["p2_simple"]
 
         next_opponent_policy = next_info.get("next_opponent_policy", None) if self.consider_explicit_opponent_policy else None

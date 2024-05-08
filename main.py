@@ -1,6 +1,7 @@
 import os
 import importlib
 import gymnasium as gym
+import numpy as np
 import torch as T
 import logging
 import json
@@ -20,7 +21,7 @@ from tqdm import tqdm
 from itertools import count
 from copy import deepcopy
 from functools import partial
-from typing import Callable, Iterable, cast, Any
+from typing import Callable, Iterable, cast
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.base import FootsiesAgentBase, FootsiesAgentTorch
 from agents.diayn import DIAYN, DIAYNWrapper
@@ -28,7 +29,7 @@ from agents.logger import TrainingLoggerWrapper
 from agents.torch_utils import hogwild
 from args import MainArgs, parse_args, EnvArgs
 from opponents.self_play import SelfPlayManager
-from opponents.curriculum import BSpecialSpammer, Backer, CurriculumManager, BSpammer, Idle, NSpecialSpammer, NSpammer, WhiffPunisher, UnsafePunisher
+from opponents.curriculum import BSpecialSpammer, CurriculumManager, BSpammer, NSpecialSpammer, NSpammer, WhiffPunisher
 from opponents.base import OpponentManager
 from intrinsic.base import IntrinsicRewardScheme
 from agents.action import ActionMap
@@ -288,12 +289,18 @@ def dummy_opponent(o: dict, i: dict) -> tuple[bool, bool, bool]:
     return (False, False, False)
 
 
-def create_env(args: EnvArgs, log_dir: str | None = "runs") -> Env:
+def observation_to_torch(obs: np.ndarray) -> T.Tensor:
+    return T.from_numpy(obs).float().unsqueeze(0)
+
+
+def create_env(args: EnvArgs, log_dir: str | None = "runs", use_custom_opponent: bool = False) -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
-        opponent = dummy_opponent if args.self_play.enabled or args.curriculum.enabled else None        
+        opponent = dummy_opponent if use_custom_opponent or args.self_play.enabled or args.curriculum.enabled else None
+
         env = FootsiesEnv(
             opponent=opponent,
+            fast_forward_speed=12.0, # manually adjusted to my CPU
             **args.kwargs, # type: ignore
         )
 
@@ -352,7 +359,7 @@ def create_env(args: EnvArgs, log_dir: str | None = "runs") -> Env:
             env = FootsiesActionCombinationsDiscretized(env)
 
     if args.torch:
-        env = TransformObservation(env, lambda obs: T.from_numpy(obs).float().unsqueeze(0))
+        env = TransformObservation(env, observation_to_torch)
 
     # Final miscellaneous wrappers
     if args.diayn.enabled:

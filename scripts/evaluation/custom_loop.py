@@ -17,6 +17,10 @@ from stable_baselines3.common.callbacks import BaseCallback
 from abc import ABC, abstractmethod
 from typing import Protocol
 from footsies_gym.envs.footsies import FootsiesEnv
+import logging
+
+
+LOGGER = logging.getLogger("scripts.evaluation.custom_loop")
 
 
 class Observer(ABC):
@@ -176,7 +180,7 @@ def custom_loop(
 
     port_start = 11000 + 25 * id_
     port_stop = 11000 + 25 * (id_ + 1)
-    env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop)
+    env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop, use_custom_opponent=True)
 
     if isinstance(agent, Callable):
         agent = agent(env)
@@ -291,16 +295,14 @@ def dataset_run(
 
     process_id: int = mp.current_process()._identity[0] - 1
 
-    dataset = FootsiesDataset.load("footsies-dataset")
-    dataset = FootsiesTorchDataset(dataset)
-
+    dataset = FootsiesTorchDataset(FootsiesDataset.load("footsies-dataset"))
     dataloader = DataLoader(dataset, batch_size=1, shuffle=shuffle)
 
     observer = observer_type()
 
     step = 0
     for epoch in range(epochs):
-        for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader, desc=f"{label} ({epoch})", unit="it", position=process_id, dynamic_ncols=True, colour="#42f593"):
+        for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader, desc=f"{label} ({epoch + 1}/{epochs})", unit="it", position=process_id, dynamic_ncols=True, colour="#42f593"):
             obs = obs.float()
             next_obs = next_obs.float()
 
@@ -318,6 +320,6 @@ def dataset_run(
             step += 1
 
             observer.update(step, obs, next_obs, reward, terminated, False, {}, {}, agent)
-    
+
     return observer
         

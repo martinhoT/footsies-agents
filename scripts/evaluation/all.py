@@ -28,7 +28,7 @@ from sys import stdout
 
 
 class EvaluationScript(Protocol):
-    def __call__(self, *, seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False) -> None:
+    def __call__(self, *, seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False) -> None:
         ...
 
 
@@ -75,7 +75,7 @@ def main(seeds: int = 10, processes: int = 4):
         
         except KeyboardInterrupt:
             print(f"Okay, runs of '{name}' were interrupted")
-            exit(0)
+            return
         
         # Catch any problem and ignore it, just notify and try the next script
         except Exception as e:

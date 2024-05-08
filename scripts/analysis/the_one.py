@@ -19,6 +19,8 @@ from agents.logger import TrainingLoggerWrapper
 from agents.the_one.agent import TheOneAgent
 from typing import Literal, cast
 from gymnasium.spaces import Discrete
+from scripts.analysis.base import editable_dpg_value
+from os import path
 import tyro
 import logging
 import warnings
@@ -41,12 +43,25 @@ class TheOneAnalyserManager:
 
         self.r = 0
     
+    agent_name = cast(str, editable_dpg_value("agent_name"))
+
+    def _save_agent(self, s, a, u):
+        folder_path = path.join("runs", "analysis_" + self.agent_name)
+        self.agent.save(folder_path)
+
     def add_custom_elements(self, analyser: Analyser):
         with dpg.group(horizontal=True):
             dpg.add_text("Predicted opponent action:")
             dpg.add_text("X", tag="predicted_opponent_action")
-        
+
         dpg.add_checkbox(label="Online learning", default_value=False, tag="the_one_online_learning")
+
+        with dpg.group(horizontal=True):
+            dpg.add_text("Name:")
+            dpg.add_input_text(multiline=False, no_spaces=True, tag="agent_name", enabled=True)
+            dpg.add_button(label="Save", callback=self._save_agent)
+
+        dpg.add_separator()
 
         self.qlearner_manager.add_custom_elements(analyser)
 
@@ -83,12 +98,16 @@ class TheOneAnalyserManager:
 def main(
     custom: bool = False,
     model: str = "to",
-    name: str = "f_opp_recurrent_no_mask",
-    load: bool = True,
-    log: bool = False,
-    opponent: Literal["human", "bot", "custom"] = "human",
-    include_gm: bool = True,
+    load: str | None = None,
+    log: str | None = None,
+    opponent: Literal["human", "bot", "custom"] = "bot",
+    include_gm: bool = False,
 ):
+    if not custom and not load:
+        raise ValueError("should either use a custom opponent or load one")
+    
+    agent_name: str = load if load else ""
+
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
     env_kwargs = {}
@@ -108,7 +127,7 @@ def main(
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=True,
+        fast_forward=opponent != "human",
         dense_reward=False,
         log_file="out.log",
         log_file_overwrite=True,
@@ -122,7 +141,7 @@ def main(
                     footsies_env,
                 )
             ),
-            agent_allow_special_moves=True,
+            agent_allow_special_moves=False,
         ),
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
@@ -144,7 +163,7 @@ def main(
         )
     
     else:
-        parameters = load_agent_parameters(name)
+        parameters = load_agent_parameters(agent_name)
         agent, loggables = import_agent(model, env, parameters)
         agent = cast(TheOneAgent, agent)
 
@@ -171,7 +190,7 @@ def main(
         warnings.warn("Since the agent is recurrent, it needs to have 'online learning' enabled in order to have the recurrent state updated. Additionally, loading and saving states is discouraged for the same reason.")
 
     if load:
-        load_agent(agent, name)
+        load_agent(agent, agent_name)
 
     qlearner_manager = QLearnerAnalyserManager(
         agent.a2c,

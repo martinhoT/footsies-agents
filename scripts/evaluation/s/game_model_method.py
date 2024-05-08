@@ -6,7 +6,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import GameModelObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 4, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     runs_raw = {
         "gm_residual": {"learn": "all", "game_model_method": "residual", "game_model_skippers": False},
         "gm_normal": {"learn": "all", "game_model_method": "normal", "game_model_skippers": False},
@@ -34,7 +34,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game bot",
+        title="Win rate over the last 100 episodes against the in-game AI",
         fig_path=result_basename + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
@@ -63,7 +63,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
         plot_data(
             dfs=dfs,
-            title=f"Game model loss against the in-game bot{title_label}",
+            title=f"Game model loss against the in-game AI{title_label}",
             fig_path=f"{result_basename}_gm{data_label}",
             exp_factor=0.9,
             xlabel="Time step",
@@ -77,9 +77,9 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     # Losses on dataset
     runs_dataset_raw = {
-        "gm_residual_gm": {"residual": True, "by_differences": False},
-        "gm_normal_gm": {"residual": False, "by_differences": False},
-        "gm_differences_gm": {"residual": False, "by_differences": True},
+        "dataset_gm_residual": {"residual": True, "by_differences": False},
+        "dataset_gm_normal": {"residual": False, "by_differences": False},
+        "dataset_gm_differences": {"residual": False, "by_differences": True},
     }
     
     dummy_env, _ = create_eval_env()
@@ -107,6 +107,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             processes=processes,
             epochs=epochs,
             shuffle=shuffle,
+            y=y,
         )
 
         if dfs is None:
@@ -120,9 +121,9 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             xlabel="Time step",
             ylabel="Loss",
             run_name_mapping={
-                "gm_residual_gm":     "Residual",
-                "gm_normal_gm":       "Normal",
-                "gm_differences_gm":  "Differences",
+                "dataset_gm_residual":     "Residual",
+                "dataset_gm_normal":       "Normal",
+                "dataset_gm_differences":  "Differences",
             },
             attr_name="loss" + data_label,
         )

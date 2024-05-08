@@ -5,7 +5,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_tra
 from args import FootsiesSimpleActionsArgs
 from typing import Literal
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     runs_raw: dict[str, Literal["last", "none", "stand"]] = {
         "assumed_opponent_action_on_frameskip_none": "none",
         "assumed_opponent_action_on_frameskip_last": "last",
@@ -38,7 +38,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game bot",
+        title="Win rate over the last 100 episodes against the in-game AI",
         fig_path=path.splitext(__file__)[0],
         exp_factor=0.9,
         xlabel="Time step",

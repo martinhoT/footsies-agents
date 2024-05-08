@@ -14,7 +14,10 @@ from main import main
 from dataclasses import replace
 from stable_baselines3.common.base_class import BaseAlgorithm
 from gymnasium import Env
+import logging
 
+
+LOGGER = logging.getLogger("scripts.evaluation.data_collectors")
 
 AgentCustom = FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentBase | BaseAlgorithm]
 
@@ -26,6 +29,9 @@ class AgentCustomRun:
 
 
 def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], observer_type: type[Observer], seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
+    # Halve the number of processes since there are technically going to be two processes per run: the agent and the game
+    processes //= 2
+
     dfs: dict[str, pd.DataFrame] = {}
 
     # `None` means all seeds are missing, and so a new dataframe has to be created
@@ -74,7 +80,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
         i = 0
         for run_name, missing_seeds in missing.items():
             missing_seeds_n = len(missing_seeds) if missing_seeds is not None else seeds
-            run_observers = tuple(o for o in observers_flat[i:i+missing_seeds_n])
+            run_observers = tuple(o for o in observers_flat[i:i+missing_seeds_n] if o is not None)
             observers.append(run_observers)
             i += missing_seeds_n
 
@@ -121,6 +127,9 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
 
 
 def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
+    # Halve the number of processes since there are technically going to be two processes per run: the agent and the game
+    processes //= 2
+    
     missing: dict[str, list[tuple[str, int]]] = {}
     for run_name in runs:
         for seed in range(seeds):
@@ -223,14 +232,14 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
                     args.append(a)
 
             observers_flat: list[Observer] = pool.starmap(dataset_run_partial, args)
-        
+
         # Batch the observers according to the run they belong to
 
         observers: list[tuple[Observer, ...]] = []
         i = 0
         for run_name, missing_seeds in missing.items():
             missing_seeds_n = len(missing_seeds) if missing_seeds is not None else seeds
-            run_observers = tuple(o for o in observers_flat[i:i+missing_seeds_n])
+            run_observers = tuple(o for o in observers_flat[i:i+missing_seeds_n] if o is not None)
             observers.append(run_observers)
             i += missing_seeds_n
 

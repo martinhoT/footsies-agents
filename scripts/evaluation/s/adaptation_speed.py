@@ -102,7 +102,7 @@ class EnoughFightingObserver(WinRateObserver):
 def main(
     seeds: int = 10,
     timesteps: int = int(1e6),
-    processes: int = 4,
+    processes: int = 12,
     y: bool = False,
     small: bool = False,
 ):
