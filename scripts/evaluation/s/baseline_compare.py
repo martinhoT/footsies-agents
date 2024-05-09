@@ -1,7 +1,7 @@
 from os import path
-from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustomRun
+from scripts.evaluation.data_collectors import get_data_custom_loop
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.custom_loop import WinRateObserver
+from scripts.evaluation.custom_loop import WinRateObserver, AgentCustomRun
 from typing import Any, Callable
 from scripts.tuning.sb3_a2c import create_model_from_parameters as create_a2c_with_parameters
 from scripts.tuning.sb3_dqn import create_model_from_parameters as create_dqn_with_parameters

@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 
-def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str, exp_factor: float = 0.9, xlabel: str | None = None, ylabel: str | None = None, run_name_mapping: dict[str, str] | None = None, attr_name: str = "Val"):
+def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str | None, exp_factor: float = 0.9, xlabel: str | None = None, ylabel: str | None = None, run_name_mapping: dict[str, str] | None = None, attr_name: str = "Val"):
     # Compact columns names (mean, std, mean exp, std exp)
     c_m = f"{attr_name}Mean"
     c_s = f"{attr_name}Std"
@@ -26,5 +26,7 @@ def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str, exp_facto
         plt.xlabel(xlabel)
     if ylabel is not None:
         plt.ylabel(ylabel)
-    plt.savefig(fig_path)
-    plt.clf()
+    
+    if fig_path is not None:
+        plt.savefig(fig_path)
+        plt.clf()

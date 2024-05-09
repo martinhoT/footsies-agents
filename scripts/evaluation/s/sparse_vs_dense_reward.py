@@ -29,7 +29,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     plot_data(
         dfs=dfs,
         title="Win rate over the last 100 episodes against the in-game AI",
-        fig_path=path.splitext(__file__)[0],
+        fig_path=path.splitext(__file__)[0] + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Win rate",

@@ -36,9 +36,10 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
     "action_masking":                       action_masking,
     "actor_entropy_coef":                   actor_entropy_coef,
-    #"adaptation_speed":                     adaptation_speed,
+    "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
+    "baseline_compare":                     baseline_compare,   # BUG: the training hangs for the agent at the end for some reason
     "critic_opponent_update_style":         critic_opponent_update_style,
     "consider_opponent_actions":            consider_opponent_actions,
     "discount_factor":                      discount_factor,
@@ -55,13 +56,16 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "transfer_learning":                    transfer_learning,
     "zero_sum":                             zero_sum,
     # Put self-play as the last one since it's the one that takes the longest to execute
-    "self_play":                            self_play,
-    "baseline_compare":                     baseline_compare,   # BUG: the training hangs for the agent at the end for some reason
+    #"self_play":                            self_play,
 }
 
 
-def main(seeds: int = 10, processes: int = 4):
-    for name, script in EVALUATIONS.items():
+def main(seeds: int = 10, processes: int = 12, reverse: bool = False):
+    evals = EVALUATIONS.items()
+    if reverse:
+        evals = reversed(evals)
+
+    for name, script in evals:
         print("-" * 50)
         print(f"{'RUNNING ' + name:^50}")
         print("-" * 50)

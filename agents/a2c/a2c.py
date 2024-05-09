@@ -934,3 +934,19 @@ class A2CQLearner(A2CLearnerBase):
     @learn_critic.setter
     def learn_critic(self, value: bool):
         self._learn_critic = value
+
+    @property
+    def agent_update_style(self) -> UpdateStyle:
+        return self._agent_update_style
+
+    @agent_update_style.setter
+    def agent_update_style(self, value: UpdateStyle):
+        self._agent_update_style = value
+    
+    @property
+    def opponent_update_style(self) -> UpdateStyle:
+        return self._opponent_update_style
+    
+    @opponent_update_style.setter
+    def opponent_update_style(self, value: UpdateStyle):
+        self._opponent_update_style = value

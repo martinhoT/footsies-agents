@@ -4,9 +4,9 @@ from models import to_
 from copy import deepcopy
 from os import path
 from scripts.evaluation.utils import create_eval_env
-from scripts.evaluation.custom_loop import WinRateObserver
+from scripts.evaluation.custom_loop import WinRateObserver, AgentCustomRun
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustomRun
+from scripts.evaluation.data_collectors import get_data_custom_loop
 from gymnasium.spaces import Discrete
 from typing import cast
 
@@ -62,7 +62,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
         title="Win rate over the last 100 episodes",
         fig_path=result_path,
         exp_factor=0.9,
-        xlabel="Episode",
+        xlabel="Time step",
         ylabel="Win rate",
         run_name_mapping={
             "control": "No learned Q-function",

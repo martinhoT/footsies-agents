@@ -1,31 +1,20 @@
 import pandas as pd
 import multiprocessing as mp
-from typing import Callable, Sequence, Mapping
+from typing import Sequence, Mapping
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
 from agents.game_model.agent import GameModelAgent
 from agents.mimic.agent import MimicAgent
 from args import MainArgs
 from os import path
-from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run, PreCustomLoop
-from dataclasses import dataclass
+from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run, AgentCustomRun
 from functools import partial
 from main import main
 from dataclasses import replace
-from stable_baselines3.common.base_class import BaseAlgorithm
-from gymnasium import Env
 import logging
 
 
 LOGGER = logging.getLogger("scripts.evaluation.data_collectors")
-
-AgentCustom = FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentBase | BaseAlgorithm]
-
-@dataclass
-class AgentCustomRun:
-    agent:      AgentCustom
-    opponent:   Callable[[dict, dict], tuple[bool, bool, bool]] | None
-    pre_loop:   PreCustomLoop | None = None
 
 
 def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], observer_type: type[Observer], seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
@@ -61,7 +50,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
         with mp.Pool(processes=processes) as pool:
             custom_loop_partial = partial(custom_loop, timesteps=timesteps)
 
-            args: list[tuple[AgentCustom, str, int, type[Observer], Callable[[dict, dict], tuple[bool, bool, bool]] | None, int, PreCustomLoop | None]] = []
+            args: list[tuple[AgentCustomRun, str, int, type[Observer], int]] = []
             for i, (run_name, missing_seeds) in enumerate(missing.items()):
                 run_args = runs[run_name]
 
@@ -69,7 +58,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
                     missing_seeds = list(range(seeds))
 
                 for seed in missing_seeds:
-                    a = (run_args.agent, run_name, i * seeds + seed, observer_type, run_args.opponent, seed, run_args.pre_loop)
+                    a = (run_args, run_name, i * seeds + seed, observer_type, seed)
                     args.append(a)            
 
             observers_flat: list[Observer] = pool.starmap(custom_loop_partial, args)
@@ -113,7 +102,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
 
         for run_name in missing:
             df = dfs[run_name]
-            df.to_csv(f"{result_path}_{run_name}.csv")
+            df.to_csv(f"{result_path}_{run_name}.csv", index=False)
     
     # Calculate aggregations according to the seeds
 
@@ -126,7 +115,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
     return dfs
 
 
-def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
+def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False, data_cols: Sequence[int] = (0, 1)) -> dict[str, pd.DataFrame] | None:
     # Halve the number of processes since there are technically going to be two processes per run: the agent and the game
     processes //= 2
     
@@ -178,7 +167,11 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
 
         for seed in range(seeds):
             data_path = path.join("runs", f"eval_{run_name}_S{seed}", f"{data}.csv")
-            d = pd.read_csv(data_path, names=["Idx", "Val"])
+            d = pd.read_csv(
+                data_path,
+                names=["Idx", "Val"],
+                usecols=data_cols # type: ignore
+            )
             df["Idx"] = d["Idx"]
             df[f"Val{seed}"] = d["Val"]
         
@@ -272,7 +265,7 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
 
         for run_name in missing:
             df = dfs[run_name]
-            df.to_csv(f"{result_path}_{run_name}.csv")
+            df.to_csv(f"{result_path}_{run_name}.csv", index=False)
     
     # Calculate aggregations according to the seeds
 

@@ -117,7 +117,7 @@ class CurriculumManager(OpponentManager):
                 self._episode,
             )
         if self._csv_file_writer is not None:
-            self._csv_file_writer.writerow((self._episode, win_rate))
+            self._csv_file_writer.writerow((self._episode, win_rate, int(opponent_change)))
 
         return opponent_change
 

@@ -78,13 +78,12 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
         "reaction_correction_skippers":     "Multiple models"
     })
 
-    ax = sns.boxplot(
-        data=merged_df,
-
-    )
+    ax = sns.boxplot(merged_df)
+    ax = sns.violinplot()
     ax.set_title("Interaction time against the in-game AI")
     ax.set_xlabel("Model")
-    ax.set_ylabel("Time (ns)")
+    ax.set_ylabel("Time (s)")
+    ax.hlines(0.016, 0, 1, colors="red", linestyles="dashed", label="Reaction hard limit")
     
     plt.xticks(rotation=30)
     

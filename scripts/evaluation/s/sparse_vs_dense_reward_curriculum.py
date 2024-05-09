@@ -3,8 +3,12 @@ from scripts.evaluation.data_collectors import get_data
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
 from args import CurriculumArgs
+from math import isnan
+import matplotlib.pyplot as plt
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+    result_path = path.splitext(__file__)[0]
+    
     runs_raw = {
         "sparse_reward_curriculum": {"dense_reward": False},
         "dense_reward_curriculum": {"dense_reward": True},
@@ -36,7 +40,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     plot_data(
         dfs=dfs,
         title="Win rate over the last 100 episodes against the curriculum",
-        fig_path=path.splitext(__file__)[0],
+        fig_path=None,
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Win rate",
@@ -45,6 +49,29 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
             "dense_reward_curriculum":     "Dense reward",
         }
     )
+
+    # Plot vertical lines where opponent transitions occurred
+
+    dfs_transitions = get_data(
+        data="performancewin_rate_against_current_curriculum_opponent",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+        data_cols=(0, 2),
+    )
+
+    if dfs_transitions is None:
+        return
+
+    ax = plt.gca()
+    for i, (_, df) in enumerate(dfs_transitions.items()):
+        transition_idxs = [df.groupby(f"Val{i}")["Idx"].apply(list)[1] for i in range(seeds)]
+        transitions = [sum(v) / len(v) for v in map(lambda vs: [v for v in vs if not isnan(v)], zip(*transition_idxs))]
+        ax.vlines(transitions, 0, 1, linestyles="dashed", colors=f"C{i}")
+
+    plt.savefig(result_path + "_wr")
+    plt.clf()
 
 if __name__ == "__main__":
     import tyro

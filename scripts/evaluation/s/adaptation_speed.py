@@ -3,9 +3,9 @@ import torch as T
 from os import path
 from agents.base import FootsiesAgentBase
 from scripts.evaluation.utils import create_eval_env
-from scripts.evaluation.data_collectors import get_data_custom_loop, AgentCustomRun
+from scripts.evaluation.data_collectors import get_data_custom_loop
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.custom_loop import WinRateObserver, PreCustomLoop
+from scripts.evaluation.custom_loop import WinRateObserver, PreCustomLoop, AgentCustomRun
 from models import to_
 from itertools import combinations
 from copy import deepcopy
@@ -114,7 +114,7 @@ def main(
 
     agent, _ = to_(
         observation_space_size=dummy_env.observation_space.shape[0],
-        action_space_size=dummy_env.action_space.n,
+        action_space_size=int(dummy_env.action_space.n),
     )
 
     if small:
@@ -193,6 +193,7 @@ def main(
     fig = ax.get_figure()
     assert fig is not None
     fig.savefig(result_path)
+    fig.clear()
 
 if __name__ == "__main__":
     import tyro

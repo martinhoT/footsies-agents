@@ -1,16 +1,11 @@
 from os import path
-from scripts.evaluation.utils import create_eval_env, quick_agent_args, quick_train_args, quick_env_args
+from scripts.evaluation.utils import quick_agent_args, quick_train_args, quick_env_args
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.data_collectors import get_data
-from gymnasium.spaces import Discrete
 from args import SelfPlayArgs
 
 def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: bool = False):
     result_path = path.splitext(__file__)[0]
-
-    dummy_env, _ = create_eval_env()
-    assert dummy_env.observation_space.shape
-    assert isinstance(dummy_env.action_space, Discrete)
 
     runs = {
         "self_play": quick_train_args(
@@ -30,6 +25,8 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
             timesteps=timesteps,
         )
     }
+
+    # Elo
 
     dfs = get_data(
         data="performanceelo",
@@ -52,6 +49,8 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
         run_name_mapping=None,
     )
 
+    # Episode length
+
     dfs = get_data(
         data="episode_length",
         runs=runs,
@@ -70,6 +69,29 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
         exp_factor=0.99,
         xlabel="Episode",
         ylabel="Time steps",
+        run_name_mapping=None,
+    )
+
+    # Episode truncations
+
+    dfs = get_data(
+        data="episode_truncations",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+    
+    plot_data(
+        dfs=dfs,
+        title="Episode truncations during self-play",
+        fig_path=result_path + "_truncations",
+        exp_factor=0.99,
+        xlabel="Episode",
+        ylabel="Truncation probability",
         run_name_mapping=None,
     )
 

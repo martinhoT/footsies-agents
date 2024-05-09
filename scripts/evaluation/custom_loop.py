@@ -2,7 +2,7 @@ import random
 import torch as T
 import multiprocessing as mp
 from collections import deque
-from typing import Callable, TypeVar
+from typing import Callable, TypeVar, Any
 from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
 from tqdm import trange, tqdm
@@ -17,6 +17,8 @@ from stable_baselines3.common.callbacks import BaseCallback
 from abc import ABC, abstractmethod
 from typing import Protocol
 from footsies_gym.envs.footsies import FootsiesEnv
+from dataclasses import dataclass
+from args import EnvArgs
 import logging
 
 
@@ -164,31 +166,41 @@ class PreCustomLoop(Protocol):
     def __call__(self, agent: FootsiesAgentBase | BaseAlgorithm, env: Env, footsies_env: FootsiesEnv, seed: int | None) -> None:
         ...
 
+AgentCustom = FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentBase | BaseAlgorithm]
+
+@dataclass
+class AgentCustomRun:
+    agent:          AgentCustom
+    opponent:       Callable[[dict, dict], tuple[bool, bool, bool]] | None
+    env_args:       EnvArgs | None = None
+    pre_loop:       PreCustomLoop | None = None
+    """This is a loop that is run before the main one, but on which data won't be collected"""
+
 
 O = TypeVar("O", bound=Observer)
 
 def custom_loop(
-    agent: FootsiesAgentBase | BaseAlgorithm | Callable[[Env], FootsiesAgentBase | BaseAlgorithm],
+    run: AgentCustomRun,
     label: str,
     id_: int,
     observer_type: type[O],
-    opponent: Callable[[dict, dict], tuple[bool, bool, bool]] | None = None,
     initial_seed: int | None = 0,
-    pre_loop: PreCustomLoop | None = None, # this is a loop that is run before the main one, but on which data won't be collected
     timesteps: int = int(1e6),
 ) -> O:
 
     port_start = 11000 + 25 * id_
     port_stop = 11000 + 25 * (id_ + 1)
-    env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop, use_custom_opponent=True)
+    env, footsies_env = create_eval_env(port_start=port_start, port_stop=port_stop, use_custom_opponent=True, env_args=run.env_args)
 
-    if isinstance(agent, Callable):
-        agent = agent(env)
+    if isinstance(run.agent, Callable):
+        agent = run.agent(env)
+    else:
+        agent = run.agent
 
-    if pre_loop is not None:
-        pre_loop(agent, env, footsies_env, initial_seed)
+    if run.pre_loop is not None:
+        run.pre_loop(agent, env, footsies_env, initial_seed)
 
-    footsies_env.set_opponent(opponent)
+    footsies_env.set_opponent(run.opponent)
     observer = observer_type()
 
     if isinstance(agent, FootsiesAgentBase):
@@ -231,7 +243,7 @@ def custom_loop_footsies(
 
     seed = initial_seed
     terminated, truncated = True, True
-    for step in trange(timesteps, desc=f"{label} ({id_})", unit="step", position=process_id, dynamic_ncols=True, colour="#80e4ed"):
+    for step in trange(timesteps, desc=f"{label} ({id_})", unit="step", position=process_id, dynamic_ncols=True, colour="#f5426c"):
         if (terminated or truncated):
             obs, info = env.reset(seed=seed)
             terminated, truncated = False, False

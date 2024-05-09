@@ -13,6 +13,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k, model="to", kwargs={
+            "critic_agent_update": "q_learning", # dramatize it
             "critic_opponent_update": "q_learning", # dramatize it
             "critic_target_update_rate": update_rate,
         }),

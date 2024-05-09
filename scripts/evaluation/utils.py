@@ -14,10 +14,14 @@ def create_eval_env(
     port_start: int = 5000,
     port_stop: int | None = None,
     use_custom_opponent: bool = False,
+    env_args: EnvArgs | None = None,
 ) -> tuple[Env[torch.Tensor, int], FootsiesEnv]:
     
     ports = FootsiesEnv.find_ports(start=port_start, stop=port_stop)
-    env_args = quick_env_args(kwargs=ports)
+    if env_args is None:
+        env_args = quick_env_args(kwargs=ports)
+    else:
+        env_args.kwargs.update(ports)
 
     env = create_env(env_args, use_custom_opponent=use_custom_opponent)
     footsies_env = cast(FootsiesEnv, env.unwrapped)
