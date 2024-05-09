@@ -8,7 +8,7 @@ from agents.mimic.agent import MimicAgent
 from args import MainArgs
 from os import path
 from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run, AgentCustomRun
-from functools import partial
+from functools import partial, reduce
 from main import main
 from dataclasses import replace
 import logging
@@ -162,23 +162,22 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
     
     dfs: dict[str, pd.DataFrame] = {}
     for run_name in runs:
-        df = pd.DataFrame([], columns=["Idx", "ValMean", "ValStd"])
-        seed_columns = [f"Val{seed}" for seed in range(seeds)]
-
-        for seed in range(seeds):
-            data_path = path.join("runs", f"eval_{run_name}_S{seed}", f"{data}.csv")
-            d = pd.read_csv(
-                data_path,
-                names=["Idx", "Val"],
+        ds = [
+            pd.read_csv(
+                path.join("runs", f"eval_{run_name}_S{seed}", f"{data}.csv"),
+                names=["Idx", f"Val{seed}"],
                 usecols=data_cols # type: ignore
-            )
-            df["Idx"] = d["Idx"]
-            df[f"Val{seed}"] = d["Val"]
-        
-        df["ValMean"] = df[seed_columns].mean(axis=1)
-        df["ValStd"] = df[seed_columns].std(axis=1)
+            ) for seed in range(seeds)
+        ]
 
-        dfs[run_name] = df
+        merge_method = partial(pd.merge, how="outer", on="Idx")
+        merged_df = reduce(merge_method, ds)
+        
+        seed_columns = [f"Val{seed}" for seed in range(seeds)]
+        merged_df["ValMean"] = merged_df[seed_columns].mean(axis=1)
+        merged_df["ValStd"] = merged_df[seed_columns].std(axis=1)
+
+        dfs[run_name] = merged_df
     
     return dfs
 
