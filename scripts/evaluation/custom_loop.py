@@ -19,6 +19,7 @@ from typing import Protocol
 from footsies_gym.envs.footsies import FootsiesEnv
 from dataclasses import dataclass
 from args import EnvArgs
+from copy import deepcopy
 import logging
 
 
@@ -195,7 +196,9 @@ def custom_loop(
     if isinstance(run.agent, Callable):
         agent = run.agent(env)
     else:
-        agent = run.agent
+        # The 'run.agent' will be shared between instances of the same run with different seeds!
+        # We need to make a distinct copy here.
+        agent = deepcopy(run.agent)
 
     if run.pre_loop is not None:
         run.pre_loop(agent, env, footsies_env, initial_seed)
@@ -299,6 +302,10 @@ def dataset_run(
     epochs: int = 100,
     shuffle: bool = True,
 ) -> O:
+    
+    # Instantiate a distinct copy of the agent, to avoid it being shared with other runs (e.g. a run with different seeds).
+    agent = deepcopy(agent)
+
     if not shuffle and seed is not None:
         raise ValueError("using a seed without shuffling is inconsequential, if no shuffling is to be performed please set the seed to `None`")
 
