@@ -4,10 +4,8 @@ from os import path
 from agents.base import FootsiesAgentBase
 from scripts.evaluation.utils import create_eval_env
 from scripts.evaluation.data_collectors import get_data_custom_loop
-from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.custom_loop import WinRateObserver, PreCustomLoop, AgentCustomRun
 from models import to_
-from itertools import combinations
 from copy import deepcopy
 from opponents.curriculum import Idle, Backer, NSpammer, BSpammer, NSpecialSpammer, BSpecialSpammer, WhiffPunisher, CurriculumOpponent
 from typing import cast, Callable, Literal
@@ -74,37 +72,13 @@ def train_agent_against_opponent(agent: TheOneAgent, env: Env, footsies_env: Foo
         obs, info = next_obs, next_info
 
 
-class EnoughFightingObserver(WinRateObserver):
-    def __init__(self, last: int = 100, win_rate_threshold: float = 0.7, win_rate_threshold_over: int = 20):
-        super().__init__(last=last)
-        self._win_rate_threshold = win_rate_threshold
-        self._win_rate_threshold_over = win_rate_threshold_over # we need to count the win rate over some episodes or else it doesn't make sense (imagine just winning the first game -> 100% win rate instantly)
-        self._step_counter = 0
-        self._episodes = 0
-    
-    def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase):
-        super().update(step, obs, next_obs, reward, terminated, truncated, info, next_info, agent)
-        self._step_counter = step + 1
-        self._episodes += terminated or truncated
-
-    @property
-    def data(self) -> tuple[list[int], tuple[list[float], ...]]:
-        return [0], ([self._step_counter],)
-
-    @staticmethod
-    def attributes() -> tuple[str, ...]:
-        return ("time_taken",)
-
-    def enough(self) -> bool:
-        return self.win_rate > self._win_rate_threshold and self._episodes > self._win_rate_threshold_over
-
-
 def main(
     seeds: int = 10,
     timesteps: int = int(1e6),
     processes: int = 12,
     y: bool = False,
     small: bool = False,
+    wr_thresh: float = 0.7,
 ):
     result_path = path.splitext(__file__)[0]
 
@@ -155,7 +129,7 @@ def main(
     dfs = get_data_custom_loop(
         result_path=result_path,
         runs=runs,
-        observer_type=EnoughFightingObserver,
+        observer_type=WinRateObserver,
         seeds=seeds,
         timesteps=timesteps,
         processes=processes,
@@ -171,14 +145,22 @@ def main(
         training_opponent_label, evaluation_opponent_label = name.split("_to_")
         row = opponent_labels.index(training_opponent_label)
         col = opponent_labels.index(evaluation_opponent_label) - 1
-        assert df["time_takenMean"].size == 1
-        mtx[row, col] = df["time_takenMean"][0] / timesteps
+        
+        time_taken = timesteps
+        # TODO: is this the same as taking the mean of the indices at the individual seeds?
+        for idx, row in df.iterrows():
+            if row["win_rateMean"] > wr_thresh:
+                assert isinstance(idx, int)
+                time_taken = idx
+                break
+        
+        mtx[row, col] = time_taken / timesteps
 
     # Plot the heatmap
     ax = sns.heatmap(mtx,
         vmin=0.0,
         vmax=1.0,
-        cmap="mako", # or "crest" or "viridis"
+        cmap="mako_r", # or "crest" or "viridis"
         annot=True,
         fmt=".2f",
         cbar=True,
@@ -193,6 +175,7 @@ def main(
     fig = ax.get_figure()
     assert fig is not None
     fig.savefig(result_path)
+    fig.tight_layout()
     fig.clear()
 
 if __name__ == "__main__":
