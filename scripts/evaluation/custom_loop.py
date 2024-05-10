@@ -1,8 +1,9 @@
 import random
 import torch as T
+import pandas as pd
 import multiprocessing as mp
 from collections import deque
-from typing import Callable, TypeVar, Any
+from typing import Callable, TypeVar, Sequence
 from agents.base import FootsiesAgentBase
 from agents.action import ActionMap
 from tqdm import trange, tqdm
@@ -41,6 +42,16 @@ class Observer(ABC):
 
     def enough(self) -> bool:
         return False
+
+    def df(self, attr_suffix: str = "") -> pd.DataFrame:
+        idxs, attribute_values = self.data
+
+        data: dict[str, Sequence[int | float]] = {"Idx": idxs}
+
+        for attribute, values in zip(self.attributes(), attribute_values):
+            data[attribute + attr_suffix] = values
+
+        return pd.DataFrame(data)
 
 
 class ObserverSB3Callback(BaseCallback):

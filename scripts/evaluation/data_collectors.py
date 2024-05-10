@@ -76,27 +76,21 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
         # Create dataframes with the data
 
         for run_observers, (run_name, missing_seeds) in zip(observers, missing.items()):
-            # Create the dataframe from scratch
+            # If None, then we want to consider all seeds
             if missing_seeds is None:
-                # The indices should be the same among all seeds, so we can just get from the first observer
-                indices, _ = run_observers[0].data
+                missing_seeds = list(range(seeds))
+            
+            # If there is already a dataframe, then merge the new ones with it
+            dfs_to_merge = []
+            if run_name in dfs:
+                dfs_to_merge.append(dfs[run_name])
 
-                data: dict[str, Sequence[int | float]] = {"Idx": indices}
-                for observer, seed in zip(run_observers, range(seeds)):
-                    _, values = observer.data
-                    for attribute, value in zip(observer.attributes(), values):
-                        data[f"{attribute}{seed}"] = value
+            dfs_to_merge.extend(o.df(str(seed)) for o, seed in zip(run_observers, missing_seeds, strict=True))
 
-                df = pd.DataFrame(data)
-                dfs[run_name] = df
+            merge_method = partial(pd.merge, how="outer", on="Idx")
+            merged_df = reduce(merge_method, dfs_to_merge)
 
-            # Otherwise, populate existing dataframe
-            else:
-                df = dfs[run_name]
-                for observer, seed in zip(run_observers, missing_seeds):
-                    _, values = observer.data
-                    for attribute, value in zip(observer.attributes(), values):
-                        df[f"{attribute}{seed}"] = value
+            dfs[run_name] = merged_df
 
         # Save the data for posterity
 
@@ -238,27 +232,21 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
         # Create dataframes with the data
 
         for run_observers, (run_name, missing_seeds) in zip(observers, missing.items()):
-            # Create the dataframe from scratch
+            # If None, then we want to consider all seeds
             if missing_seeds is None:
-                # The indices should be the same among all seeds, so we can just get from the first observer
-                indices, _ = run_observers[0].data
+                missing_seeds = list(range(seeds))
+            
+            # If there is already a dataframe, then merge the new ones with it
+            dfs_to_merge = []
+            if run_name in dfs:
+                dfs_to_merge.append(dfs[run_name])
 
-                data: dict[str, Sequence[int | float]] = {"Idx": indices}
-                for observer, seed in zip(run_observers, range(seeds)):
-                    _, values = observer.data
-                    for attribute, value in zip(observer.attributes(), values):
-                        data[f"{attribute}{seed}"] = value
+            dfs_to_merge.extend(o.df(str(seed)) for o, seed in zip(run_observers, missing_seeds, strict=True))
 
-                df = pd.DataFrame(data)
-                dfs[run_name] = df
+            merge_method = partial(pd.merge, how="outer", on="Idx")
+            merged_df = reduce(merge_method, dfs_to_merge)
 
-            # Otherwise, populate existing dataframe
-            else:
-                df = dfs[run_name]
-                for observer, seed in zip(run_observers, missing_seeds):
-                    _, values = observer.data
-                    for attribute, value in zip(observer.attributes(), values):
-                        df[f"{attribute}{seed}"] = value
+            dfs[run_name] = merged_df
 
         # Save the data for posterity
 
