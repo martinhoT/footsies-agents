@@ -1,3 +1,4 @@
+import os
 import random
 import torch as T
 import pandas as pd
@@ -196,7 +197,7 @@ def custom_loop(
     label: str,
     id_: int,
     observer_type: type[O],
-    initial_seed: int | None = 0,
+    seed: int | None = 0,
     timesteps: int = int(1e6),
 ) -> O:
 
@@ -212,7 +213,7 @@ def custom_loop(
         agent = deepcopy(run.agent)
 
     if run.pre_loop is not None:
-        run.pre_loop(agent, env, footsies_env, initial_seed)
+        run.pre_loop(agent, env, footsies_env, seed)
 
     footsies_env.set_opponent(run.opponent)
     observer = observer_type()
@@ -224,7 +225,7 @@ def custom_loop(
             label=label,
             id_=id_,
             observer=observer,
-            initial_seed=initial_seed,
+            initial_seed=seed,
             timesteps=timesteps,
         )
     

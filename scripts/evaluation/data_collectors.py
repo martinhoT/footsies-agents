@@ -1,6 +1,7 @@
+import os
 import pandas as pd
 import multiprocessing as mp
-from typing import Sequence, Mapping
+from typing import Sequence, Mapping, Callable
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
 from agents.game_model.agent import GameModelAgent
@@ -11,10 +12,49 @@ from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run, A
 from functools import partial, reduce
 from main import main
 from dataclasses import replace
-import logging
+
+# NOTE: I don't like these wrappers...
+
+# Wrapper on custom_loop
+def custom_loop_df(
+    save_path: str,
+    run: AgentCustomRun,
+    label: str,
+    id_: int,
+    observer_type: type[Observer],
+    seed: int | None = 0,
+    timesteps: int = int(1e6),
+) -> pd.DataFrame:
+    
+    if os.path.exists(save_path):
+        return pd.read_csv(save_path)
+
+    observer = custom_loop(run, label, id_, observer_type, seed, timesteps)
+    df = observer.df(str(seed))
+    df.to_csv(save_path, header=df.columns.tolist(), index=False)
+    return df
 
 
-LOGGER = logging.getLogger("scripts.evaluation.data_collectors")
+# Wrapper on dataset_run
+def dataset_run_df(
+    save_path: str,
+    agent: MimicAgent | GameModelAgent,
+    label: str,
+    observer_type: type[Observer],
+    seed: int | None = 0,
+    epochs: int = 100,
+    shuffle: bool = True,
+) -> pd.DataFrame:
+    
+    if os.path.exists(save_path):
+        names = ["Idx"] + list(observer_type.attributes())
+        df = pd.read_csv(save_path, names=names)
+        return df
+
+    observer = dataset_run(agent, label, observer_type, seed, epochs, shuffle)
+    df = observer.df(str(seed))
+    df.to_csv(save_path, index=False)
+    return df
 
 
 def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], observer_type: type[Observer], seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
@@ -48,9 +88,9 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
         # Collect the data
 
         with mp.Pool(processes=processes) as pool:
-            custom_loop_partial = partial(custom_loop, timesteps=timesteps)
+            custom_loop_partial = partial(custom_loop_df, timesteps=timesteps)
 
-            args: list[tuple[AgentCustomRun, str, int, type[Observer], int]] = []
+            args: list[tuple[str, AgentCustomRun, str, int, type[Observer], int]] = []
             for i, (run_name, missing_seeds) in enumerate(missing.items()):
                 run_args = runs[run_name]
 
@@ -58,41 +98,38 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
                     missing_seeds = list(range(seeds))
 
                 for seed in missing_seeds:
-                    a = (run_args, run_name, i * seeds + seed, observer_type, seed)
-                    args.append(a)            
+                    save_path = f"{result_path}_{run_name}_S{seed}_O.csv"
+                    id_ = i * seeds + seed
+                    a = (save_path, run_args, run_name, id_, observer_type, seed)
+                    args.append(a)
 
-            observers_flat: list[Observer] = pool.starmap(custom_loop_partial, args)
+            dfs_flat: list[pd.DataFrame] = pool.starmap(custom_loop_partial, args)
         
-        # Batch the observers according to the run they belong to
+        # Create/update the dataframes with the observer data
 
-        observers: list[tuple[Observer, ...]] = []
         i = 0
         for run_name, missing_seeds in missing.items():
-            missing_seeds_n = len(missing_seeds) if missing_seeds is not None else seeds
-            run_observers = tuple(o for o in observers_flat[i:i+missing_seeds_n] if o is not None)
-            observers.append(run_observers)
-            i += missing_seeds_n
-
-        # Create dataframes with the data
-
-        for run_observers, (run_name, missing_seeds) in zip(observers, missing.items()):
             # If None, then we want to consider all seeds
             if missing_seeds is None:
                 missing_seeds = list(range(seeds))
-            
+
+            # Get the dataframes pertaining to this run only
+            missing_seeds_n = len(missing_seeds)
+            dfs_to_merge = dfs_flat[i:i+missing_seeds_n]
+            i += missing_seeds_n
+
             # If there is already a dataframe, then merge the new ones with it
-            dfs_to_merge = []
             if run_name in dfs:
                 dfs_to_merge.append(dfs[run_name])
-
-            dfs_to_merge.extend(o.df(str(seed)) for o, seed in zip(run_observers, missing_seeds, strict=True))
-
+            
+            # Perform the merge...
             merge_method = partial(pd.merge, how="outer", on="Idx")
             merged_df = reduce(merge_method, dfs_to_merge)
 
+            # ... and store
             dfs[run_name] = merged_df
 
-        # Save the data for posterity
+        # Save the merged data for posterity. At this point the individual observer data is useless
 
         for run_name in missing:
             df = dfs[run_name]
@@ -204,9 +241,9 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
         # Collect the data
 
         with mp.Pool(processes=processes) as pool:
-            dataset_run_partial = partial(dataset_run, epochs=epochs, shuffle=shuffle)
+            dataset_run_partial = partial(dataset_run_df, epochs=epochs, shuffle=shuffle)
 
-            args: list[tuple[FootsiesAgentBase, str, type[Observer], int]] = []
+            args: list[tuple[str, FootsiesAgentBase, str, type[Observer], int]] = []
             for i, (run_name, missing_seeds) in enumerate(missing.items()):
                 agent = runs[run_name]
 
@@ -214,38 +251,34 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
                     missing_seeds = list(range(seeds))
 
                 for seed in missing_seeds:
-                    a = (agent, run_name, observer_type, seed)
+                    save_path = f"{result_path}_{run_name}_S{seed}_O.csv"
+                    a = (save_path, agent, run_name, observer_type, seed)
                     args.append(a)
 
-            observers_flat: list[Observer] = pool.starmap(dataset_run_partial, args)
+            dfs_flat: list[pd.DataFrame] = pool.starmap(dataset_run_partial, args)
 
-        # Batch the observers according to the run they belong to
+        # Create/update the dataframes with the observer data
 
-        observers: list[tuple[Observer, ...]] = []
         i = 0
         for run_name, missing_seeds in missing.items():
-            missing_seeds_n = len(missing_seeds) if missing_seeds is not None else seeds
-            run_observers = tuple(o for o in observers_flat[i:i+missing_seeds_n] if o is not None)
-            observers.append(run_observers)
-            i += missing_seeds_n
-
-        # Create dataframes with the data
-
-        for run_observers, (run_name, missing_seeds) in zip(observers, missing.items()):
             # If None, then we want to consider all seeds
             if missing_seeds is None:
                 missing_seeds = list(range(seeds))
-            
+
+            # Get the dataframes pertaining to this run only
+            missing_seeds_n = len(missing_seeds)
+            dfs_to_merge = dfs_flat[i:i+missing_seeds_n]
+            i += missing_seeds_n
+
             # If there is already a dataframe, then merge the new ones with it
-            dfs_to_merge = []
             if run_name in dfs:
                 dfs_to_merge.append(dfs[run_name])
-
-            dfs_to_merge.extend(o.df(str(seed)) for o, seed in zip(run_observers, missing_seeds, strict=True))
-
+            
+            # Perform the merge...
             merge_method = partial(pd.merge, how="outer", on="Idx")
             merged_df = reduce(merge_method, dfs_to_merge)
 
+            # ... and store
             dfs[run_name] = merged_df
 
         # Save the data for posterity
