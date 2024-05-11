@@ -6,7 +6,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     result_basename = path.splitext(__file__)[0] + name_suffix
 
     run_name_mapping = {
@@ -62,6 +62,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     if dfs is None:
         return
 
+    # Sort the values, there seemed to be some issue with S0
+    for df in dfs.values():
+        df.sort_values("Idx", inplace=True, ascending=True)
+
     plot_data(
         dfs=dfs,
         title="Opponent model loss against the in-game AI",
@@ -112,7 +116,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             title=f"Opponent model loss on the dataset ({player.upper()})",
             fig_path=f"{result_basename}_loss_dataset_{player}",
             exp_factor=0.9,
-            xlabel="Time step",
+            xlabel="Iteration",
             ylabel="Loss",
             run_name_mapping={"dataset_" + k: v for k, v in run_name_mapping.items()},
             attr_name=f"{player}_loss",
