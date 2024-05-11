@@ -109,10 +109,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             exp_factor=0.9,
             xlabel="Time step",
             ylabel="Loss",
-            run_name_mapping={
-                "dataset_no_dynamic_weights":   "No dynamic weights",
-                "dataset_yes_dynamic_weights":  "Dynamic weights",
-            },
+            run_name_mapping={"dataset_" + k: v for k, v in run_name_mapping},
             attr_name=f"{player}_loss",
         )
 

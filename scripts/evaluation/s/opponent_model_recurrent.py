@@ -79,8 +79,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes:
     # Losses on dataset
     runs_dataset_raw = {
         "dataset_opp_normal": {"recurrent": False},
-        "dataset_opp_recurrent_hit": {"recurrent": True, "reset_context_at": "hit"},
         "dataset_opp_recurrent_end": {"recurrent": True, "reset_context_at": "end"},
+        "dataset_opp_recurrent_hit": {"recurrent": True, "reset_context_at": "hit"},
         "dataset_opp_recurrent_neutral": {"recurrent": True, "reset_context_at": "neutral"},
     }
     

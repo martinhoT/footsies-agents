@@ -100,6 +100,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
 
     plot_add_curriculum_transitions(
         dfs_transitions=dfs_transitions,
+        seeds=seeds,
         fig_path=result_path + "_curriculum_wr",
     )
 

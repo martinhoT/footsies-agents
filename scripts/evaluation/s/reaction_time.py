@@ -29,6 +29,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
         timesteps=timesteps / timesteps_divisor,
     ) for k, (timesteps_divisor, v) in runs_raw.items()}
 
+    # Win rate
+
     dfs = get_data(
         data="win_rate",
         runs=runs,
@@ -57,6 +59,38 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
         }
     )
 
+    # Reaction time
+
+    dfs = get_data(
+        data="trainingreaction_time",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="Reaction time against the in-game AI",
+        fig_path=result_path + "_time",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Reaction time (frames)",
+        run_name_mapping={
+            "reaction_correction_none":         "No correction",
+            "reaction_correction_every_1":      "1-step model",
+            "reaction_correction_every_3":      "3-step model",
+            "reaction_correction_every_5":      "5-step model",
+            "reaction_correction_every_15":     "15-step model",
+            "reaction_correction_skippers":     "Multiple models"
+        }
+    )
+
+    # Act elapsed time
+
     dfs = get_data(
         data="trainingact_elapsed_time_seconds",
         runs=runs,
@@ -83,7 +117,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     ax.set_title("Interaction time against the in-game AI")
     ax.set_xlabel("Model")
     ax.set_ylabel("Time (s)")
-    ax.hlines(0.016, -1, len(runs_raw), colors="red", linestyles="dashed", label="Reaction hard limit")
+    ax.hlines(0.016, -0.5, len(runs_raw) - 0.5, colors="red", linestyles="dashed", label="Reaction hard limit")
     
     plt.xticks(rotation=30)
     
@@ -91,6 +125,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     assert fig is not None
     fig.tight_layout()
     fig.savefig(result_path + "_act")
+    fig.clf()
 
 if __name__ == "__main__":
     import tyro

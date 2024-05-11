@@ -101,6 +101,7 @@ def main(
     load: str | None = None,
     log: str | None = None,
     opponent: Literal["human", "bot", "custom"] = "bot",
+    fast_forward: bool = True,
     include_gm: bool = False,
 ):
     if not custom and not load:
@@ -127,7 +128,7 @@ def main(
         remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
-        fast_forward=opponent != "human",
+        fast_forward=opponent != "human" and fast_forward,
         dense_reward=False,
         log_file="out.log",
         log_file_overwrite=True,

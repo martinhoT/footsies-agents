@@ -235,7 +235,7 @@ class FootsiesDataset:
         random.shuffle(self.episodes)
         self._update_transitions()
 
-    def visualize(self, episode: int):
+    def visualize(self, episode: int = 758):
         """Visualize an episode from the dataset."""
         e = self.episodes[episode]
         
@@ -267,6 +267,7 @@ class FootsiesDataset:
             opponent=opponent,
             log_file="out.log",
             log_file_overwrite=True,
+            **FootsiesEnv.find_ports(11000), # type: ignore
         )
 
         footsies_normalized = FootsiesNormalized(footsies_env)

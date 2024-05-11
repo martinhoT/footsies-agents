@@ -46,7 +46,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
 
     runs_curriculum_raw = {
         "no_consider_opponent_actions_curriculum": {"consider_opponent_at_all": False, "use_opponent_model": False, "rollback": True, "critic_opponent_update": "uniform"},
-        "yes_consider_opponent_actions_curriculum": {"consider_opponent_at_all": True},
+        "yes_consider_opponent_actions_curriculum": {"consider_opponent_at_all": True, "use_opponent_model": False},
     }
     
     runs_curriculum = {k: quick_train_args(

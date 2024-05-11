@@ -76,6 +76,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_add_curriculum_transitions(
         dfs_transitions=dfs_transitions,
+        seeds=seeds,
         fig_path=result_basename + "_wr_curriculum",
     )
 

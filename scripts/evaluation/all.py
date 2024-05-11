@@ -39,7 +39,7 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
-    "baseline_compare":                     baseline_compare,   # BUG: the training hangs for the agent at the end for some reason
+    # "baseline_compare":                     baseline_compare,   # BUG: the training hangs for the agent at the end for some reason
     "critic_opponent_update_style":         critic_opponent_update_style,
     "consider_opponent_actions":            consider_opponent_actions,
     "discount_factor":                      discount_factor,
@@ -56,7 +56,7 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "transfer_learning":                    transfer_learning,
     "zero_sum":                             zero_sum,
     # Put self-play as the last one since it's the one that takes the longest to execute
-    #"self_play":                            self_play,
+    "self_play":                            self_play,
 }
 
 

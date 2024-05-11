@@ -4,6 +4,8 @@ from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+    raise RuntimeError("deprecated test")
+    
     runs_raw = {
         "target_network_0": 0,
         "target_network_100": 100,

@@ -33,13 +33,12 @@ def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str | None, ex
         plt.clf()
 
 
-def plot_add_curriculum_transitions(dfs_transitions: dict[str, pd.DataFrame], fig_path: str | None):
+def plot_add_curriculum_transitions(dfs_transitions: dict[str, pd.DataFrame], seeds: int, fig_path: str | None):
     n = len(dfs_transitions)
     linewidth = 4
 
     ax = plt.gca()
     for i, (_, df) in enumerate(dfs_transitions.items()):
-        seeds = sum(1 for c in df.columns if c.startswith("Val"))
         linestyle = (i * linewidth, (n, (n - 1) * linewidth))
 
         transition_idxs = [df.groupby(f"Val{j}")["Idx"].apply(list)[1] for j in range(seeds)]
