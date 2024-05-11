@@ -36,6 +36,8 @@ class QSumObserver(Observer):
 
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+    raise RuntimeError("deprecated test")
+    
     env, _ = create_eval_env()
     assert env.observation_space.shape
     assert isinstance(env.action_space, Discrete)

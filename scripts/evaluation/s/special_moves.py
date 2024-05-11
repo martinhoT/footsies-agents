@@ -3,7 +3,7 @@ import random
 from os import path
 from scripts.evaluation.data_collectors import get_data, get_data_custom_loop
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args, create_eval_env
+from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
 from scripts.evaluation.custom_loop import WinRateObserver, AgentCustomRun, PreCustomLoop
 from args import FootsiesSimpleActionsArgs, EnvArgs
 from agents.the_one.agent import TheOneAgent

@@ -1,7 +1,7 @@
 from os import path
 from models import mimic_
 from scripts.evaluation.data_collectors import get_data, get_data_dataset
-from scripts.evaluation.plotting import plot_data
+from scripts.evaluation.plotting import plot_data, plot_add_curriculum_transitions
 from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args, create_eval_env
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
@@ -42,7 +42,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     ) for k, v in runs_raw.items()}
 
     dfs = get_data(
-        data="win_rate",
+        data="performancewin_rate_against_current_curriculum_opponent",
         runs=runs_curriculum,
         seeds=seeds,
         processes=processes,
@@ -55,11 +55,28 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     plot_data(
         dfs=dfs,
         title="Win rate over the last 100 episodes against the curriculum",
-        fig_path=result_basename + "_wr_curriculum",
+        fig_path=None,
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Win rate",
         run_name_mapping={k + "_curriculum": v for k, v in run_name_mapping.items()},
+    )
+
+    dfs_transitions = get_data(
+        data="performancewin_rate_against_current_curriculum_opponent",
+        runs=runs_curriculum,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+        data_cols=(0, 2),
+    )
+
+    if dfs_transitions is None:
+        return
+
+    plot_add_curriculum_transitions(
+        dfs_transitions=dfs_transitions,
+        fig_path=result_basename + "_wr_curriculum",
     )
 
     # Win rate on normal agent
@@ -139,13 +156,13 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     if dfs is None:
         return
 
-    for player in ["p1", "p2"]:
+    for player in ("p1", "p2"):
         title_suffix = f" ({player.upper()})"
         attr_name = f"{player}_loss"
 
         plot_data(
             dfs=dfs,
-            title=f"Opponent model loss on the dataset" + title_suffix,
+            title=f"Opponent model loss on the dataset ({player.upper()})",
             fig_path=f"{result_basename}_loss_dataset_{player}",
             exp_factor=0.9,
             xlabel="Time step",
@@ -156,7 +173,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
                 "dataset_entropy_coef_016":   "$\\beta = 0.16$",
                 "dataset_entropy_coef_032":   "$\\beta = 0.32$",
             },
-            attr_name=attr_name,
+            attr_name=f"{player}_loss",
         )
 
 if __name__ == "__main__":

@@ -1,10 +1,8 @@
 from os import path
 from scripts.evaluation.data_collectors import get_data
-from scripts.evaluation.plotting import plot_data
+from scripts.evaluation.plotting import plot_data, plot_add_curriculum_transitions
 from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
 from args import CurriculumArgs
-from math import isnan
-import matplotlib.pyplot as plt
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     result_path = path.splitext(__file__)[0]
@@ -64,14 +62,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     if dfs_transitions is None:
         return
 
-    ax = plt.gca()
-    for i, (_, df) in enumerate(dfs_transitions.items()):
-        transition_idxs = [df.groupby(f"Val{i}")["Idx"].apply(list)[1] for i in range(seeds)]
-        transitions = [sum(v) / len(v) for v in map(lambda vs: [v for v in vs if not isnan(v)], zip(*transition_idxs))]
-        ax.vlines(transitions, 0, 1, linestyles="dashed", colors=f"C{i}")
-
-    plt.savefig(result_path + "_wr")
-    plt.clf()
+    plot_add_curriculum_transitions(
+        dfs_transitions=dfs_transitions,
+        fig_path=result_path + "_wr",
+    )
 
 if __name__ == "__main__":
     import tyro

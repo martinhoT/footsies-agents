@@ -253,6 +253,7 @@ def custom_loop_footsies(
 
     process_id: int = mp.current_process()._identity[0] - 1
 
+    T.set_num_threads(1)
     T.manual_seed(initial_seed)
     random.seed(initial_seed)
 
@@ -306,6 +307,7 @@ def custom_loop_sb3(
     return observer
 
 
+# NOTE: shuffling is done at the level of episodes, not transitions
 def dataset_run(
     agent: MimicAgent | GameModelAgent,
     label: str,
@@ -320,14 +322,22 @@ def dataset_run(
 
     if not shuffle and seed is not None:
         raise ValueError("using a seed without shuffling is inconsequential, if no shuffling is to be performed please set the seed to `None`")
+    
+    # Avoid CPU oversubscription. We only ever use 1 thread per process.
+    # This is important since we don't need to interact with the game, and so the agent is free to learn as fast as it can.
+    # It's better to manage this since this function is meant to be used with multiprocessing.
+    T.set_num_threads(1)
 
     # This is needed in case we are going to shuffle the dataset
     T.manual_seed(seed)
+    random.seed(seed)
 
     process_id: int = mp.current_process()._identity[0] - 1
 
-    dataset = FootsiesTorchDataset(FootsiesDataset.load("footsies-dataset"))
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=shuffle)
+    base_dataset = FootsiesDataset.load("footsies-dataset")
+    base_dataset.shuffle() # this will internally use the seed set in random
+    dataset = FootsiesTorchDataset(base_dataset)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
     observer = observer_type()
 

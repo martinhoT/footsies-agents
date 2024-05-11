@@ -1,5 +1,6 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+from math import isnan
 
 
 def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str | None, exp_factor: float = 0.9, xlabel: str | None = None, ylabel: str | None = None, run_name_mapping: dict[str, str] | None = None, attr_name: str = "Val"):
@@ -27,6 +28,24 @@ def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str | None, ex
     if ylabel is not None:
         plt.ylabel(ylabel)
     
+    if fig_path is not None:
+        plt.savefig(fig_path)
+        plt.clf()
+
+
+def plot_add_curriculum_transitions(dfs_transitions: dict[str, pd.DataFrame], fig_path: str | None):
+    n = len(dfs_transitions)
+    linewidth = 4
+
+    ax = plt.gca()
+    for i, (_, df) in enumerate(dfs_transitions.items()):
+        seeds = sum(1 for c in df.columns if c.startswith("Val"))
+        linestyle = (i * linewidth, (n, (n - 1) * linewidth))
+
+        transition_idxs = [df.groupby(f"Val{j}")["Idx"].apply(list)[1] for j in range(seeds)]
+        transitions = [sum(v) / len(v) for v in map(lambda vs: [v for v in vs if not isnan(v)], zip(*transition_idxs))]
+        ax.vlines(transitions, 0, 1, linestyles=linestyle, colors=f"C{i}")
+
     if fig_path is not None:
         plt.savefig(fig_path)
         plt.clf()

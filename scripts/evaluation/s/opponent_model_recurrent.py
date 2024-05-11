@@ -75,8 +75,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     # Losses on dataset
     runs_dataset_raw = {
         "dataset_opp_normal": {"recurrent": False},
-        "dataset_opp_recurrent_end": {"recurrent": True, "reset_context_at": "end"},
         "dataset_opp_recurrent_hit": {"recurrent": True, "reset_context_at": "hit"},
+        "dataset_opp_recurrent_end": {"recurrent": True, "reset_context_at": "end"},
         "dataset_opp_recurrent_neutral": {"recurrent": True, "reset_context_at": "neutral"},
     }
     
@@ -106,20 +106,17 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     if dfs is None:
         return
     
-    plot_data(
-        dfs=dfs,
-        title=f"Opponent model loss on the dataset",
-        fig_path=f"{result_basename}_loss_dataset",
-        exp_factor=0.9,
-        xlabel="Time step",
-        ylabel="Loss",
-        run_name_mapping={
-            "dataset_normal":               "Non-recurrent",
-            "dataset_recurrent_end":        "Recurrent (end)",
-            "dataset_recurrent_hit":        "Recurrent (hit)",
-            "dataset_recurrent_neutral":    "Recurrent (neutral)"
-        }
-    )
+    for player in ("p1", "p2"):
+        plot_data(
+            dfs=dfs,
+            title=f"Opponent model loss on the dataset ({player.upper()})",
+            fig_path=f"{result_basename}_loss_dataset_{player}",
+            exp_factor=0.9,
+            xlabel="Time step",
+            ylabel="Loss",
+            run_name_mapping={"dataset_" + k: v for k, v in run_name_mapping.items()},
+            attr_name=f"{player}_loss",
+        )
 
 if __name__ == "__main__":
     import tyro

@@ -101,13 +101,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
     if dfs is None:
         return
     
-    for player in ["p1", "p2"]:
-        title_suffix = f" ({player.upper()})"
-        attr_name = f"{player}_loss"
-
+    for player in ("p1", "p2"):
         plot_data(
             dfs=dfs,
-            title=f"Opponent model loss on the dataset" + title_suffix,
+            title=f"Opponent model loss on the dataset ({player.upper()})",
             fig_path=f"{result_basename}_loss_dataset_{player}",
             exp_factor=0.9,
             xlabel="Time step",
@@ -116,7 +113,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
                 "dataset_no_dynamic_weights":   "No dynamic weights",
                 "dataset_yes_dynamic_weights":  "Dynamic weights",
             },
-            attr_name=attr_name,
+            attr_name=f"{player}_loss",
         )
 
 if __name__ == "__main__":

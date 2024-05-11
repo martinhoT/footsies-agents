@@ -8,9 +8,9 @@ from gymnasium.spaces import Discrete
 
 def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     runs_raw = {
-        "gm_residual": {"learn": "all", "game_model_method": "residual", "game_model_skippers": False},
-        "gm_normal": {"learn": "all", "game_model_method": "normal", "game_model_skippers": False},
-        "gm_differences": {"learn": "all", "game_model_method": "differences", "game_model_skippers": False},
+        "gm_residual": {"learn": "all", "game_model_method": "residual", "game_model_skippers": True, "use_reaction_time": True},
+        "gm_normal": {"learn": "all", "game_model_method": "normal", "game_model_skippers": True, "use_reaction_time": True},
+        "gm_differences": {"learn": "all", "game_model_method": "differences", "game_model_skippers": True, "use_reaction_time": True},
     }
 
     runs = {k: quick_train_args(
@@ -34,7 +34,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game AI",
+        title="Win rate over the last 100 episodes against the in-game AI, with reaction time",
         fig_path=result_basename + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
@@ -63,7 +63,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
         plot_data(
             dfs=dfs,
-            title=f"Game model loss against the in-game AI{title_label}",
+            title=f"Game model loss against the in-game AI{title_label}, with reaction time",
             fig_path=f"{result_basename}_gm{data_label}",
             exp_factor=0.9,
             xlabel="Time step",

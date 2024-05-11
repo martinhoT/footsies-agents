@@ -2,8 +2,9 @@ import numpy as np
 import gzip
 import os
 import struct
+import random
 from torch.utils.data import Dataset
-from typing import Any, Callable, Generator, Iterable, Iterator, Sequence
+from typing import Any, Callable, Generator, Iterable, Iterator
 from dataclasses import dataclass, field, astuple
 from itertools import pairwise
 from gymnasium import Env
@@ -14,7 +15,6 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.utils import get_dict_obs_from_vector_obs
 from agents.action import ActionMap
 from io import BufferedIOBase
-from tqdm import tqdm
 
 
 UNFLATTENED_OBSERVATION_SPACE = FootsiesNormalized(FootsiesEnv()).observation_space
@@ -197,7 +197,7 @@ class FootsiesDataset:
     transitions:        tuple[FootsiesTransition, ...] = field(default_factory=tuple, init=False)
 
     def __post_init__(self):
-        self.transitions = tuple(transition for episode in self.episodes for transition in episode)
+        self._update_transitions()
 
     def __add__(self, other: "FootsiesDataset"):
         return FootsiesDataset(self.episodes + other.episodes)
@@ -207,6 +207,9 @@ class FootsiesDataset:
 
     def __getitem__(self, idx) -> FootsiesEpisode:
         return self.episodes[idx]
+
+    def _update_transitions(self):
+        self.transitions = tuple(transition for episode in self.episodes for transition in episode)
 
     @staticmethod
     def load(path: str) -> "FootsiesDataset":
@@ -227,6 +230,11 @@ class FootsiesDataset:
                 f.write(episode.tobytes())
                 f.write(b"\n")
     
+    def shuffle(self):
+        """Shuffle the episodes (not the transitions)."""
+        random.shuffle(self.episodes)
+        self._update_transitions()
+
     def visualize(self, episode: int):
         """Visualize an episode from the dataset."""
         e = self.episodes[episode]

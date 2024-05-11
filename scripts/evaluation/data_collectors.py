@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import multiprocessing as mp
-from typing import Sequence, Mapping, Callable
+from typing import Sequence, Mapping
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
 from agents.game_model.agent import GameModelAgent
