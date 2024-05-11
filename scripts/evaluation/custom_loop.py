@@ -199,7 +199,7 @@ def custom_loop(
     observer_type: type[O],
     seed: int | None = 0,
     timesteps: int = int(1e6),
-) -> O:
+) -> tuple[O, FootsiesAgentBase | BaseAlgorithm]:
 
     port_start = 11000 + 25 * id_
     port_stop = 11000 + 25 * (id_ + 1)
@@ -238,7 +238,7 @@ def custom_loop(
 
     env.close()
 
-    return observer
+    return observer, agent
 
 
 def custom_loop_footsies(

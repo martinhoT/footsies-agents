@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import multiprocessing as mp
-from typing import Sequence, Mapping
+from typing import Callable, Sequence, Mapping
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
 from agents.game_model.agent import GameModelAgent
@@ -10,7 +10,7 @@ from args import MainArgs
 from os import path
 from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run, AgentCustomRun
 from functools import partial, reduce
-from main import main
+from main import main, save_agent
 from dataclasses import replace
 
 # NOTE: I don't like these wrappers...
@@ -29,9 +29,13 @@ def custom_loop_df(
     if os.path.exists(save_path):
         return pd.read_csv(save_path)
 
-    observer = custom_loop(run, label, id_, observer_type, seed, timesteps)
+    observer, agent = custom_loop(run, label, id_, observer_type, seed, timesteps)
     df = observer.df(str(seed))
     df.to_csv(save_path, header=df.columns.tolist(), index=False)
+    
+    # Save the agent as well
+    save_agent(agent, "evalCustom_" + save_path)
+    
     return df
 
 
