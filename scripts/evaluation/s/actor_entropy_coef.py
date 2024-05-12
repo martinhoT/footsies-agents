@@ -34,7 +34,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the curriculum",
+        title="",
         fig_path=result_path + "_wr",
         exp_factor=0.9,
         xlabel="Episode",
@@ -73,7 +73,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the curriculum",
+        title="",
         fig_path=None,
         exp_factor=0.9,
         xlabel="Episode",

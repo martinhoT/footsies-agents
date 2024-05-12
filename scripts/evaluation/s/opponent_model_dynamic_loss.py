@@ -39,7 +39,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game AI",
+        title="",
         fig_path=result_basename + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
@@ -60,7 +60,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Opponent model loss against the in-game AI",
+        title="",
         fig_path=result_basename + "_loss",
         exp_factor=0.9,
         xlabel="Time step",

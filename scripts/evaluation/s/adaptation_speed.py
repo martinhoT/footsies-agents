@@ -80,6 +80,10 @@ def main(
     small: bool = False,
     wr_thresh: float = 0.7,
 ):
+    if seeds > 1:
+        print("The number of seeds will be forced to 1 to not take an eternity")
+        seeds = 1
+
     result_path = path.splitext(__file__)[0]
 
     dummy_env, _  = create_eval_env()
@@ -148,10 +152,9 @@ def main(
         
         time_taken = timesteps
         # TODO: is this the same as taking the mean of the indices at the individual seeds?
-        for idx, row in df.iterrows():
-            if row["win_rateMean"] > wr_thresh:
-                assert isinstance(idx, int)
-                time_taken = idx
+        for _, r in df.iterrows():
+            if r["win_rateMean"] > wr_thresh:
+                time_taken = r["Idx"]
                 break
         
         mtx[row, col] = time_taken / timesteps

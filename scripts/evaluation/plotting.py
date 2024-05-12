@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from math import isnan
 
 
-def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str | None, exp_factor: float = 0.9, xlabel: str | None = None, ylabel: str | None = None, run_name_mapping: dict[str, str] | None = None, attr_name: str = "Val"):
+def plot_data(dfs: dict[str, pd.DataFrame], *, title: str, fig_path: str | None, exp_factor: float = 0.9, xlabel: str | None = None, ylabel: str | None = None, yscale: str = "linear", run_name_mapping: dict[str, str] | None = None, attr_name: str = "Val"):
     # Compact columns names (mean, std, mean exp, std exp)
     c_m = f"{attr_name}Mean"
     c_s = f"{attr_name}Std"
@@ -27,7 +27,8 @@ def plot_data(dfs: dict[str, pd.DataFrame], title: str, fig_path: str | None, ex
         plt.xlabel(xlabel)
     if ylabel is not None:
         plt.ylabel(ylabel)
-    
+    plt.yscale(yscale)
+
     if fig_path is not None:
         plt.savefig(fig_path)
         plt.clf()

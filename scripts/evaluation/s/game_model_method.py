@@ -34,7 +34,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
 
     plot_data(
         dfs=dfs,
-        title="Win rate over the last 100 episodes against the in-game AI, with reaction time",
+        title="",
         fig_path=result_basename + "_wr",
         exp_factor=0.9,
         xlabel="Time step",
@@ -126,6 +126,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
                 "dataset_gm_differences":  "Differences",
             },
             attr_name="loss" + data_label,
+            yscale="log",
         )
 
 if __name__ == "__main__":

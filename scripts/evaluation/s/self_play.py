@@ -41,7 +41,7 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
 
     plot_data(
         dfs=dfs,
-        title="Elo during self-play",
+        title="",
         fig_path=result_path + "_elo",
         exp_factor=0.99,
         xlabel="Episode",
@@ -64,7 +64,7 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
     
     plot_data(
         dfs=dfs,
-        title="Episode length during self-play",
+        title="",
         fig_path=result_path + "_length",
         exp_factor=0.99,
         xlabel="Episode",
@@ -87,7 +87,7 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
     
     plot_data(
         dfs=dfs,
-        title="Episode truncations during self-play",
+        title="",
         fig_path=result_path + "_truncations",
         exp_factor=0.99,
         xlabel="Episode",
