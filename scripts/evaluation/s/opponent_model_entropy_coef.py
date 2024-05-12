@@ -168,12 +168,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             exp_factor=0.9,
             xlabel="Time step",
             ylabel="Loss",
-            run_name_mapping={
-                "dataset_entropy_coef_004":   "$\\beta = 0.04$",
-                "dataset_entropy_coef_008":   "$\\beta = 0.08$",
-                "dataset_entropy_coef_016":   "$\\beta = 0.16$",
-                "dataset_entropy_coef_032":   "$\\beta = 0.32$",
-            },
+            run_name_mapping={"dataset_" + k: v for k, v in run_name_mapping.items()},
             attr_name=f"{player}_loss",
         )
 
