@@ -258,7 +258,7 @@ class ExperimentArgs:
     """Agent arguments"""
     env: "EnvArgs"
     """Environment arguments"""
-    time_steps: int = 200000
+    time_steps: int = int(1e5)
     """Number of time steps"""
     study_name: str | None = None
     """Name of the study (should be the same among processes on the same study). If `None`, will use the agent's name as the study name and save it in the `tuning` scripts folder"""

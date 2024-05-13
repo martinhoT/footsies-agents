@@ -24,7 +24,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     use_reaction_time: bool = False,
     use_game_model: bool = True,
     game_model_skippers: bool = True,
-    game_model_method: Literal["residual", "differences", "normal"] = "differences",
+    game_model_method: Literal["residual", "differences", "normal"] = "residual",
     
     # Learn what?
     learn: Literal["gm", "no-gm", "none", "all"] = "no-gm",
@@ -34,8 +34,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     use_opponent_model: bool = True,
     critic_opponent_update: str = "expected_sarsa",
     consider_explicit_opponent_policy: bool = True,
-    opponent_model_dynamic_loss_weights: bool = True,
-    opponent_model_recurrent: bool = False,
+    opponent_model_dynamic_loss_weights: bool = False,
+    opponent_model_recurrent: bool = True,
     opponent_model_reset_context_at: Literal["hit", "neutral", "end"] = "end",
     
     # Highly-tunable hyperparameters

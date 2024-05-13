@@ -31,13 +31,9 @@ def create_model_from_parameters(env: Env, activation_fn: str, net_arch: str, le
 
 def define_model(trial: optuna.Trial, env: Env) -> DQN:
     return create_model_from_parameters(env,
-        activation_fn=trial.suggest_categorical("activation_fn", ["nn.ReLU", "nn.LeakyReLU", "nn.Tanh"]),
-        net_arch=trial.suggest_categorical("net_arch", [
-            "[64, 64]",
-            "[128, 128]",
-            "[64, 64, 64]",
-        ]),
-        learning_rate=trial.suggest_float("learning_rate", 1e-5, 1e-2, log=True),
+        activation_fn="nn.LeakyReLU",
+        net_arch="[128, 128]",
+        learning_rate=trial.suggest_float("learning_rate", 1e-5, 1e-1),
         tau=trial.suggest_float("tau", 0.0, 1.0),
         gamma=trial.suggest_float("gamma", 0.0, 1.0),
     )

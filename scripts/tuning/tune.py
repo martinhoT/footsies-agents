@@ -11,6 +11,7 @@ from stable_baselines3.common.monitor import Monitor
 from main import create_env, save_agent, setup_logger
 from opponents.curriculum import CurriculumManager
 from main import extract_opponent_manager
+from tqdm import trange
 
 
 DefineModelFunction = Callable[[optuna.Trial, Env], FootsiesAgentBase | BaseAlgorithm]
@@ -54,12 +55,12 @@ class TrialManager:
         if isinstance(agent, FootsiesAgentBase):
             agent.preprocess(self.env)
 
-        for step in range(0, self.time_steps, self.time_steps_before_eval):
+        for step in trange(0, self.time_steps, self.time_steps_before_eval, position=0, colour="#ff4dde"):
             if isinstance(agent, BaseAlgorithm):
                 agent.learn(self.time_steps_before_eval, progress_bar=True)
             else:
                 terminated, truncated = True, True
-                for _ in range(self.time_steps_before_eval):
+                for _ in trange(self.time_steps_before_eval, position=1, colour="#4dffbe"):
                     if terminated or truncated:
                         obs, info = self.env.reset()
                         terminated, truncated = False, False
@@ -119,6 +120,10 @@ def main(args: ExperimentArgs):
     if args.env.self_play.enabled:
         raise ValueError("self-play is not supported for tuning")
 
+    if args.env.footsies_wrapper_simple.allow_agent_special_moves:
+        print("WARNING: special moves were set to be allowed, but will be forcefully disabled for simplification")
+        args.env.footsies_wrapper_simple.allow_agent_special_moves = False
+
     module_name = args.agent.name.replace(".", "_")
 
     optimize_module_str = ".".join(("scripts", "tuning", module_name))
@@ -148,12 +153,12 @@ def main(args: ExperimentArgs):
 
     env = create_env(args.env, log_dir=None)
 
-    curriculum = extract_opponent_manager(env)
-    if curriculum is None:
-        if args.env.curriculum.enabled:
+    curriculum = None
+    if args.env.curriculum.enabled:
+        curriculum = extract_opponent_manager(env)
+        if curriculum is None:
             raise RuntimeError("the environment was not created with an opponent manager when one was requested, or it could not be found")
-    else:
-        if not isinstance(curriculum, CurriculumManager):
+        elif not isinstance(curriculum, CurriculumManager):
             raise RuntimeError("the environment's opponent manager is not the curriculum one")
 
     # Wrap with a Monitor wrapper if using an SB3 agent, or else they may complain on evaluation
@@ -161,7 +166,7 @@ def main(args: ExperimentArgs):
         env = Monitor(env)
 
     trialManager = TrialManager(
-        agent_name=module_name,
+        agent_name=module_name + ("_curriculum" if args.env.curriculum.enabled else ""),
         env=env,
         define_model_function=define_model_function,
         objective_function=objective_function,
@@ -174,7 +179,7 @@ def main(args: ExperimentArgs):
     study_name = args.study_name if args.study_name is not None else module_name
     study_path = args.study_name if args.study_name is not None else os.path.join("scripts", "tuning", module_name)
     study = optuna.create_study(
-        storage=f"sqlite:///{study_path}.db",
+        storage=f"sqlite:///{study_path}{'_curriculum' if args.env.curriculum.enabled else ''}.db",
         sampler=None,   # TPESampler
         pruner=None,    # MedianPruner
         study_name=study_name,
