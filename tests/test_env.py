@@ -29,6 +29,7 @@ def test_phasic_move_progress_wrapper(footsies_env: FootsiesEnv):
 
     terminated, truncated = False, False
     while not (terminated or truncated):
+        # NOTE: this is wrong! the action space needs a seed *explicitly* set for reproducibility
         action = env.action_space.sample()
         obs, _, terminated, truncated, _ = env.step(action)
         assert obs.size(1) == total_obs_size

@@ -15,6 +15,7 @@ def create_eval_env(
     port_stop: int | None = None,
     use_custom_opponent: bool = False,
     env_args: EnvArgs | None = None,
+    seed: int = 0, # use the same seed for the *environment internals*, which shouldn't matter because it's just the obs and action space samplers (probably not even used)
 ) -> tuple[Env[torch.Tensor, int], FootsiesEnv]:
     
     ports = FootsiesEnv.find_ports(start=port_start, stop=port_stop)
@@ -23,7 +24,7 @@ def create_eval_env(
     else:
         env_args.kwargs.update(ports)
 
-    env = create_env(env_args, use_custom_opponent=use_custom_opponent)
+    env = create_env(env_args, use_custom_opponent=use_custom_opponent, seed=seed)
     footsies_env = cast(FootsiesEnv, env.unwrapped)
 
     return env, footsies_env

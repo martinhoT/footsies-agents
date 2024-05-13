@@ -5,18 +5,26 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     runs_raw = {
+        "discount_1_0_correct": {"critic_discount": 1.0, "policy_cumulative_discount": True},
         "discount_1_0": {"critic_discount": 1.0, "policy_cumulative_discount": False},
         # "discount_0_999": {"critic_discount": 0.999, "policy_cumulative_discount": False},
         "discount_0_99": {"critic_discount": 0.99, "policy_cumulative_discount": False},
         "discount_0_9": {"critic_discount": 0.9, "policy_cumulative_discount": False},
-        "discount_1_0_correct": {"critic_discount": 1.0, "policy_cumulative_discount": True},
         # "discount_0_999_correct": {"critic_discount": 0.999, "policy_cumulative_discount": True},
         "discount_0_99_correct": {"critic_discount": 0.99, "policy_cumulative_discount": True},
         "discount_0_9_correct": {"critic_discount": 0.9, "policy_cumulative_discount": True},
     }
 
+    from scripts.evaluation.utils import quick_env_args
+
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k, kwargs=v),
+        env_args=quick_env_args(
+            kwargs={
+                "log_file": "/home/martinho/projects/footsies-agents/eval1.log",
+                "log_file_overwrite": True,
+            },
+        ),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
 

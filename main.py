@@ -293,7 +293,7 @@ def observation_to_torch(obs: np.ndarray) -> T.Tensor:
     return T.from_numpy(obs).float().unsqueeze(0)
 
 
-def create_env(args: EnvArgs, log_dir: str | None = "runs", use_custom_opponent: bool = False) -> Env:
+def create_env(args: EnvArgs, log_dir: str | None = "runs", use_custom_opponent: bool = False, seed: int | None = None) -> Env:
     # Create environment with initial wrappers
     if args.is_footsies:
         opponent = dummy_opponent if use_custom_opponent or args.self_play.enabled or args.curriculum.enabled else None
@@ -420,6 +420,10 @@ def create_env(args: EnvArgs, log_dir: str | None = "runs", use_custom_opponent:
 
             env = OpponentManagerWrapper(env, curriculum_manager)
 
+    if seed is not None:
+        env.action_space.seed(seed)
+        env.observation_space.seed(seed)
+
     return env
 
 
@@ -514,6 +518,7 @@ def main(args: MainArgs):
 
     if args.seed is not None:
         T.manual_seed(args.seed)
+        np.random.seed(args.seed)
         random.seed(args.seed)
         LOGGER.info("Seed was set to %s", args.seed)
 
@@ -527,7 +532,7 @@ def main(args: MainArgs):
         environment_initialization_msg += "\n".join(f"  {k}: {v} ({type(v).__name__})" for k, v in args.env.kwargs.items())
         LOGGER.info(environment_initialization_msg)
     
-    env = create_env(args.env, log_dir=log_dir)
+    env = create_env(args.env, log_dir=log_dir, seed=args.seed)
 
     # Log which wrappers are being used
     e = env
