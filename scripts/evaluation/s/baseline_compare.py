@@ -38,8 +38,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     result_path = path.splitext(__file__)[0]
 
     runs_raw: dict[str, Callable[[Env], FootsiesAgentBase | BaseAlgorithm]] = {
-        # "agent": partial(create_agent_with_parameters, **get_best_params("to")),
-        "agent": create_the_one_default,
+        "agent": partial(create_agent_with_parameters, **get_best_params("to")),
+        # "agent": create_the_one_default,
         "ppo": partial(create_ppo_with_parameters, **get_best_params("sb3_ppo")),
         "a2c": partial(create_a2c_with_parameters, **get_best_params("sb3_a2c")),
         "dqn": partial(create_dqn_with_parameters, **get_best_params("sb3_dqn")),
@@ -71,10 +71,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
         xlabel="Time step",
         ylabel="Win rate",
         run_name_mapping={
-            "compare_agent": "Ours",
-            "compare_ppo": "PPO",
-            "compare_a2c": "A2C",
-            "compare_dqn": "DQN",
+            "agent": "Ours",
+            "ppo": "PPO",
+            "a2c": "A2C",
+            "dqn": "DQN",
         },
         attr_name="win_rate"
     )

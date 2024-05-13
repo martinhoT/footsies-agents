@@ -34,7 +34,8 @@ def custom_loop_df(
     df.to_csv(save_path, header=df.columns.tolist(), index=False)
     
     # Save the agent as well
-    save_agent(agent, "evalCustom_" + save_path)
+    basename, _ = os.path.splitext(os.path.basename(save_path))
+    save_agent(agent, basename)
     
     return df
 

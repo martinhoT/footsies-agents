@@ -15,9 +15,8 @@ from scripts.analysis.base import Analyser
 from agents.mimic.agent import MimicAgent as OpponentModelAgent
 from agents.mimic.mimic import PlayerModel, PlayerModelNetwork, ScarStore
 from agents.action import ActionMap
-from main import load_agent
 from agents.torch_utils import observation_invert_perspective_flattened
-from opponents.curriculum import NSpammer, WhiffPunisher, UnsafePunisher
+from opponents.curriculum import WhiffPunisher
 
 
 class OpponentDistributionPlot:

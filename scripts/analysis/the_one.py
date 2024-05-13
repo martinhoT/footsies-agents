@@ -1,6 +1,5 @@
 import torch
 import dearpygui.dearpygui as dpg
-from torch import nn
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.wrappers.normalization import FootsiesNormalized
@@ -13,7 +12,7 @@ from scripts.analysis.game_model import GameModelAnalyserManager
 from models import to_
 from gymnasium.wrappers.transform_observation import TransformObservation
 from main import setup_logger, load_agent, load_agent_parameters, import_agent
-from opponents.curriculum import WhiffPunisher, CurriculumOpponent
+from opponents.curriculum import CurriculumOpponent
 from agents.wrappers import FootsiesSimpleActions
 from agents.logger import TrainingLoggerWrapper
 from agents.the_one.agent import TheOneAgent
@@ -21,6 +20,7 @@ from typing import Literal, cast
 from gymnasium.spaces import Discrete
 from scripts.analysis.base import editable_dpg_value
 from os import path
+from opponents import curriculum
 import tyro
 import logging
 import warnings
@@ -100,12 +100,13 @@ def main(
     model: str = "to",
     load: str | None = None,
     log: str | None = None,
-    opponent: Literal["human", "bot", "custom"] = "bot",
+    opponent: Literal["human", "bot"] | str = "bot",
     fast_forward: bool = True,
     include_gm: bool = False,
+    dense_reward: bool = False,
 ):
     if not custom and not load:
-        raise ValueError("should either use a custom opponent or load one")
+        raise ValueError("should either use a custom agent or load one")
     
     agent_name: str = load if load else ""
 
@@ -117,19 +118,17 @@ def main(
         env_kwargs["vs_player"] = True
     elif opponent == "bot":
         pass
-    elif opponent == "custom":
-        custom_opponent = WhiffPunisher()
+    else:
+        custom_opponent = getattr(curriculum, opponent)()
         env_kwargs["opponent"] = custom_opponent.act
+    env_kwargs.update(FootsiesEnv.find_ports(15000))
 
     footsies_env = FootsiesEnv(
         game_path="../Footsies-Gym/Build/FOOTSIES.x86_64",
-        game_port=15000,
-        opponent_port=15001,
-        remote_control_port=15002,
         render_mode="human",
         sync_mode="synced_non_blocking",
         fast_forward=opponent != "human" and fast_forward,
-        dense_reward=False,
+        dense_reward=dense_reward,
         log_file="out.log",
         log_file_overwrite=True,
         **env_kwargs,
@@ -153,14 +152,6 @@ def main(
         agent, loggables = to_(
             env.observation_space.shape[0],
             int(env.action_space.n),
-            actor_entropy_coef=0.20,
-            use_game_model=False,
-            critic_arch_hs=[128, 128, 128],
-            critic_arch_activation=nn.LeakyReLU,
-            actor_arch_hs=[128, 128],
-            actor_arch_activation=nn.LeakyReLU,
-            critic_lr=1e-3,
-            actor_lr=1e-3,
         )
     
     else:

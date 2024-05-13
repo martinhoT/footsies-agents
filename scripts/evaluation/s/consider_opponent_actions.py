@@ -15,7 +15,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k, model="to", kwargs=v),
-        timesteps=timesteps,
+        timesteps=timesteps * 2, # we want more timesteps for when evaluating against the in-game AI to show that the same performance is still achieved, only much later
     ) for k, v in runs_raw.items()}
 
     dfs = get_data(
