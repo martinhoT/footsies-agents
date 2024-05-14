@@ -4,22 +4,29 @@ import random
 import logging
 from torch import nn
 from torch.distributions import Categorical
+from agents.action import ActionMap
 from agents.base import FootsiesAgentBase
 from agents.a2c.a2c import A2CQLearner, ValueNetwork
 from agents.logger import TestState
 from agents.ql.ql import QFunction, QFunctionTable, QFunctionNetwork
 from agents.torch_utils import AggregateModule
+from typing import Any
 
 LOGGER = logging.getLogger("main.a2c.agent")
 
 
 class A2CAgent(FootsiesAgentBase):
+    
+    HITSTOP_FRAMES: int = 11
+    """The amount of hitstop frames that we assume the game has."""
+    
     def __init__(
         self,
         learner: A2CQLearner,
         opponent_action_dim: int,
         consider_explicit_opponent_policy: bool = False,
         act_with_qvalues: bool = False,
+        do_nothing_at_hitstop: bool = True,
     ):
         """
         Footsies agent using the A2C algorithm, potentially with some modifications.
@@ -37,6 +44,7 @@ class A2CAgent(FootsiesAgentBase):
         self.opponent_action_dim = opponent_action_dim
         self.consider_explicit_opponent_policy = consider_explicit_opponent_policy
         self._act_with_qvalues = act_with_qvalues
+        self._do_nothing_at_hitstop = do_nothing_at_hitstop
 
         self._learner = learner
         self._actor = learner.actor
@@ -50,8 +58,8 @@ class A2CAgent(FootsiesAgentBase):
         self._model = AggregateModule(modules)
 
         # The action that the agent *consciously* attempted.
-        # The no-op action that the agent sends when it can't do anything is not taken into account here.
-        self._current_action: int = 0
+        # When the agent can't do anything this is None.
+        self._current_action: int | None = None
 
         # For logging
         self.cumulative_delta = 0
@@ -61,9 +69,10 @@ class A2CAgent(FootsiesAgentBase):
         self._test_observations = None
 
     def act(self, obs: T.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> int:
+        self._current_action = None
+
         # If we can't perform an action, don't even attempt one.
-        # Note that _current_action is not updated.
-        if not info["p1_is_actionable"] or not info["agent_simple_completed"]:
+        if self.wont_act(info):
             return 0
         
         # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic.
@@ -101,7 +110,7 @@ class A2CAgent(FootsiesAgentBase):
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
-            agent_will_frameskip=(not next_info["p1_is_actionable"]) or (not next_info["agent_simple_completed"]),
+            agent_will_frameskip=self.wont_act(next_info),
             opponent_will_frameskip=not next_info["p2_is_actionable"],
             next_obs_opponent_policy=next_opponent_policy,
             intrinsic_reward=next_info.get("intrinsic_reward", 0),
@@ -116,6 +125,10 @@ class A2CAgent(FootsiesAgentBase):
                 self.cumulative_qtable_error += self._learner.extrinsic_td_error
                 self.cumulative_qtable_error_n += 1
     
+    def wont_act(self, info: dict[str, Any]) -> bool:
+        """Whether the agent will attempt to perform any action at the state indicated of the respective `info` dictionary."""
+        return (not info["p1_is_actionable"]) or (not info["agent_simple_completed"]) or (self._do_nothing_at_hitstop and 0 < info["p1_hitstop_frame"] < self.HITSTOP_FRAMES)
+
     @property
     def model(self) -> nn.Module:
         return self._model
@@ -125,7 +138,7 @@ class A2CAgent(FootsiesAgentBase):
         return self._learner
 
     @property
-    def current_action(self) -> int:
+    def current_action(self) -> int | None:
         return self._current_action
 
     @property

@@ -56,6 +56,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     game_model_skippers_every: int = 5,
     game_model_single_skipper: int = 1,
     consider_opponent_at_all: bool = True,
+    do_nothing_at_hitstop: bool = True,
 
     # Probably should be kept as-is
     ppo: bool = False,
@@ -156,6 +157,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         opponent_action_dim=opponent_action_dim,
         consider_explicit_opponent_policy=consider_explicit_opponent_policy,
         act_with_qvalues=act_with_qvalues,
+        do_nothing_at_hitstop=do_nothing_at_hitstop,
     )
 
     if use_opponent_model:

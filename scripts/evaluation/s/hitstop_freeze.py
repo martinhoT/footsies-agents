@@ -5,15 +5,19 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     runs_raw = {
-        "hitstop_keep": {"skip_freeze": False},
-        "hitstop_ignore": {"skip_freeze": True},
+        "hitstop_keep": True,
+        "hitstop_ignore": False,
     }
 
     runs = {k: quick_train_args(
-        agent_args=quick_agent_args(k),
+        agent_args=quick_agent_args(k,
+            kwargs={
+                "do_nothing_at_hitstop": ignore_hitstop
+            },
+        ),
         timesteps=timesteps,
-        skip_freeze=v["skip_freeze"],
-    ) for k, v in runs_raw.items()}
+        skip_freeze=ignore_hitstop,
+    ) for k, ignore_hitstop in runs_raw.items()}
 
     dfs = get_data(
         data="win_rate",

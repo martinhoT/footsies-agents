@@ -276,7 +276,7 @@ class NSpammer(CurriculumOpponentSimple):
 
     @property
     def difficulty(self) -> int:
-        return 2
+        return 1
 
 
 class BSpammer(CurriculumOpponentSimple):
@@ -308,7 +308,7 @@ class BSpammer(CurriculumOpponentSimple):
 
     @property
     def difficulty(self) -> int:
-        return 2
+        return 1
 
 
 class NSpecialSpammer(CurriculumOpponent):
@@ -325,7 +325,7 @@ class NSpecialSpammer(CurriculumOpponent):
 
     @property
     def difficulty(self) -> int:
-        return 1
+        return 2
 
     def reset(self):
         self._action_cycle = cycle([
@@ -348,7 +348,7 @@ class BSpecialSpammer(CurriculumOpponent):
 
     @property
     def difficulty(self) -> int:
-        return 1
+        return 2
 
     def reset(self):
         self._action_cycle = cycle([

@@ -457,7 +457,11 @@ def setup_logger(agent_name: str, stdout_level: int = logging.INFO, file_level: 
     logger.addHandler(ch)
 
     if log_to_file:
-        rfh = RotatingFileHandler(f"logs/{agent_name}.log", maxBytes=int(1e7), backupCount=9)
+        if not os.path.exists("logs"):
+            os.mkdir("logs")
+        
+        log_file_path = os.path.join("logs", f"{agent_name}.log")
+        rfh = RotatingFileHandler(log_file_path, maxBytes=int(1e7), backupCount=9)
         rfh.setFormatter(formatter)
         rfh.setLevel(file_level)
 

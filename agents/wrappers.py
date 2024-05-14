@@ -227,18 +227,32 @@ class FootsiesSimpleActionExtractor:
 
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0
+        self._p1_hitstop_frame = 0
+        self._p2_hitstop_frame = 0
         self._current_info = {}
     
     def update(self, info: dict) -> dict:
         info = info.copy()
         inferred_p1_action, inferred_p2_action = ActionMap.simples_from_transition_ori(self._current_info, info)
 
+        if ActionMap.is_in_hitstop_ori(info, p1=True):
+            self._p1_hitstop_frame += 1
+        else:
+            self._p1_hitstop_frame = 0
+        if ActionMap.is_in_hitstop_ori(info, p1=False):
+            self._p2_hitstop_frame += 1
+        else:
+            self._p2_hitstop_frame = 0
+        
         info["p1_simple"] = self.effective_action(inferred_p1_action, self._assumed_agent_action_on_nonactionable, self._last_valid_p1_action)
         info["p2_simple"] = self.effective_action(inferred_p2_action, self._assumed_opponent_action_on_nonactionable, self._last_valid_p2_action)
         info["p1_was_actionable"] = inferred_p1_action is not None
         info["p2_was_actionable"] = inferred_p2_action is not None
         info["p1_is_actionable"] = ActionMap.is_state_actionable_ori(info, p1=True)
         info["p2_is_actionable"] = ActionMap.is_state_actionable_ori(info, p1=False)
+        info["p1_hitstop_frame"] = self._p1_hitstop_frame
+        info["p2_hitstop_frame"] = self._p2_hitstop_frame
+
         self._current_info = info
         if inferred_p1_action is not None:
             self._last_valid_p1_action = inferred_p1_action
@@ -257,10 +271,14 @@ class FootsiesSimpleActionExtractor:
         info["p2_was_actionable"] = False
         info["p1_is_actionable"] = True
         info["p2_is_actionable"] = True
+        info["p1_hitstop_frame"] = 0
+        info["p2_hitstop_frame"] = 0
 
         self._current_info = info
         self._last_valid_p1_action = 0
         self._last_valid_p2_action = 0
+        self._p1_hitstop_frame = 0
+        self._p2_hitstop_frame = 0
 
         return info
 
