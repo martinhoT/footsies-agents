@@ -27,13 +27,13 @@ class ActionMap:
         FootsiesMove.STAND:         ((True, True, False),),
         FootsiesMove.FORWARD:       ((False, True, False),),
         FootsiesMove.BACKWARD:      ((True, False, False),),
-        FootsiesMove.DASH_FORWARD:  ((False, True, False), (False, False, False), (False, True, False)),
-        FootsiesMove.DASH_BACKWARD: ((True, False, False), (False, False, False), (True, False, False)),
+        FootsiesMove.DASH_FORWARD:  ((False, False, False), (False, True, False), (False, False, False), (False, True, False)),
+        FootsiesMove.DASH_BACKWARD: ((False, False, False), (True, False, False), (False, False, False), (True, False, False)),
         # We add a STAND to the N and B attacks to avoid charging the special move
         FootsiesMove.N_ATTACK:      ((False, False, True), (False, False, False)),
         FootsiesMove.B_ATTACK:      ((False, True, True), (False, False, False)),
-        FootsiesMove.N_SPECIAL:     tuple(((False, False, True) for _ in range(59))) + ((False, False, False),),
-        FootsiesMove.B_SPECIAL:     tuple(((False, False, True) for _ in range(59))) + ((False, True, False),),
+        FootsiesMove.N_SPECIAL:     ((False, False, True),) * 59 + ((False, False, False),),
+        FootsiesMove.B_SPECIAL:     ((False, False, True),) * 59 + ((False, True, False),),
     }
     SIMPLE_AS_MOVE_TO_DISCRETE_MAP: dict[FootsiesMove, Sequence[int]] = {}
     SIMPLE_TO_PRIMITIVE_MAP: dict[int, Sequence[tuple[bool, bool, bool]]] = {}
