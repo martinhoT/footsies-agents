@@ -353,7 +353,27 @@ class ActionMap:
         opponent_move_frame = int((opponent_move_progress * opponent_move_state.value.duration).round().item())
 
         return ActionMap.is_state_actionable(player_move_state, opponent_move_state, player_move_frame, opponent_move_frame)
+
+    @staticmethod
+    def is_at_neutral_actionable_torch(obs: T.Tensor, p1: bool = True) -> bool:
+        """The same as `is_state_actionable` but without counting hitstop"""
+        if obs.size(0) > 1:
+            raise ValueError("batched observations are not supported for this method")
+
+        idx = 0 if p1 else 1
+        player_move_progress = obs[0, 32 + idx]
+        player_move_index = int(obs[0, 2 + idx * 15:17 + idx * 15].argmax(dim=-1).item())
+        player_move_state = ActionMap.move_from_move_index(player_move_index)
         
+        player_move_frame = int((player_move_progress * player_move_state.value.duration).round().item())
+        
+        return (
+            # Current move is finishing
+            player_move_frame + 1 == player_move_state.value.duration
+            # Is the player in a neutral state? i.e. states from which the player can always act
+            or player_move_state in ActionMap.NEUTRAL_STATES
+        )
+
 
     @staticmethod
     def is_simple_action_commital(simple: int) -> bool:

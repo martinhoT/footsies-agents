@@ -46,7 +46,8 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
 
     runs_curriculum_raw = {
         "no_consider_opponent_actions_curriculum": {"consider_opponent_at_all": False, "use_opponent_model": False, "rollback": True, "critic_opponent_update": "uniform"},
-        "yes_consider_opponent_actions_curriculum": {"consider_opponent_at_all": True, "use_opponent_model": False},
+        "yes_consider_opponent_actions_curriculum_opp": {"consider_opponent_at_all": True, "use_opponent_model": True},
+        "yes_consider_opponent_actions_curriculum_perfect": {"consider_opponent_at_all": True, "use_opponent_model": False},
     }
     
     runs_curriculum = {k: quick_train_args(
@@ -74,13 +75,14 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     plot_data(
         dfs=dfs,
         title="",
-        fig_path=path.splitext(__file__)[0] + "_wr_curr",
+        fig_path=path.splitext(__file__)[0] + "_wr_curr_perfect",
         exp_factor=0.9,
         xlabel="Episode",
         ylabel="Win rate",
         run_name_mapping={
-            "no_consider_opponent_actions_curriculum":     "Do not consider opponent",
-            "yes_consider_opponent_actions_curriculum":    "Consider opponent",
+            "no_consider_opponent_actions_curriculum":              "Do not consider opponent",
+            "yes_consider_opponent_actions_curriculum_opp":         "Consider opponent (model)",
+            "yes_consider_opponent_actions_curriculum_perfect":     "Consider opponent (oracle)",
         },
     )
 

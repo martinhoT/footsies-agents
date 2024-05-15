@@ -30,6 +30,10 @@ class MainArgs:
     """Skip any environment freeze in which an environment transition has equal observations. This is useful for handling hitstop in FOOTSIES"""
     seed: int | None = None
     """Random seed for both the agent and the environment. For the environment, it's only set on the first `reset()` call"""
+    threads: int | None = None
+    """Number of threads for PyTorch to use. If `None`, won't attempt to set any number of threads (the default)"""
+    against_self: bool = False
+    """Whether to have the agent play against itself (for debugging)."""
     progress_bar_kwargs: tyro.conf.UseAppendAction[Dict[str, int | float | bool | str]] = field(default_factory=dict)
     """Keyword arguments to pass to the `tqdm` progress bar during training"""
 

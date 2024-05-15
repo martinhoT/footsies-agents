@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 import multiprocessing as mp
+import shutil
+from datetime import datetime
 from typing import Callable, Sequence, Mapping
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
@@ -35,7 +37,7 @@ def custom_loop_df(
     
     # Save the agent as well
     basename, _ = os.path.splitext(os.path.basename(save_path))
-    save_agent(agent, basename)
+    save_agent(agent, "eval_" + basename)
     
     return df
 
@@ -151,7 +153,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
     return dfs
 
 
-def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False, data_cols: Sequence[int] = (0, 1)) -> dict[str, pd.DataFrame] | None:
+def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False, data_cols: Sequence[int] = (0, 1), pre_trained: str | None = None) -> dict[str, pd.DataFrame] | None:
     # Halve the number of processes since there are technically going to be two processes per run: the agent and the game
     processes //= 2
     
@@ -185,10 +187,33 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                     # Update agent args with specific name
                     agent_args_modified = replace(run_args.agent, name_=run_fullname)
 
+                    # Update misc args with pre-training info
+                    if pre_trained is not None:
+                        misc_args_modified = replace(run_args.misc, load=True)
+
+                        # Make sure there is a copy to load from
+                        pre_trained_path = os.path.join("saved", pre_trained)
+                        if not os.path.exists(pre_trained_path):
+                            raise ValueError("The requested pre-trained agent doesn't exist")
+                        
+                        prepared_pre_trained_path = os.path.join("saved", run_fullname)
+                        if os.path.exists(prepared_pre_trained_path):
+                            timestamp = datetime.now().isoformat()
+                            print(f"An agent at {prepared_pre_trained_path} already exists, sending it to the trash ({timestamp})")
+                            trash_path = os.path.join("~", ".local", "share", "Trash", "files", run_fullname + f"_{timestamp}")
+                            os.rename(prepared_pre_trained_path, trash_path)
+                        
+                        shutil.copytree(pre_trained_path, prepared_pre_trained_path)
+                        print(f"Copied pre-trained agent '{pre_trained_path}' to the path '{prepared_pre_trained_path}'")
+
+                    else:
+                        misc_args_modified = run_args.misc
+
                     # Update main args with everything + seed
                     run_args_modified = replace(run_args,
                         env=env_args_modified,
                         agent=agent_args_modified,
+                        misc=misc_args_modified,
                         seed=seed,
                     )
                     

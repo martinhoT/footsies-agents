@@ -12,7 +12,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k,
             kwargs={
-                "do_nothing_at_hitstop": ignore_hitstop
+                "one_decision_at_hitstop": ignore_hitstop
             },
         ),
         timesteps=timesteps,

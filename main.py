@@ -7,7 +7,7 @@ import logging
 import json
 import datetime
 import random
-from gymnasium import Env
+from gymnasium import Env, Wrapper
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from gymnasium.wrappers.transform_observation import TransformObservation
 from gymnasium.wrappers.time_limit import TimeLimit
@@ -226,14 +226,13 @@ def train(
                 action = agent.act(obs, info)
                 next_obs, reward, terminated, truncated, next_info = env.step(action)
                 reward = float(reward)
-                
+
                 # Discard histop/freeze
                 if skip_freeze:
-                    in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
-                    while in_hitstop and obs.isclose(next_obs).all():
+                    while next_info["p1_hitstun"] and next_info["p2_hitstun"] and obs.isclose(next_obs).all().item():
                         # The agent keeps acting. For the case of the_one, this means that they have more time to react when hitstop occurs which makes sense.
                         # We are only doing this freeze-skipping thing to avoid updating the agent on meaningless transitions.
-                        action = agent.act(obs, info)
+                        action = agent.act(next_obs, next_info)
                         next_obs, r, terminated, truncated, next_info = env.step(action)
                         r = float(r)
                         reward += r
@@ -526,6 +525,9 @@ def main(args: MainArgs):
         random.seed(args.seed)
         LOGGER.info("Seed was set to %s", args.seed)
 
+    if args.threads is not None:
+        T.set_num_threads(args.threads)
+
     # Prepare environment
 
     if LOGGER.isEnabledFor(logging.INFO):
@@ -536,7 +538,7 @@ def main(args: MainArgs):
         environment_initialization_msg += "\n".join(f"  {k}: {v} ({type(v).__name__})" for k, v in args.env.kwargs.items())
         LOGGER.info(environment_initialization_msg)
     
-    env = create_env(args.env, log_dir=log_dir, seed=args.seed)
+    env = create_env(args.env, log_dir=log_dir, seed=args.seed, use_custom_opponent=args.against_self)
 
     # Log which wrappers are being used
     e = env
@@ -564,6 +566,13 @@ def main(args: MainArgs):
 
     if args.misc.load:
         load_agent(agent, args.agent.name)
+
+    if args.against_self:
+        if isinstance(agent, BaseAlgorithm):
+            raise ValueError("can't train against self using an SB3 implementation")
+        
+        opponent = agent.extract_opponent(env)
+        cast(FootsiesEnv, env.unwrapped).set_opponent(opponent.act)
 
     # Identity function, used when logging is disabled
     agent_logging_wrapper = lambda a: a

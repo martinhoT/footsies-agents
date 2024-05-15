@@ -21,6 +21,7 @@ from gymnasium.spaces import Discrete
 from scripts.analysis.base import editable_dpg_value
 from os import path
 from opponents import curriculum
+from opponents.base import Opponent
 import tyro
 import logging
 import warnings
@@ -32,7 +33,7 @@ class TheOneAnalyserManager:
         qlearner_manager: QLearnerAnalyserManager,
         mimic_manager: MimicAnalyserManager | None,
         game_model_manager: GameModelAnalyserManager | None,
-        custom_opponent: CurriculumOpponent | None = None,
+        custom_opponent: Opponent | None = None,
     ):
         self.agent = agent
         self.qlearner_manager = qlearner_manager
@@ -89,7 +90,7 @@ class TheOneAnalyserManager:
             # Ignore hitstop/freeze
             in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
             if not (in_hitstop and obs.isclose(next_obs).all()):
-                if self.custom_opponent is not None:
+                if isinstance(self.custom_opponent, CurriculumOpponent):
                     next_info["next_opponent_policy"] = self.custom_opponent.peek(next_info)
                 self.agent.update(obs, next_obs, self.r, terminated, truncated, info, next_info)
                 self.r = 0
@@ -100,10 +101,11 @@ def main(
     model: str = "to",
     load: str | None = None,
     log: str | None = None,
-    opponent: Literal["human", "bot"] | str = "bot",
+    opponent: Literal["human", "bot", "self"] | str = "bot",
     fast_forward: bool = True,
     include_gm: bool = False,
     dense_reward: bool = False,
+    blank: bool = False,
 ):
     if not custom and not load:
         raise ValueError("should either use a custom agent or load one")
@@ -113,13 +115,16 @@ def main(
     setup_logger("analyse", stdout_level=logging.DEBUG, log_to_file=False)
 
     env_kwargs = {}
-    custom_opponent = None
+    custom_opponent: Opponent | None = None
     if opponent == "human":
         env_kwargs["vs_player"] = True
     elif opponent == "bot":
         pass
+    elif opponent == "self":
+        env_kwargs["opponent"] = lambda o, i: (False, False, False) # just set a dummy
     else:
         custom_opponent = getattr(curriculum, opponent)()
+        assert custom_opponent is not None
         env_kwargs["opponent"] = custom_opponent.act
     env_kwargs.update(FootsiesEnv.find_ports(15000))
 
@@ -152,7 +157,7 @@ def main(
         agent, loggables = to_(
             env.observation_space.shape[0],
             int(env.action_space.n),
-            opponent_model_recurrent=False,
+            # opponent_model_recurrent=False,
         )
     
     else:
@@ -182,8 +187,12 @@ def main(
     if agent.opp is not None and agent.opp.p2_model is not None and agent.opp.p2_model.network.is_recurrent:
         warnings.warn("Since the agent is recurrent, it needs to have 'online learning' enabled in order to have the recurrent state updated. Additionally, loading and saving states is discouraged for the same reason.")
 
-    if load:
+    if load and not blank:
         load_agent(agent, agent_name)
+
+    if opponent == "self":
+        custom_opponent = agent.extract_opponent(env)
+        footsies_env.set_opponent(custom_opponent.act)
 
     qlearner_manager = QLearnerAnalyserManager(
         agent.a2c,

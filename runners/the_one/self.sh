@@ -1,0 +1,2 @@
+#!/bin/sh
+./runners/footsies.sh to --agent.name eval_yes_consider_opponent_actions_S0 --misc.no-save --misc.load --misc.log-base-folder runs_ex --against-self --env.footsies-wrapper-simple.no-allow-agent-special-moves --agent.kwargs learn none "$@"

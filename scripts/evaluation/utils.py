@@ -119,6 +119,7 @@ def quick_train_args(agent_args: AgentArgs, env_args: EnvArgs | None = None, epi
             "desc": agent_args.name,
         },
         post_process_init=True,
+        threads=1,
         **main_kwargs,
     )
 

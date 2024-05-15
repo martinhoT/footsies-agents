@@ -33,25 +33,25 @@ class EvaluationScript(Protocol):
 
 
 EVALUATIONS: dict[str, EvaluationScript] = {
+    "hitstop_freeze":                       hitstop_freeze,
+    "consider_opponent_actions":            consider_opponent_actions,
+    "special_moves":                        special_moves,
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
+    "discount_factor":                      discount_factor,
+    "reaction_time":                        reaction_time,
     "action_masking":                       action_masking,
     "actor_entropy_coef":                   actor_entropy_coef,
     "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
-    "baseline_compare":                     baseline_compare,   # BUG: the training hangs for the agent at the end for some reason
+    #"baseline_compare":                     baseline_compare,   # BUG: the training hangs for the agent at the end for some reason
     "critic_opponent_update_style":         critic_opponent_update_style,
-    "consider_opponent_actions":            consider_opponent_actions,
-    "discount_factor":                      discount_factor,
     "game_model_method":                    game_model_method,
-    "hitstop_freeze":                       hitstop_freeze,
     "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
     "opponent_model_entropy_coef":          opponent_model_entropy_coef,
     "opponent_model_recurrent":             opponent_model_recurrent,
-    "reaction_time":                        reaction_time,
     "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
     "sparse_vs_dense_reward":               sparse_vs_dense_reward,
-    "special_moves":                        special_moves,
     "target_network":                       target_network,
     "transfer_learning":                    transfer_learning,
     "zero_sum":                             zero_sum,

@@ -1,10 +1,12 @@
+import os
 from os import path
 from scripts.evaluation.utils import quick_agent_args, quick_train_args, quick_env_args
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.data_collectors import get_data
-from args import SelfPlayArgs
+from args import SelfPlayArgs, CurriculumArgs
+from main import main as main_training
 
-def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: bool = False, just_pre_train: bool = False):
     result_path = path.splitext(__file__)[0]
 
     runs = {
@@ -26,6 +28,23 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
         )
     }
 
+    # Just train against the curriculum once, and load that agent
+    if not path.exists("saved/curriculum_PT"):
+        print("We don't have a pre-trained curriculum agent yet, creating one")
+        main_training(quick_train_args(
+            agent_args=quick_agent_args("curriculum_PT", model="to"),
+            env_args=quick_env_args(
+                curriculum=CurriculumArgs(True)
+            ),
+            timesteps=None,
+        ))
+    
+    else:
+        print("We already have a pre-trained agent, continuing")
+
+    if just_pre_train:
+        return
+
     # Elo
 
     dfs = get_data(
@@ -34,6 +53,7 @@ def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: boo
         seeds=seeds,
         processes=processes,
         y=y,
+        pre_trained="curriculum_PT",
     )
 
     if dfs is None:

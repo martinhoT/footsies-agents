@@ -17,16 +17,13 @@ LOGGER = logging.getLogger("main.a2c.agent")
 
 class A2CAgent(FootsiesAgentBase):
     
-    HITSTOP_FRAMES: int = 11
-    """The amount of hitstop frames that we assume the game has."""
-    
     def __init__(
         self,
         learner: A2CQLearner,
         opponent_action_dim: int,
         consider_explicit_opponent_policy: bool = False,
         act_with_qvalues: bool = False,
-        do_nothing_at_hitstop: bool = True,
+        one_decision_at_hitstop: bool = True,
     ):
         """
         Footsies agent using the A2C algorithm, potentially with some modifications.
@@ -44,7 +41,7 @@ class A2CAgent(FootsiesAgentBase):
         self.opponent_action_dim = opponent_action_dim
         self.consider_explicit_opponent_policy = consider_explicit_opponent_policy
         self._act_with_qvalues = act_with_qvalues
-        self._do_nothing_at_hitstop = do_nothing_at_hitstop
+        self._one_decision_at_hitstop = one_decision_at_hitstop
 
         self._learner = learner
         self._actor = learner.actor
@@ -60,6 +57,10 @@ class A2CAgent(FootsiesAgentBase):
         # The action that the agent *consciously* attempted.
         # When the agent can't do anything this is None.
         self._current_action: int | None = None
+        # Whether the agent has performed an action during hitstop.
+        # While in hitstop, time is frozen, so the agent should only perform one action.
+        # Likewise, there should only be one update, from the moment the agent performs an action to the moment hitstop ends.
+        self._has_acted_in_hitstop: bool = False
 
         # For logging
         self.cumulative_delta = 0
@@ -68,13 +69,15 @@ class A2CAgent(FootsiesAgentBase):
         self.cumulative_qtable_error_n = 0
         self._test_observations = None
 
+    # NOTE: reminder, we should use `info` carefully here, since when using reaction time it won't be delayed
     def act(self, obs: T.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> int:
-        self._current_action = None
-
         # If we can't perform an action, don't even attempt one.
-        if self.wont_act(info):
+        if self.wont_act(info["agent_simple_completed"], obs):
             return 0
         
+        # If we have passed the above condition, then it is because we are free to act, so we haven't acted yet.
+        self._has_acted_in_hitstop = False
+
         # NOTE: this means that by default, without an opponent model, we assume the opponent is uniform random, which is unrealistic.
         if predicted_opponent_action is None:
             predicted_opponent_action = random.randint(0, self.opponent_action_dim - 1)
@@ -96,6 +99,13 @@ class A2CAgent(FootsiesAgentBase):
         
         action = int(simple_action)
         self._current_action = action
+
+        # Update the respective variable.
+        # This basically tells update() that we do not want to act further until we are back in a neutral state.
+        is_in_hitstop = ActionMap.is_in_hitstop_torch(obs)
+        if is_in_hitstop:
+            self._has_acted_in_hitstop = True
+
         return action
 
     def update(self, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict):
@@ -110,7 +120,7 @@ class A2CAgent(FootsiesAgentBase):
         self._learner.learn(obs, next_obs, reward, terminated, truncated,
             obs_agent_action=obs_agent_action,
             obs_opponent_action=obs_opponent_action,
-            agent_will_frameskip=self.wont_act(next_info),
+            agent_will_frameskip=self.wont_act(next_info["agent_simple_completed"], next_obs),
             opponent_will_frameskip=not next_info["p2_is_actionable"],
             next_obs_opponent_policy=next_opponent_policy,
             intrinsic_reward=next_info.get("intrinsic_reward", 0),
@@ -124,10 +134,21 @@ class A2CAgent(FootsiesAgentBase):
             if self._learner.extrinsic_td_error is not None:
                 self.cumulative_qtable_error += self._learner.extrinsic_td_error
                 self.cumulative_qtable_error_n += 1
+        
+        if terminated or truncated:
+            self._current_action = None
     
-    def wont_act(self, info: dict[str, Any]) -> bool:
-        """Whether the agent will attempt to perform any action at the state indicated of the respective `info` dictionary."""
-        return (not info["p1_is_actionable"]) or (not info["agent_simple_completed"]) or (self._do_nothing_at_hitstop and 0 < info["p1_hitstop_frame"] < self.HITSTOP_FRAMES)
+    def wont_act(self, completed_previous_action: bool, obs: T.Tensor) -> bool:
+        """Whether the agent will attempt to perform any action at the current state."""
+        if not completed_previous_action:
+            return True
+
+        is_at_neutral_actionable = ActionMap.is_at_neutral_actionable_torch(obs)
+        if (self._one_decision_at_hitstop and self._has_acted_in_hitstop and not is_at_neutral_actionable):
+            return True
+
+        is_state_actionable = ActionMap.is_state_actionable_torch(obs)
+        return not is_state_actionable
 
     @property
     def model(self) -> nn.Module:

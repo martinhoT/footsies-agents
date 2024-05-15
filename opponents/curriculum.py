@@ -258,14 +258,14 @@ class NSpammer(CurriculumOpponentSimple):
         our_move = ActionMap.move_from_move_index(obs["move"][1])
         
         self._walk_for_counter = (self._walk_for_counter - 1) % (self._walk_for + 1)
-        
-        # Calm down
-        if our_move != FootsiesMove.FORWARD:
-            return FootsiesMove.FORWARD
 
         # If the agent was hit, hit them! But not if they are blocking
         if agent_move == FootsiesMove.DAMAGE:
             return FootsiesMove.N_ATTACK
+        
+        # Calm down
+        if our_move != FootsiesMove.FORWARD:
+            return FootsiesMove.FORWARD
     
         # If walked enough, attack
         if self._walk_for_counter == 0:
