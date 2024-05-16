@@ -34,6 +34,8 @@ class MainArgs:
     """Number of threads for PyTorch to use. If `None`, won't attempt to set any number of threads (the default)"""
     against_self: bool = False
     """Whether to have the agent play against itself (for debugging)."""
+    raise_game_closed: bool = False
+    """Whether to raise an exception when the game has closed. Note that this will skip saving the agent to disk."""
     progress_bar_kwargs: tyro.conf.UseAppendAction[Dict[str, int | float | bool | str]] = field(default_factory=dict)
     """Keyword arguments to pass to the `tqdm` progress bar during training"""
 

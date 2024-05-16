@@ -18,7 +18,8 @@ def plot_data(dfs: dict[str, pd.DataFrame], *, title: str, fig_path: str | None,
         plt.plot(df.Idx, df[c_me])
 
     for df in dfs.values():
-        plt.fill_between(df.Idx, df[c_me] - df[c_se], df[c_me] + df[c_se], alpha=0.2)
+        if not df[c_s].isna().any():
+            plt.fill_between(df.Idx, df[c_me] - df[c_se], df[c_me] + df[c_se], alpha=0.2)
 
     if run_name_mapping is not None:
         plt.legend([run_name_mapping[name] for name in dfs.keys()])

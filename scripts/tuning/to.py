@@ -15,10 +15,10 @@ def create_model_from_parameters(env: Env,
     opponent_model_lr: float,
     actor_entropy_coef: float,
     opponent_model_entropy_coef: float,
-    critic_hs: str,
-    critic_activation: str,
-    actor_hs: str,
-    actor_activation: str,
+    critic_hs: str = "[128, 128]",
+    critic_activation: str = "nn.LeakyReLU",
+    actor_hs: str = "[64, 64]",
+    actor_activation: str = "nn.LeakyReLU",
     opponent_model_hs: str = "[64, 64]",
     opponent_model_activation: str = "nn.LeakyReLU",
     game_model_hs: str = "[64, 64]",
@@ -83,9 +83,7 @@ def create_arch_suggestions(trial: optuna.Trial, label: str, use: bool = True) -
 
 def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneAgent]:
     # critic_arch_activation, critic_arch_hs = create_arch_suggestions(trial, "critic")
-    critic_arch_activation, critic_arch_hs = ("nn.LeakyReLU", "[64, 64]")
     # actor_arch_activation, actor_arch_hs = create_arch_suggestions(trial, "actor")
-    actor_arch_activation, actor_arch_hs = ("nn.LeakyReLU", "[128, 128]")
 
     loggables = {}
     agent = create_model_from_parameters(env,
@@ -94,10 +92,6 @@ def define_model(trial: optuna.Trial, env: Env) -> TrainingLoggerWrapper[TheOneA
         opponent_model_lr=trial.suggest_float("opponent_model_lr", 1e-5, 1e-1),
         actor_entropy_coef=trial.suggest_float("actor_entropy_coef", 0.0, 1.0),
         opponent_model_entropy_coef=trial.suggest_float("opponent_model_entropy_coef", 0.0, 1.0),
-        critic_hs=critic_arch_hs,
-        critic_activation=critic_arch_activation,
-        actor_hs=actor_arch_hs,
-        actor_activation=actor_arch_activation,
         loggables_to_update=loggables,
     )
 

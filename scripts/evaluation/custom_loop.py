@@ -270,9 +270,8 @@ def custom_loop_footsies(
         reward = float(reward)
 
         # Skip hitstop freeze
-        in_hitstop = ActionMap.is_in_hitstop_ori(next_info, True) or ActionMap.is_in_hitstop_ori(next_info, False)
-        while in_hitstop and obs.isclose(next_obs).all():
-            action = agent.act(obs, info)
+        while next_info["p1_hitstun"] and next_info["p2_hitstun"] and obs.isclose(next_obs).all().item():
+            action = agent.act(next_obs, next_info)
             next_obs, r, terminated, truncated, next_info = env.step(action)
             r = float(r)
             reward += r

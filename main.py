@@ -21,7 +21,7 @@ from tqdm import tqdm
 from itertools import count
 from copy import deepcopy
 from functools import partial
-from typing import Callable, Iterable, cast
+from typing import Any, Callable, Iterable, cast
 from stable_baselines3.common.base_class import BaseAlgorithm
 from agents.base import FootsiesAgentBase, FootsiesAgentTorch
 from agents.diayn import DIAYN, DIAYNWrapper
@@ -32,7 +32,6 @@ from opponents.self_play import SelfPlayManager
 from opponents.curriculum import BSpecialSpammer, CurriculumManager, BSpammer, NSpecialSpammer, NSpammer, WhiffPunisher
 from opponents.base import OpponentManager
 from intrinsic.base import IntrinsicRewardScheme
-from agents.action import ActionMap
 from dataclasses import asdict
 from stable_baselines3.common.callbacks import BaseCallback
 from collections import deque
@@ -216,72 +215,58 @@ def train(
 
     timestep_counter = 0
 
-    try:
-        for episode in training_iterator:
-            obs, info = env.reset(seed=seed)
-            
-            terminated = False
-            truncated = False
-            while not (terminated or truncated):
-                action = agent.act(obs, info)
-                next_obs, reward, terminated, truncated, next_info = env.step(action)
-                reward = float(reward)
-
-                # Discard histop/freeze
-                if skip_freeze:
-                    while next_info["p1_hitstun"] and next_info["p2_hitstun"] and obs.isclose(next_obs).all().item():
-                        # The agent keeps acting. For the case of the_one, this means that they have more time to react when hitstop occurs which makes sense.
-                        # We are only doing this freeze-skipping thing to avoid updating the agent on meaningless transitions.
-                        action = agent.act(next_obs, next_info)
-                        next_obs, r, terminated, truncated, next_info = env.step(action)
-                        r = float(r)
-                        reward += r
-                        LOGGER.debug("Skipped one transition, which is presumed to be artificial freeze")
-
-                if penalize_truncation is not None and truncated:
-                    reward = penalize_truncation
-                
-                if intrinsic_reward_scheme is not None:
-                    # BUG: probably not info, maybe it's next_info
-                    intrinsic_reward = intrinsic_reward_scheme.update_and_reward(obs, next_obs, reward, terminated, truncated, info)
-                    # It's not great to use the `info` dict as the storage for intrinsic reward, but this allows the addition of such without breaking the current API.
-                    # I could change it but I won't bother. Whathever agent wants to use intrinsic reward can just check if the key is present.
-                    if "intrinsic_reward" in info:
-                        LOGGER.warning("'intrinsic reward' key already present in info, will overwrite it although it shouldn't be present in the first place")
-                    info["intrinsic_reward"] = intrinsic_reward
-
-                agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
-                obs = next_obs
-                info = next_info
-
-                timestep_counter += 1
-
-            LOGGER.debug("Episode finished with reward %s and info %s, with termination (%s) or truncation (%s)", reward, info, terminated, truncated)
-
-            if opponent_manager is not None and opponent_manager.exhausted:
-                LOGGER.info("Opponent pool exhausted, quitting training")
-                break
-
-            episode_finished_callback(episode)
-
-            if n_timesteps is not None and timestep_counter > n_timesteps:
-                break
+    for episode in training_iterator:
+        obs, info = env.reset(seed=seed)
         
-            # Only use the seed for the first episode/reset call
-            seed = None
+        terminated = False
+        truncated = False
+        while not (terminated or truncated):
+            action = agent.act(obs, info)
+            next_obs, reward, terminated, truncated, next_info = env.step(action)
+            reward = float(reward)
 
-    except KeyboardInterrupt:
-        LOGGER.info("Training manually interrupted (KeyboardInterrupt)")
+            # Discard histop/freeze
+            if skip_freeze:
+                while next_info["p1_hitstun"] and next_info["p2_hitstun"] and obs.isclose(next_obs).all().item():
+                    # The agent keeps acting. For the case of the_one, this means that they have more time to react when hitstop occurs which makes sense.
+                    # We are only doing this freeze-skipping thing to avoid updating the agent on meaningless transitions.
+                    action = agent.act(next_obs, next_info)
+                    next_obs, r, terminated, truncated, next_info = env.step(action)
+                    r = float(r)
+                    reward += r
+                    LOGGER.debug("Skipped one transition, which is presumed to be artificial freeze")
 
-    except FootsiesGameClosedError as e:
-        LOGGER.warning("Quitting training since game closed: '%s'", e)
+            if penalize_truncation is not None and truncated:
+                reward = penalize_truncation
+            
+            if intrinsic_reward_scheme is not None:
+                # BUG: probably not info, maybe it's next_info
+                intrinsic_reward = intrinsic_reward_scheme.update_and_reward(obs, next_obs, reward, terminated, truncated, info)
+                # It's not great to use the `info` dict as the storage for intrinsic reward, but this allows the addition of such without breaking the current API.
+                # I could change it but I won't bother. Whathever agent wants to use intrinsic reward can just check if the key is present.
+                if "intrinsic_reward" in info:
+                    LOGGER.warning("'intrinsic reward' key already present in info, will overwrite it although it shouldn't be present in the first place")
+                info["intrinsic_reward"] = intrinsic_reward
 
-    except Exception as e:
-        LOGGER.exception("Training stopped due to %s: '%s', ignoring and quitting training", type(e).__name__, e)
+            agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
+            obs = next_obs
+            info = next_info
+
+            timestep_counter += 1
+
+        LOGGER.debug("Episode finished with reward %s and info %s, with termination (%s) or truncation (%s)", reward, info, terminated, truncated)
+
+        if opponent_manager is not None and opponent_manager.exhausted:
+            LOGGER.info("Opponent pool exhausted, quitting training")
+            break
+
+        episode_finished_callback(episode)
+
+        if n_timesteps is not None and timestep_counter > n_timesteps:
+            break
     
-    finally:
-        if opponent_manager is not None:
-            opponent_manager.close()
+        # Only use the seed for the first episode/reset call
+        seed = None
 
 
 def dummy_opponent(o: dict, i: dict) -> tuple[bool, bool, bool]:
@@ -502,6 +487,20 @@ class WinRateCallback(BaseCallback):
         return True
 
 
+def close_resources(env: Env, agent: Any):
+    try:
+        opponent_manager = extract_opponent_manager(env)
+        if opponent_manager is not None:
+            opponent_manager.close()
+    except ValueError:
+        pass
+    
+    env.close()
+
+    if isinstance(agent, TrainingLoggerWrapper):
+        agent.close()
+
+
 def main(args: MainArgs):
     # Use the same logging directory as the one the environment uses. Everything should be logging to the same place.
     log_dir: str = args.log_folder
@@ -642,12 +641,19 @@ def main(args: MainArgs):
                 progress_bar=True,
             )
 
-        # NOTE: duplicated from train(...)
         except KeyboardInterrupt:
             LOGGER.info("Training manually interrupted")
         
+        except FootsiesGameClosedError as e:
+            LOGGER.warning("Quitting training since game closed: '%s'", e)
+            if args.raise_game_closed:
+                raise e
+
         except Exception as e:
             LOGGER.exception(f"Training stopped due to {type(e).__name__}: '{e}', ignoring and quitting training")
+        
+        finally:
+            close_resources(env, agent)
 
     else:
         train_kwargs = {
@@ -696,18 +702,28 @@ def main(args: MainArgs):
             )
         
         else:
-            agent = agent_logging_wrapper(agent)
-            train(agent, env, **train_kwargs)
+            try:
+                agent = agent_logging_wrapper(agent)
+                train(agent, env, **train_kwargs)
 
+            except KeyboardInterrupt:
+                LOGGER.info("Training manually interrupted (KeyboardInterrupt)")
+
+            except FootsiesGameClosedError as e:
+                LOGGER.warning("Quitting training since game closed: '%s'", e)
+                if args.raise_game_closed:
+                    raise e
+
+            except Exception as e:
+                LOGGER.exception("Training stopped due to %s: '%s', ignoring and quitting training", type(e).__name__, e)
+            
+            finally:
+                close_resources(env, agent)
+                
     if args.misc.save:
         save_agent(agent, args.agent.name)
         save_agent_parameters(args.agent.kwargs, args.agent.name)
         save_agent_training_args(asdict(args), args.agent.name)
-
-    env.close()
-
-    if isinstance(agent, TrainingLoggerWrapper):
-        agent.close()
 
 
 if __name__ == "__main__":

@@ -3,9 +3,10 @@ import pandas as pd
 import multiprocessing as mp
 import shutil
 from datetime import datetime
-from typing import Callable, Sequence, Mapping
+from typing import Sequence, Mapping
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
+from footsies_gym.envs.exceptions import FootsiesGameClosedError
 from agents.game_model.agent import GameModelAgent
 from agents.mimic.agent import MimicAgent
 from args import MainArgs
@@ -15,7 +16,6 @@ from functools import partial, reduce
 from main import main, save_agent
 from dataclasses import replace
 
-# NOTE: I don't like these wrappers...
 
 # Wrapper on custom_loop
 def custom_loop_df(
@@ -31,7 +31,14 @@ def custom_loop_df(
     if os.path.exists(save_path):
         return pd.read_csv(save_path)
 
-    observer, agent = custom_loop(run, label, id_, observer_type, seed, timesteps)
+    done = False
+    while not done:
+        try:
+            observer, agent = custom_loop(run, label, id_, observer_type, seed, timesteps)
+            done = True
+        except FootsiesGameClosedError:
+            print(f"Game closed unexpectedly, will try running this run ({id_}) again")
+    
     df = observer.df(str(seed))
     df.to_csv(save_path, header=df.columns.tolist(), index=False)
     
@@ -54,14 +61,23 @@ def dataset_run_df(
 ) -> pd.DataFrame:
     
     if os.path.exists(save_path):
-        names = ["Idx"] + list(observer_type.attributes())
-        df = pd.read_csv(save_path, names=names)
-        return df
+        return pd.read_csv(save_path)
 
     observer = dataset_run(agent, label, observer_type, seed, epochs, shuffle)
     df = observer.df(str(seed))
     df.to_csv(save_path, index=False)
     return df
+
+
+# Wrapper on main
+def main_ensured(args: MainArgs):
+    done = False
+    while not done:
+        try:
+            main(args)
+            done = True
+        except FootsiesGameClosedError:
+            print(f"Game closed unexpectedly, will try running this run ({args.agent.name}) again")
 
 
 def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], observer_type: type[Observer], seeds: int = 10, timesteps: int = int(1e6), processes: int = 4, y: bool = False) -> dict[str, pd.DataFrame] | None:
@@ -200,7 +216,8 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                         if os.path.exists(prepared_pre_trained_path):
                             timestamp = datetime.now().isoformat()
                             print(f"An agent at {prepared_pre_trained_path} already exists, sending it to the trash ({timestamp})")
-                            trash_path = os.path.join("~", ".local", "share", "Trash", "files", run_fullname + f"_{timestamp}")
+                            home_path = os.environ["HOME"]
+                            trash_path = os.path.join(home_path, ".local", "share", "Trash", "files", run_fullname + f"_{timestamp}")
                             os.rename(prepared_pre_trained_path, trash_path)
                         
                         shutil.copytree(pre_trained_path, prepared_pre_trained_path)
@@ -215,11 +232,12 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                         agent=agent_args_modified,
                         misc=misc_args_modified,
                         seed=seed,
+                        raise_game_closed=True,
                     )
                     
                     args.append(run_args_modified)
 
-            pool.map(main, args)
+            pool.map(main_ensured, args)
     
     dfs: dict[str, pd.DataFrame] = {}
     for run_name in runs:
