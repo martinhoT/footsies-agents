@@ -39,14 +39,13 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     opponent_model_reset_context_at: Literal["hit", "neutral", "end"] = "end",
     
     # Highly-tunable hyperparameters
-    actor_lr: float = 3e-2,
-    critic_lr: float = 1e-2,
-    actor_entropy_coef: float = 0.01,
+    actor_lr: float = 9e-2,
+    critic_lr: float = 5e-2,
+    actor_entropy_coef: float = 0.036,
     actor_gradient_clipping: float = 0.5,
     critic_discount: float = 1.0,
-    # NOTE: these values are weird because I reformulated the opponent model loss for simplicity
-    opponent_model_entropy_coef: float = 0.43,
-    opponent_model_lr: float = 7e-3,
+    opponent_model_entropy_coef: float = 0.42,
+    opponent_model_lr: float = 4e-2,
 
     # Miscellaneous, but should be scrutinized
     accumulate_at_frameskip: bool = True,

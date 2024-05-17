@@ -75,7 +75,6 @@ def main(seeds: int = 10, processes: int = 12, reverse: bool = False):
             script(
                 seeds=seeds,
                 processes=processes,
-                timesteps=int(2e4),
                 y=True,
             )
         
