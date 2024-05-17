@@ -227,7 +227,7 @@ class GameModel:
 
         return prediction
 
-    def update(self, obs: T.Tensor, p1_action: T.Tensor | int | None, p2_action: T.Tensor | int | None, next_obs: T.Tensor, *, epoch_data: dict | None = None) -> tuple[float, float, float, float]:
+    def update(self, obs: T.Tensor, p1_action: T.Tensor | int | None, p2_action: T.Tensor | int | None, next_obs: T.Tensor, *, epoch_data: dict | None = None, actually_update: bool = True) -> tuple[float, float, float, float]:
         """
         Update the game model with the given transition.
         
@@ -287,9 +287,10 @@ class GameModel:
         loss = (guard_loss + move_loss + move_progress_loss + position_loss).mean()
 
         # Backpropagate and step
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        if actually_update:
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
         return guard_loss.mean().item(), move_loss.mean().item(), move_progress_loss.mean().item(), position_loss.mean().item()
 

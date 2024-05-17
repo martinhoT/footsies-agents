@@ -6,7 +6,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     result_basename = path.splitext(__file__)[0] + name_suffix
 
     run_name_mapping = {
@@ -92,7 +92,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
         runs=runs_dataset,
         observer_type=MimicObserver,
         seeds=seeds,
-        processes=processes,
+        processes=min(10, processes), # the PC gets way too hot if all CPUs are constantly running
         epochs=epochs,
         shuffle=shuffle,
         y=y,

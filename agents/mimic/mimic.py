@@ -338,6 +338,16 @@ class PlayerModel:
         action:     int
         multiplier: float
 
+    def compute_loss(self, obs: T.Tensor, action: T.Tensor) -> float:
+        """
+        Compute the loss on the given observation-action pair.
+        It is assumed that the observation batch is sequential and context-free when using recurrency.
+        """
+        predicted, _ = self._network(obs, None)
+        distribution = T.distributions.Categorical(logits=predicted)
+        loss = (self.loss_function(predicted, action) - self._entropy_coef * distribution.entropy())
+        return float(loss.mean().item())
+
     def update(self, obs: T.Tensor, action: int | None, terminated_or_truncated: bool, multiplier: float = 1.0) -> float | None:
         """
         Update the model to predict the action given the provided observation. Can optionally set a multiplier for the given example to give it more importance.

@@ -89,6 +89,38 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
         }
     )
 
+    # Game model loss
+
+    runs_with_game_model = {k: v for k, v in runs.items() if k != "reaction_correction_none"}
+
+    dfs = get_data(
+        data="learninggame_model_loss",
+        runs=runs_with_game_model,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="",
+        fig_path=result_path + "_loss_gm",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Loss",
+        run_name_mapping={
+            "reaction_correction_none":         "No correction",
+            "reaction_correction_every_1":      "1-step model",
+            "reaction_correction_every_3":      "3-step model",
+            "reaction_correction_every_5":      "5-step model",
+            "reaction_correction_every_15":     "15-step model",
+            "reaction_correction_skippers":     "Multiple models"
+        }
+    )
+
     # Act elapsed time
 
     dfs = get_data(

@@ -9,7 +9,7 @@ from gymnasium.spaces import Discrete
 from agents.logger import TrainingLoggerWrapper
 
 
-def create_model_from_parameters(env: Env,
+def create_model_from_parameters(env: Env, *,
     actor_lr: float,
     critic_lr: float,
     opponent_model_lr: float,

@@ -235,6 +235,14 @@ class FootsiesDataset:
         random.shuffle(self.episodes)
         self._update_transitions()
 
+    def generate_split(self, fraction: float) -> tuple["FootsiesDataset", "FootsiesDataset"]:
+        """Split the dataset into two, according to episodes."""
+        l = len(self.episodes)
+        split_point = int(l * fraction)
+        episodes_0 = self.episodes[:split_point]
+        episodes_1 = self.episodes[split_point:]
+        return FootsiesDataset(episodes_0), FootsiesDataset(episodes_1)
+
     def visualize(self, episode: int = 758):
         """Visualize an episode from the dataset."""
         e = self.episodes[episode]

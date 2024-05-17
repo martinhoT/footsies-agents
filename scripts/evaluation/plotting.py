@@ -43,7 +43,13 @@ def plot_add_curriculum_transitions(dfs_transitions: dict[str, pd.DataFrame], se
     for i, (_, df) in enumerate(dfs_transitions.items()):
         linestyle = (i * linewidth, (n, n * linewidth))
 
-        transition_idxs = [df.groupby(f"Val{j}")["Idx"].apply(list)[1] for j in range(seeds)]
+        transition_idxs = []
+        for j in range(seeds):
+            grouped = df.groupby(f"Val{j}")["Idx"].apply(list)
+            if 1 not in grouped:
+                raise ValueError(f"no transitions were detected for seed {j} of run {i}")
+            transition_idxs.append(grouped[1])
+
         transitions = [sum(v) / len(v) for v in map(lambda vs: [v for v in vs if not isnan(v)], zip(*transition_idxs))]
         ax.vlines(transitions, 0, 1, linestyles=linestyle, colors=f"C{i}")
 

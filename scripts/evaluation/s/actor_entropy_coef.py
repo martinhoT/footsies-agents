@@ -79,10 +79,10 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
         xlabel="Episode",
         ylabel="Win rate",
         run_name_mapping={
-            "actor_entropy_coef_002":   "$\\beta = 0.02$",
-            "actor_entropy_coef_004":   "$\\beta = 0.04$",
-            "actor_entropy_coef_008":   "$\\beta = 0.08$",
-            "actor_entropy_coef_016":   "$\\beta = 0.16$",
+            "actor_entropy_coef_002_curriculum":   "$\\beta = 0.02$",
+            "actor_entropy_coef_004_curriculum":   "$\\beta = 0.04$",
+            "actor_entropy_coef_008_curriculum":   "$\\beta = 0.08$",
+            "actor_entropy_coef_016_curriculum":   "$\\beta = 0.16$",
         },
     )
 

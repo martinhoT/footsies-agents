@@ -6,7 +6,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import GameModelObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 20, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     runs_raw = {
         "gm_residual": {"learn": "all", "game_model_method": "residual", "game_model_skippers": True, "use_reaction_time": True},
         "gm_normal": {"learn": "all", "game_model_method": "normal", "game_model_skippers": True, "use_reaction_time": True},
@@ -104,7 +104,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
             runs=runs_dataset,
             observer_type=GameModelObserver,
             seeds=seeds,
-            processes=processes,
+            processes=min(processes, 10), # the PC gets way too hot if all CPUs are constantly running
             epochs=epochs,
             shuffle=shuffle,
             y=y,
@@ -126,7 +126,7 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 10, processes
                 "dataset_gm_differences":  "Differences",
             },
             attr_name="loss" + data_label,
-            yscale="log",
+            # yscale="log",
         )
 
 if __name__ == "__main__":

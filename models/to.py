@@ -24,7 +24,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     use_reaction_time: bool = False,
     use_game_model: bool = True,
     game_model_skippers: bool = True,
-    game_model_method: Literal["residual", "differences", "normal"] = "residual",
+    game_model_method: Literal["residual", "differences", "normal"] = "differences",
     
     # Learn what?
     learn: Literal["gm", "no-gm", "none", "all"] = "no-gm",
@@ -41,7 +41,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     # Highly-tunable hyperparameters
     actor_lr: float = 3e-2,
     critic_lr: float = 1e-2,
-    actor_entropy_coef: float = 0.04,
+    actor_entropy_coef: float = 0.01,
     actor_gradient_clipping: float = 0.5,
     critic_discount: float = 1.0,
     # NOTE: these values are weird because I reformulated the opponent model loss for simplicity

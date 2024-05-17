@@ -29,6 +29,9 @@ LOGGER = logging.getLogger("scripts.evaluation.custom_loop")
 
 
 class Observer(ABC):
+    def __init__(self, *args, **kwargs):
+        pass
+
     @abstractmethod
     def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: FootsiesAgentBase | BaseAlgorithm):
         pass
@@ -127,21 +130,50 @@ class WinRateObserver(Observer):
 
 
 class GameModelObserver(Observer):
-    def __init__(self, log_frequency: int = 1000):
+    def __init__(self, log_frequency: int = 1000, validation_set: tuple[T.Tensor, ...] | None = None):
         self._log_frequency = log_frequency
+        self._validation_set = validation_set
         self._idxs = []
         self._values = []
 
     def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: GameModelAgent):
         if step % self._log_frequency == 0:
             self._idxs.append(step)
-            self._values.append((
-                agent.evaluate_average_loss_guard(),
-                agent.evaluate_average_loss_move(),
-                agent.evaluate_average_loss_move_progress(),
-                agent.evaluate_average_loss_position(),
-                agent.evaluate_average_loss_and_clear(),
-            ))
+            if self._validation_set is not None:
+                guard_loss, move_loss, move_progress_loss, position_loss = 0, 0, 0, 0
+
+                obs, next_obs, _, p1_action, p2_action, _ = self._validation_set
+                for offset, game_model in agent.game_models:
+                    if offset > 1:
+                        obs = obs[:-(offset - 1), :]
+                        p1_action = p1_action[:-(offset - 1), :]
+                        p2_action = p2_action[:-(offset - 1), :]
+                        next_obs = next_obs[(offset - 1):, :]
+                    
+                    p1_action = p1_action.squeeze(1)
+                    p2_action = p2_action.squeeze(1)
+                    gl, ml, mpl, pl = game_model.update(obs, p1_action, p2_action, next_obs, actually_update=False)
+                    guard_loss += gl
+                    move_loss += ml
+                    move_progress_loss += mpl
+                    position_loss += pl
+
+                self._values.append((
+                    guard_loss,
+                    move_loss,
+                    move_progress_loss,
+                    position_loss,
+                    guard_loss + move_loss + move_progress_loss + position_loss,
+                ))
+
+            else:
+                self._values.append((
+                    agent.evaluate_average_loss_guard(),
+                    agent.evaluate_average_loss_move(),
+                    agent.evaluate_average_loss_move_progress(),
+                    agent.evaluate_average_loss_position(),
+                    agent.evaluate_average_loss_and_clear(),
+                ))
 
     @property
     def data(self) -> tuple[list[int], tuple[list[float], ...]]:
@@ -153,18 +185,96 @@ class GameModelObserver(Observer):
 
 
 class MimicObserver(Observer):
-    def __init__(self, log_frequency: int = 1000):
+    def __init__(self, log_frequency: int = 1000, validation_set: tuple[T.Tensor, ...] | None = None):
         self._log_frequency = log_frequency
+        self._validation_set = validation_set
         self._idxs = []
         self._values = []
+
+        # Determine the points at which to reset the context
+        self._p1_should_reset_context_at: list[int] | None = None
+        self._p2_should_reset_context_at: list[int] | None = None
+
+    def _compute_reset_context_at(self, agent: MimicAgent):
+        if self._validation_set is None:
+            raise ValueError("cannot compute where to reset the context because no validation set was provided")
+        
+        obs, next_obs, _, _, _, terminated = self._validation_set
+        terminated = terminated
+        
+        self._p1_should_reset_context_at = []
+        self._p2_should_reset_context_at = []
+
+        for i, (o, no, t) in enumerate(zip(obs, next_obs, terminated)):
+            # They are not batch-like...
+            o = o.unsqueeze(0)
+            no = no.unsqueeze(0)
+            t = bool(t.item()) # convert to bool to satisfy Pylance
+            
+            if agent.p1_model is not None:
+                if agent.p1_model.should_reset_context(o, no, t):
+                    self._p1_should_reset_context_at.append(i)
+            
+            if agent.p2_model is not None:
+                if agent.p2_model.should_reset_context(o, no, t):
+                    self._p2_should_reset_context_at.append(i)
+        
+        # Add the final point (this also allows not resetting context at all to work).
+        self._p1_should_reset_context_at.append(i + 1)
+        self._p2_should_reset_context_at.append(i + 1)
+
+        # The arrays should contain context lengths, not indices.
+        for i in reversed(range(1, len(self._p1_should_reset_context_at))):
+            self._p1_should_reset_context_at[i] -= self._p1_should_reset_context_at[i - 1]
+        
+        for i in reversed(range(1, len(self._p2_should_reset_context_at))):
+            self._p2_should_reset_context_at[i] -= self._p2_should_reset_context_at[i - 1]
 
     def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: MimicAgent):
         if step % self._log_frequency == 0:
             self._idxs.append(step)
-            self._values.append((
-                agent.evaluate_p1_average_loss_and_clear(),
-                agent.evaluate_p2_average_loss_and_clear(),
-            ))
+            if self._validation_set is not None:
+                loss_p1 = None
+                loss_p2 = None
+
+                obs, _, _, p1_action, p2_action, _ = self._validation_set
+                p1_action = p1_action.squeeze(1)
+                p2_action = p2_action.squeeze(1)
+
+                # Determine the points at which to reset the context.
+                # We assume it only needs to be done once since the agent should be the same.
+                if self._p1_should_reset_context_at is None or self._p2_should_reset_context_at is None:
+                    self._compute_reset_context_at(agent)
+
+                assert self._p1_should_reset_context_at is not None
+                assert self._p2_should_reset_context_at is not None
+
+                obs_split_p1 = T.split(obs, self._p1_should_reset_context_at)
+                p1_action_split = T.split(p1_action, self._p1_should_reset_context_at)
+
+                obs_split_p2 = T.split(obs, self._p2_should_reset_context_at)
+                p2_action_split = T.split(p2_action, self._p2_should_reset_context_at)
+
+                loss_p1 = 0
+                loss_p2 = 0
+
+                for o, p1 in zip(obs_split_p1, p1_action_split):
+                    if agent.p1_model is not None:
+                        loss_p1 += agent.p1_model.compute_loss(o, p1)
+                for o, p2 in zip(obs_split_p2, p2_action_split):
+                    if agent.p2_model is not None:
+                        loss_p2 += agent.p2_model.compute_loss(o, p2)
+
+                self._values.append((
+                    loss_p1,
+                    loss_p2,
+                ))
+                
+            else:
+                self._values.append((
+                    agent.evaluate_p1_average_loss_and_clear(),
+                    agent.evaluate_p2_average_loss_and_clear(),
+                ))
 
     @property
     def data(self) -> tuple[list[int], tuple[list[float], ...]]:
@@ -335,10 +445,15 @@ def dataset_run(
 
     base_dataset = FootsiesDataset.load("footsies-dataset")
     base_dataset.shuffle() # this will internally use the seed set in random
-    dataset = FootsiesTorchDataset(base_dataset)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    train_base_dataset, validation_base_dataset = base_dataset.generate_split(0.9)
+    train_dataset = FootsiesTorchDataset(train_base_dataset)
+    validation_dataset = FootsiesTorchDataset(validation_base_dataset)
+    dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
 
-    observer = observer_type()
+    # Lazy way to create a whole tensor batch
+    validation_set: tuple[T.Tensor, ...] = next(iter(DataLoader(validation_dataset, batch_size=len(validation_dataset), shuffle=False)))
+    validation_set = (validation_set[0].float(), validation_set[1].float(), validation_set[2].float(), validation_set[3].long(), validation_set[4].long(), validation_set[5].bool())
+    observer = observer_type(log_frequency=10000, validation_set=validation_set)
 
     step = 0
     for epoch in range(epochs):

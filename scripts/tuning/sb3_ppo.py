@@ -6,7 +6,17 @@ from gymnasium import Env
 from torch import nn
 
 
-def create_model_from_parameters(env: Env, activation_fn: str, pi_arch: str, vf_arch: str, learning_rate: float, gae_lambda: float, ent_coef: float, vf_coef: float, gamma: float) -> PPO:
+def create_model_from_parameters(env: Env, *,
+    learning_rate: float,
+    gae_lambda: float,
+    ent_coef: float,
+    vf_coef: float,
+    gamma: float = 1.0,
+    pi_arch: str = "[64, 64]",
+    vf_arch: str = "[128, 128]",
+    activation_fn: str = "nn.LeakyReLU",
+) -> PPO:
+    
     activation_fn = eval(activation_fn, {"nn": nn})
     pi_arch = eval(pi_arch)
     vf_arch = eval(vf_arch)
@@ -38,18 +48,11 @@ def create_model_from_parameters(env: Env, activation_fn: str, pi_arch: str, vf_
 
 
 def define_model(trial: optuna.Trial, env: Env) -> PPO:
-    pi_arch = "[64, 64]"
-    vf_arch = "[128, 128]"
-
     return create_model_from_parameters(env,
-        activation_fn="nn.LeakyReLU",
-        pi_arch=pi_arch,
-        vf_arch=vf_arch,
         learning_rate=trial.suggest_float("learning_rate", 1e-5, 1e-1),
         gae_lambda=trial.suggest_float("gae_lambda", 0.0, 1.0),
         ent_coef=trial.suggest_float("ent_coef", 0.0, 1.0),
         vf_coef=trial.suggest_float("vf_coef", 0.0, 1.0),
-        gamma=1.0,
     )
 
 

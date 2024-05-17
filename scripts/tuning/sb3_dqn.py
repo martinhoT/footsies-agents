@@ -6,7 +6,14 @@ from gymnasium import Env
 from torch import nn
 
 
-def create_model_from_parameters(env: Env, activation_fn: str, net_arch: str, learning_rate: float, tau: float, gamma: float) -> DQN:
+def create_model_from_parameters(env: Env, *,
+    learning_rate: float,
+    tau: float,
+    gamma: float,
+    net_arch: str = "[128, 128]",
+    activation_fn: str = "nn.LeakyReLU",
+) -> DQN:
+    
     activation_fn = eval(activation_fn, {"nn": nn})
     net_arch = eval(net_arch)
     
@@ -31,8 +38,6 @@ def create_model_from_parameters(env: Env, activation_fn: str, net_arch: str, le
 
 def define_model(trial: optuna.Trial, env: Env) -> DQN:
     return create_model_from_parameters(env,
-        activation_fn="nn.LeakyReLU",
-        net_arch="[128, 128]",
         learning_rate=trial.suggest_float("learning_rate", 1e-5, 1e-1),
         tau=trial.suggest_float("tau", 0.0, 1.0),
         gamma=trial.suggest_float("gamma", 0.0, 1.0),
