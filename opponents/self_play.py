@@ -138,7 +138,7 @@ class SelfPlayManager(OpponentManager):
         
         Parameters
         ----------
-        - `game_result`: the result of the game, in terms of the agent's perspective. 1 for win, 0 for loss, 0.5 for draw
+        - `game_result`: the result of the game, in the agent's perspective. 1 for win, 0 for loss, 0.5 for draw
         """
         if self.agent is None:
             raise RuntimeError("the snapshot method should have already been set before interacting with the environment, quitting")
@@ -207,8 +207,8 @@ class SelfPlayManager(OpponentManager):
         """Set the agent, from which snapshots will be taken."""
         self.agent = agent
 
-    def play_game_against(self, opponent: Opponent | None) -> int:
-        """Have the agent play a game against the specified opponent. Return the game result (1 on win, 0 on draw and -1 on loss)."""
+    def play_game_against(self, opponent: Opponent | None) -> float:
+        """Have the agent play a game against the specified opponent. Return the game result (1 on win, 0.5 on draw and 0 on loss)."""
         if self.agent is None:
             raise ValueError("there needs to be an agent set for this manager")
 
@@ -220,14 +220,20 @@ class SelfPlayManager(OpponentManager):
         while not (terminated or truncated):
             action = self.agent.act(obs, info)
             obs, reward, terminated, truncated, info = env.step(action)
-    
-        return (float(reward) > 0) if not truncated else info["guard"][0] > info["guard"][1]
+
+        result = 0.5
+        if terminated and (reward != 0.0):
+            result = 1 if float(reward) > 0.0 else 0
+        elif truncated and (info["guard"][0] != info["guard"][1]):
+            result = 1 if info["guard"][0] > info["guard"][1] else 0
+
+        return result
 
     def update_elo_sweep(self, episodes_per_opponent: int = 20):
         """Update Elos of all opponents and the agent."""
         regime = [(opponent, _) for opponent in self.opponent_history for _ in range(episodes_per_opponent)]
         for opponent, _ in tqdm(regime, desc="Elo sweep", unit="game", leave=False, dynamic_ncols=True, colour="#c651f0"):
-            game_result = (self.play_game_against(opponent.opp) + 1) / 2
+            game_result = self.play_game_against(opponent.opp)
             self.update_elo(opponent, game_result)
         
     def close(self):
