@@ -98,7 +98,7 @@ def main(
     if small:
         opponent_labels = ["Blank", "NSpammer", "BSpammer"]
     else:
-        opponent_labels = ["Blank", "NSpammer", "BSpammer", "NSpecialSpammer", "WhiffPunisher", "Bot"]
+        opponent_labels = ["Blank", "NSpammer", "BSpammer", "NSpecialSpammer", "BSpecialSpammer", "WhiffPunisher", "Bot"]
 
     agent_regimes: list[AgentTrainingRegime] = []
     for training_opponent_label in opponent_labels:
@@ -173,7 +173,6 @@ def main(
     ) 
     ax.set_xlabel("Evaluation opponent")
     ax.set_ylabel("Training opponent")
-    ax.set_title("Time taken to adapt to a new opponent after pre-training")
     
     fig = ax.get_figure()
     assert fig is not None
