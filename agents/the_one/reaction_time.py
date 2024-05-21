@@ -24,6 +24,7 @@ class ReactionTimeEmulator:
         multiplier: float = 1,
         additive: float = 0,
         history_size: int = 30,
+        temperature: float = 1.0,
     ):
         """
         Emulator of human choice reaction time following Hick's law.
@@ -33,12 +34,14 @@ class ReactionTimeEmulator:
         - `multiplier`: the entropy multiplier in the reaction time formula
         - `additive`: the additive constant in the reaction time formula
         - `history_size`: the size of the observation history
+        - `temperature`: the temperature for both the agent and opponent action distribution's
         """
         self._actor = actor
         self._opponent = opponent
         self._multiplier = multiplier
         self._additive = additive
         self._history_size = history_size
+        self._temperature = temperature
         self._predictor = None
 
         self._states = deque([], maxlen=history_size)
@@ -129,9 +132,9 @@ class ReactionTimeEmulator:
         - `opponent_hidden_state`: the hidden state of the opponent model at `observation`, useful for further inference with the opponent model
         """
         # Calculate the decision distribution.
-        opp_probs, hs = self._opponent.network.probabilities(self._prev_obs, self._opp_hs)
+        opp_probs, hs = self._opponent.network.probabilities(self._prev_obs, self._opp_hs, temperature=self._temperature)
         self._opp_hs = hs
-        d = self._actor.decision_distribution(self._prev_obs, opp_probs, detached=True)
+        d = self._actor.decision_distribution(self._prev_obs, opp_probs, detached=True, temperature=self._temperature)
 
         # Calculate the reaction time from the decision distribution.
         if self._constant:

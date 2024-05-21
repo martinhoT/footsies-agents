@@ -58,15 +58,68 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
     plot_data(
         dfs=dfs,
         title="",
-        fig_path=result_path + "_policy_ent",
+        fig_path=result_path + "_ent",
         exp_factor=0.9,
         xlabel="Time step",
-        ylabel="Win rate",
+        ylabel="Entropy",
         run_name_mapping={
             "yes_agent_frameskip":  "Decision skip",
             "no_agent_frameskip":   "No decision skip",
         },
     )
+
+    # Advantage
+
+    dfs = get_data(
+        data="learningdelta",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="",
+        fig_path=result_path + "_delta",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Advantage",
+        run_name_mapping={
+            "yes_agent_frameskip":  "Decision skip",
+            "no_agent_frameskip":   "No decision skip",
+        },
+    )
+
+    # Delta
+
+    dfs = get_data(
+        data="learningqlearner_error",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="",
+        fig_path=result_path + "_qerror",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="TD error",
+        run_name_mapping={
+            "yes_agent_frameskip":  "Decision skip",
+            "no_agent_frameskip":   "No decision skip",
+        },
+    )
+
 
 if __name__ == "__main__":
     import tyro

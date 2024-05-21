@@ -76,7 +76,7 @@ class ActorNetwork(nn.Module):
         for simple in ActionMap.PERFORMABLE_SIMPLES_IN_HITSTOP_INT:
             self._hitstop_mask[..., simple] = True
 
-    def forward(self, obs: T.Tensor):
+    def forward(self, obs: T.Tensor, temperature: float = 1.0):
         if self._footsies_masking:
             in_hitstop = ActionMap.is_in_hitstop_torch(obs, p1=self._p1)
             action_mask = T.ones_like(self._hitstop_mask).repeat(obs.size(0), 1, 1)
@@ -86,20 +86,20 @@ class ActorNetwork(nn.Module):
             action_mask = None
         
         rep = self._representation(obs)
-        return self.from_representation(rep, action_mask)
+        return self.from_representation(rep, action_mask, temperature=temperature)
     
-    def from_representation(self, rep: T.Tensor, action_mask: T.Tensor | None = None) -> T.Tensor:
+    def from_representation(self, rep: T.Tensor, action_mask: T.Tensor | None = None, temperature: float = 1.0) -> T.Tensor:
         logits = self.actor_layers(rep)
         if action_mask is not None:
             # Invalidate all actions that are not in the mask
             logits = logits.masked_fill(~action_mask, -T.inf)
-        return self.softmax(logits)
+        return self.softmax(logits / temperature)
     
     @property
     def consider_opponent_action(self) -> bool:
         return self._consider_opponent_action
     
-    def probabilities(self, obs: T.Tensor, next_opponent_action: T.Tensor | int | None) -> T.Tensor:
+    def probabilities(self, obs: T.Tensor, next_opponent_action: T.Tensor | int | None, temperature: float = 1.0) -> T.Tensor:
         """Get the action probability distribution for the given observation and predicted opponent action. If the next opponent action is a tensor, then it should be 1-dimensional."""
         if next_opponent_action is None:
             next_opponent_action_idx = slice(None)
@@ -107,10 +107,10 @@ class ActorNetwork(nn.Module):
             next_opponent_action_idx = next_opponent_action
 
         if isinstance(next_opponent_action_idx, (int, slice)):
-            action_probabilities = self(obs)[:, next_opponent_action_idx, :]
+            action_probabilities = self(obs, temperature=temperature)[:, next_opponent_action_idx, :]
             return action_probabilities
 
-        action_probabilities: T.Tensor = self(obs)
+        action_probabilities: T.Tensor = self(obs, temperature=temperature)
         return action_probabilities.take_along_dim(next_opponent_action_idx[:, None, None], dim=1)
 
     def distribution_size(self, obs: T.Tensor) -> int:
@@ -118,9 +118,9 @@ class ActorNetwork(nn.Module):
         in_hitstop = ActionMap.is_in_hitstop_torch(obs, p1=self._p1)
         return 2 if in_hitstop else self._action_dim
 
-    def decision_distribution(self, obs: T.Tensor, next_opponent_policy: T.Tensor, detached: bool = False) -> Categorical:
+    def decision_distribution(self, obs: T.Tensor, next_opponent_policy: T.Tensor, detached: bool = False, temperature: float = 1.0) -> Categorical:
         """Get the decision probabilities and distribution for the given observation and next opponent policy. The next opponent policy should have dimensions `batch_dim X opponent_action_dim`."""
-        actor_probs = self.probabilities(obs, None)
+        actor_probs = self.probabilities(obs, None, temperature=temperature)
         if detached:
             actor_probs = actor_probs.detach()
         probs = next_opponent_policy @ actor_probs

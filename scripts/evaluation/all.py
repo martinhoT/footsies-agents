@@ -39,8 +39,8 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
-    "critic_opponent_update_style":         critic_opponent_update_style,
     "consider_opponent_actions":            consider_opponent_actions,
+    "critic_opponent_update_style":         critic_opponent_update_style,
     "discount_factor":                      discount_factor,
     "game_model_method":                    game_model_method,
     "hitstop_freeze":                       hitstop_freeze,
@@ -57,7 +57,7 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     # Put self-play as the last one since it's the one that takes the longest to execute
     "self_play":                            self_play,
     # Actually put baseline comparison as the last one since it may change (if we perform more tuning)
-    "baseline_compare":                     baseline_compare,
+    # "baseline_compare":                     baseline_compare,
 }
 
 

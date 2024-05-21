@@ -244,11 +244,11 @@ class TheOneAgent(FootsiesAgentTorch):
     @property
     def learn_a2c(self) -> bool:
         """Whether the agent is learning the A2C component at `update`."""
-        return self._learn
+        return self._learn_a2c
 
     @learn_a2c.setter
     def learn_a2c(self, value: bool):
-        self._learn = value
+        self._learn_a2c = value
 
     @property
     def learn_opponent_model(self) -> bool:

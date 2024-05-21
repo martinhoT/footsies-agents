@@ -94,10 +94,10 @@ class PlayerModelNetwork(nn.Module):
         output = self.layers(x)
         return output, hidden_state
 
-    def probabilities(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.Tensor, T.Tensor]:
+    def probabilities(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto", temperature: float = 1.0) -> tuple[T.Tensor, T.Tensor]:
         """The action probabilities at the given observation."""
         logits, new_hidden = self(obs, hidden)
-        return self.softmax(logits), new_hidden
+        return self.softmax(logits / temperature), new_hidden
 
     def log_probabilities(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.Tensor, T.Tensor]:
         """The action log-probabilities at the given observation."""

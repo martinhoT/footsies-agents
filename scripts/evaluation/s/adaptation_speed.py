@@ -72,6 +72,30 @@ def train_agent_against_opponent(agent: TheOneAgent, env: Env, footsies_env: Foo
         obs, info = next_obs, next_info
 
 
+def heatplot(mtx: T.Tensor, xlabels: list[str], ylabels: list[str], fig_path: str | None = None, color_reverse: bool = False):
+    ax = sns.heatmap(mtx,
+        vmin=0.0,
+        vmax=1.0,
+        cmap="viridis" + ("_r" if color_reverse else ""), # "crest" or "viridis" or "mako"
+        annot=True,
+        fmt=".2f",
+        cbar=True,
+        square=True,
+        xticklabels=xlabels,
+        yticklabels=ylabels,
+    ) 
+    ax.set_xlabel("Evaluation opponent")
+    ax.set_ylabel("Training opponent")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=60)
+    
+    fig = ax.get_figure()
+    assert fig is not None
+    fig.tight_layout()
+    if fig_path is not None:
+        fig.savefig(fig_path)
+    fig.clear()
+
+
 def main(
     seeds: int = 10,
     timesteps: int = int(1e6),
@@ -143,6 +167,8 @@ def main(
     if dfs is None:
         return
 
+    # Time taken to adapt (get to wr_thresh)
+
     # Create the matrix first. We exclude "Blank" as an evaluation opponent
     mtx = T.zeros((len(opponent_labels), len(opponent_labels) - 1))
     for name, df in dfs.items():
@@ -160,25 +186,31 @@ def main(
         mtx[row, col] = time_taken / timesteps
 
     # Plot the heatmap
-    ax = sns.heatmap(mtx,
-        vmin=0.0,
-        vmax=1.0,
-        cmap="mako_r", # or "crest" or "viridis"
-        annot=True,
-        fmt=".2f",
-        cbar=True,
-        square=True,
-        xticklabels=opponent_labels[1:],
-        yticklabels=opponent_labels,
-    ) 
-    ax.set_xlabel("Evaluation opponent")
-    ax.set_ylabel("Training opponent")
-    
-    fig = ax.get_figure()
-    assert fig is not None
-    fig.savefig(result_path)
-    fig.tight_layout()
-    fig.clear()
+    heatplot(
+        mtx=mtx,
+        fig_path=result_path + "_time",
+        xlabels=opponent_labels[1:],
+        ylabels=opponent_labels,
+        color_reverse=True,
+    )
+
+    # Final win rate
+
+    mtx = T.zeros((len(opponent_labels), len(opponent_labels) - 1))
+    for name, df in dfs.items():
+        training_opponent_label, evaluation_opponent_label = name.split("_to_")
+        row = opponent_labels.index(training_opponent_label)
+        col = opponent_labels.index(evaluation_opponent_label) - 1
+
+        mtx[row, col] = df.iloc[-1, :]["win_rateMean"]
+
+    # Plot the heatmap
+    heatplot(
+        mtx=mtx,
+        fig_path=result_path + "_wr",
+        xlabels=opponent_labels[1:],
+        ylabels=opponent_labels,
+    )
 
 if __name__ == "__main__":
     import tyro

@@ -68,6 +68,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
+    reaction_time_temperature: float = 0.25,
 
     # Can only be specified programatically
     critic_arch_hs: conf.Suppress[list[int]] = [128, 128],
@@ -204,6 +205,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
             # These don't matter since they will be substituted by the call below
             multiplier=1.0,
             additive=0.0,
+            temperature=reaction_time_temperature,
         )
         reaction_time_emulator.confine_to_range(REACTION_TIME_MIN, REACTION_TIME_MAX, action_dim)
 

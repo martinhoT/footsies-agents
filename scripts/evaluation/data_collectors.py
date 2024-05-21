@@ -110,7 +110,7 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
 
         # Collect the data
 
-        with mp.Pool(processes=processes) as pool:
+        with mp.get_context("spawn").Pool(processes=processes) as pool:
             custom_loop_partial = partial(custom_loop_df, timesteps=timesteps)
 
             args: list[tuple[str, AgentCustomRun, str, int, type[Observer], int]] = []
@@ -190,7 +190,7 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                 return None
         
         # Try to avoid oversubscription, since each agent will have at least 2 processes running: itself, and the game
-        with mp.Pool(processes=processes) as pool:
+        with mp.get_context("spawn").Pool(processes=processes) as pool:
             args: list[MainArgs] = []
             for i, (run_name, missing_seeded_runs) in enumerate(missing.items()):
                 run_args = runs[run_name]
@@ -288,7 +288,7 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
 
         # Collect the data
 
-        with mp.Pool(processes=processes) as pool:
+        with mp.get_context("spawn").Pool(processes=processes) as pool:
             dataset_run_partial = partial(dataset_run_df, epochs=epochs, shuffle=shuffle)
 
             args: list[tuple[str, FootsiesAgentBase, str, type[Observer], int]] = []

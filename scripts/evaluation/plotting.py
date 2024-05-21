@@ -29,6 +29,7 @@ def plot_data(dfs: dict[str, pd.DataFrame], *, title: str, fig_path: str | None,
     if ylabel is not None:
         plt.ylabel(ylabel)
     plt.yscale(yscale)
+    plt.tight_layout()
 
     if fig_path is not None:
         plt.savefig(fig_path)

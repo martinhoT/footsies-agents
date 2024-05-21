@@ -5,11 +5,11 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     runs_raw = {
-        "discount_1_0_correct": {"critic_discount": 1.0, "policy_cumulative_discount": True},
         "discount_1_0": {"critic_discount": 1.0, "policy_cumulative_discount": False},
         # "discount_0_999": {"critic_discount": 0.999, "policy_cumulative_discount": False},
         "discount_0_99": {"critic_discount": 0.99, "policy_cumulative_discount": False},
         "discount_0_9": {"critic_discount": 0.9, "policy_cumulative_discount": False},
+        "discount_1_0_correct": {"critic_discount": 1.0, "policy_cumulative_discount": True},
         # "discount_0_999_correct": {"critic_discount": 0.999, "policy_cumulative_discount": True},
         "discount_0_99_correct": {"critic_discount": 0.99, "policy_cumulative_discount": True},
         "discount_0_9_correct": {"critic_discount": 0.9, "policy_cumulative_discount": True},

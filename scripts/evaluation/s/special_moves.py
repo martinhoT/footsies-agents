@@ -113,39 +113,41 @@ def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: boo
 
     # Win rate against in-game bot after training against WhiffPunisher
 
-    runs_custom = {k: AgentCustomRun(
-        agent=create_agent,
-        opponent=None,
-        env_args=env_args,
-        pre_loop=cast(PreCustomLoop, partial(train_against_whiff_punisher, timesteps=timesteps, label=k)),
-    ) for k, env_args in runs_raw.items()}
+    # NOTE: do not know if this would be needed now
 
-    dfs = get_data_custom_loop(
-        result_path=result_path,
-        runs=runs_custom,
-        observer_type=WinRateObserver,
-        seeds=seeds,
-        timesteps=timesteps,
-        processes=processes,
-        y=y,
-    )
+    # runs_custom = {k: AgentCustomRun(
+    #     agent=create_agent,
+    #     opponent=None,
+    #     env_args=env_args,
+    #     pre_loop=cast(PreCustomLoop, partial(train_against_whiff_punisher, timesteps=timesteps, label=k)),
+    # ) for k, env_args in runs_raw.items()}
 
-    if dfs is None:
-        return
+    # dfs = get_data_custom_loop(
+    #     result_path=result_path,
+    #     runs=runs_custom,
+    #     observer_type=WinRateObserver,
+    #     seeds=seeds,
+    #     timesteps=timesteps,
+    #     processes=processes,
+    #     y=y,
+    # )
+
+    # if dfs is None:
+    #     return
     
-    plot_data(
-        dfs=dfs,
-        title="",
-        fig_path=result_path + "_pretrain_wr",
-        exp_factor=0.9,
-        xlabel="Time step",
-        ylabel="Win rate",
-        run_name_mapping={
-            "no_specials":  "Without special moves",
-            "yes_specials": "With special moves",
-        },
-        attr_name="win_rate",
-    )
+    # plot_data(
+    #     dfs=dfs,
+    #     title="",
+    #     fig_path=result_path + "_pretrain_wr",
+    #     exp_factor=0.9,
+    #     xlabel="Time step",
+    #     ylabel="Win rate",
+    #     run_name_mapping={
+    #         "no_specials":  "Without special moves",
+    #         "yes_specials": "With special moves",
+    #     },
+    #     attr_name="win_rate",
+    # )
 
 if __name__ == "__main__":
     import tyro

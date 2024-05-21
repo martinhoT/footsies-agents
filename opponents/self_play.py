@@ -3,10 +3,11 @@ import logging
 from torch.utils.tensorboard import SummaryWriter # type: ignore
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, cast
+from typing import Any, Callable, cast
 from opponents.base import OpponentManager, Opponent
 from opponents.curriculum import CurriculumOpponent
 from agents.base import FootsiesAgentOpponent, FootsiesAgentBase
+from agents.the_one.agent import TheOneAgent
 from gymnasium import Env
 from os import path
 from footsies_gym.envs.footsies import FootsiesEnv
@@ -220,6 +221,8 @@ class SelfPlayManager(OpponentManager):
         while not (terminated or truncated):
             action = self.agent.act(obs, info)
             obs, reward, terminated, truncated, info = env.step(action)
+            if terminated or truncated:
+                self.agent.reset()
 
         result = 0.5
         if terminated and (reward != 0.0):
