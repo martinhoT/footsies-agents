@@ -56,6 +56,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     game_model_single_skipper: int = 1,
     consider_opponent_at_all: bool = True,
     one_decision_at_hitstop: bool = True,
+    use_softmax: bool = True,
+    reaction_time_temperature: float = 0.25,
 
     # Probably should be kept as-is
     ppo: bool = False,
@@ -68,7 +70,6 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     critic_target_update_rate: int = 1000,
     critic_table: bool = False,
     act_with_qvalues: bool = False,
-    reaction_time_temperature: float = 0.25,
 
     # Can only be specified programatically
     critic_arch_hs: conf.Suppress[list[int]] = [128, 128],
@@ -97,6 +98,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         opponent_action_dim=opponent_action_dim,
         footsies_masking=action_masking,
         p1=True,
+        use_softmax=use_softmax,
     )
 
     if critic_table:
@@ -171,6 +173,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
                 hidden_layer_sizes=opponent_model_arch_hs,
                 hidden_layer_activation=opponent_model_arch_activation,
                 recurrent=opponent_model_recurrent,
+                use_softmax=use_softmax,
             ),
             scar_store=ScarStore(
                 obs_dim=obs_dim,

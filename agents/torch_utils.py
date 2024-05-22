@@ -204,12 +204,23 @@ class InputClip(nn.Module):
 
 
 class ProbabilityDistribution(nn.Module):
-    def __init__(self):
+    def __init__(self, dim: int | None = None):
         """Makes input sum to 1"""
         super().__init__()
+        self.dim = dim
 
     def forward(self, x: T.Tensor):
-        return x / T.sum(x)
+        return x / T.sum(x, dim=self.dim)
+
+
+class LogProbabilityDistribution(nn.Module):
+    def __init__(self, dim: int | None = None):
+        """Log probabilities of a simple probability distribution"""
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x: T.Tensor):
+        return T.log(x / T.sum(x, dim=self.dim))
 
 
 class DebugStoreRecent(nn.Module):

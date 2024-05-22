@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import logging
 from torch import nn
 from torch.distributions import Categorical
-from agents.torch_utils import create_layered_network, ToMatrix
+from agents.torch_utils import create_layered_network, ToMatrix, ProbabilityDistribution
 from agents.ql.ql import QFunction
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -47,6 +47,7 @@ class ActorNetwork(nn.Module):
         opponent_action_dim: int | None = None,
         footsies_masking: bool = True,
         p1: bool = True,
+        use_softmax: bool = True,
     ):
         super().__init__()
         if opponent_action_dim is None:
@@ -69,7 +70,7 @@ class ActorNetwork(nn.Module):
         self.actor_layers = create_layered_network(obs_dim, output_dim, hidden_layer_sizes, hidden_layer_activation)
         if consider_opponent_action:
             self.actor_layers.append(ToMatrix(opponent_action_dim, action_dim))
-        self.softmax = nn.Softmax(dim=-1)
+        self.prob = nn.Softmax(dim=-1) if use_softmax else ProbabilityDistribution(dim=-1)
 
         # What actions can be performed during hitstop
         self._hitstop_mask = T.zeros((1, opponent_action_dim, action_dim), dtype=T.bool)
@@ -93,7 +94,7 @@ class ActorNetwork(nn.Module):
         if action_mask is not None:
             # Invalidate all actions that are not in the mask
             logits = logits.masked_fill(~action_mask, -T.inf)
-        return self.softmax(logits / temperature)
+        return self.prob(logits / temperature)
     
     @property
     def consider_opponent_action(self) -> bool:
@@ -156,6 +157,15 @@ class ActorNetwork(nn.Module):
         cloned.load_state_dict(self.state_dict())
 
         return cloned
+
+    @property
+    def p1(self) -> bool:
+        """Whether this policy is for player 1."""
+        return self._p1
+
+    @p1.setter
+    def p1(self, value: bool):
+        self._p1 = value
 
 
 class A2CLearnerBase(ABC):

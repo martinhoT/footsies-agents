@@ -225,6 +225,7 @@ class TheOneAgent(FootsiesAgentTorch):
         opponent.learn_a2c = False
         opponent.learn_opponent_model = False
         opponent.learn_game_model = False
+        opponent.a2c.learner.actor.p1 = False
 
         return FootsiesAgentOpponent(
             agent=opponent,

@@ -1,7 +1,7 @@
 import torch as T
 import logging
 from torch import nn
-from agents.torch_utils import create_layered_network, InputClip, DebugStoreRecent
+from agents.torch_utils import create_layered_network, InputClip, ProbabilityDistribution, LogProbabilityDistribution
 from collections.abc import Generator
 from collections import deque
 from dataclasses import astuple, dataclass
@@ -27,6 +27,7 @@ class PlayerModelNetwork(nn.Module):
         hidden_layer_sizes: list[int] | None = None,
         hidden_layer_activation: type[nn.Module] = nn.LeakyReLU,
         recurrent: nn.RNNBase | bool = False,
+        use_softmax: bool = True,
     ):
         super().__init__()
 
@@ -68,8 +69,8 @@ class PlayerModelNetwork(nn.Module):
             self.layers.append(InputClip(-1, 1, leaky_coef=input_clip_leaky_coef))
 
         self.sigmoid = nn.Sigmoid()
-        self.softmax = nn.Softmax(dim=1)
-        self.log_softmax = nn.LogSoftmax(dim=1)
+        self.prob = nn.Softmax(dim=1) if use_softmax else ProbabilityDistribution(dim=1)
+        self.log_prob = nn.LogSoftmax(dim=1) if use_softmax else LogProbabilityDistribution(dim=1)
 
         # Hidden state if using recurrency
         self._hidden = None
@@ -97,12 +98,12 @@ class PlayerModelNetwork(nn.Module):
     def probabilities(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto", temperature: float = 1.0) -> tuple[T.Tensor, T.Tensor]:
         """The action probabilities at the given observation."""
         logits, new_hidden = self(obs, hidden)
-        return self.softmax(logits / temperature), new_hidden
+        return self.prob(logits / temperature), new_hidden
 
     def log_probabilities(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.Tensor, T.Tensor]:
         """The action log-probabilities at the given observation."""
         logits, new_hidden = self(obs, hidden)
-        return self.log_softmax(logits), new_hidden
+        return self.log_prob(logits), new_hidden
 
     def distribution(self, obs: T.Tensor, hidden: T.Tensor | None | str = "auto") -> tuple[T.distributions.Categorical, T.Tensor]:
         """The action distribution at the given observation."""
