@@ -64,7 +64,7 @@ def quick_env_args(**kwargs) -> EnvArgs:
 
     inner_kwargs = {
         "game_path": "../Footsies-Gym/Build/FOOTSIES.x86_64",
-        "dense_reward": False,
+        "dense_reward": True,
         # "render_mode": "human",
         "sync_mode": "synced_non_blocking",
     }

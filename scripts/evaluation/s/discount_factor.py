@@ -5,7 +5,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 1
+        seeds = 6
     
     runs_raw = {
         "discount_1_0": {"critic_discount": 1.0, "policy_cumulative_discount": False},

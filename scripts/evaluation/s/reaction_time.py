@@ -107,6 +107,10 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     if dfs is None:
         return
 
+    # Since it uses 3 models, we want to see the average loss among all of them
+    df = dfs["reaction_correction_skippers"]
+    df["ValMean"] /= 3
+
     plot_data(
         dfs=dfs,
         title="",

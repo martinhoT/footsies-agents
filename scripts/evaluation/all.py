@@ -18,6 +18,7 @@ from scripts.evaluation.s.reaction_time import main as reaction_time
 from scripts.evaluation.s.self_play import main as self_play
 from scripts.evaluation.s.sparse_vs_dense_reward_curriculum import main as sparse_vs_dense_reward_curriculum
 from scripts.evaluation.s.sparse_vs_dense_reward import main as sparse_vs_dense_reward
+from scripts.evaluation.s.softmax import main as softmax
 from scripts.evaluation.s.special_moves import main as special_moves
 from scripts.evaluation.s.target_network import main as target_network
 from scripts.evaluation.s.transfer_learning import main as transfer_learning
@@ -35,6 +36,7 @@ class EvaluationScript(Protocol):
 EVALUATIONS: dict[str, EvaluationScript] = {
     "sparse_vs_dense_reward":               sparse_vs_dense_reward,
     "special_moves":                        special_moves,
+    "softmax":                              softmax,
     "reaction_time":                        reaction_time,
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
     "action_masking":                       action_masking,

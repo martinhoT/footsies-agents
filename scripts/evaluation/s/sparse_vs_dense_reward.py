@@ -3,7 +3,7 @@ from scripts.evaluation.data_collectors import get_data
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
 
-def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 12, y: bool = False):
     if seeds is None:
         seeds = 3
     

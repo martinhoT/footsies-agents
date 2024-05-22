@@ -2,8 +2,9 @@ import os
 import pandas as pd
 import multiprocessing as mp
 import shutil
+import json
 from datetime import datetime
-from typing import Sequence, Mapping
+from typing import Sequence, Mapping, Any
 from agents.base import FootsiesAgentBase
 from footsies_gym.envs.footsies import FootsiesEnv
 from footsies_gym.envs.exceptions import FootsiesGameClosedError
@@ -169,16 +170,59 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
     return dfs
 
 
+def all_eval_trained() -> dict[str, dict[str, Any]]:
+    res: dict[str, dict[str, Any]] = {}
+
+    for eval_run in os.listdir("saved"):
+        if not eval_run.startswith("eval_"):
+            continue
+
+        eval_path = os.path.join("saved", eval_run)
+        training_args_files = [f for f in os.listdir(eval_path) if f.startswith("training_args_")]
+        training_args_files.sort(key=lambda f: datetime.strptime(f[14:-5], "%d-%m-%y_%H-%M-%S"), reverse=True)
+
+        # It's possible that there are no training args files, such as when the agent was run in a custom loop
+        if not training_args_files:
+            continue
+
+        most_recent_training_args = training_args_files[0]
+
+        most_recent_training_args_path = os.path.join(eval_path, most_recent_training_args)
+        with open(most_recent_training_args_path, "rt") as f:
+            res[eval_run] = json.load(f)
+
+    return res
+
+
+def get_similar_agent_run(args: MainArgs) -> str | None:
+    for run, run_args in all_eval_trained().items():
+        agent_args = run_args["agent"]["kwargs"]
+        args.agent.kwargs
+
+        return None
+        return run
+
+    return None
+
+
 def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False, data_cols: Sequence[int] = (0, 1), pre_trained: str | None = None) -> dict[str, pd.DataFrame] | None:
     # Halve the number of processes since there are technically going to be two processes per run: the agent and the game
     processes //= 2
     
     missing: dict[str, list[tuple[str, int]]] = {}
-    for run_name in runs:
+    for run_name, main_args in runs.items():
         for seed in range(seeds):
             run_fullname = f"eval_{run_name}_S{seed}"
             data_path = path.join("runs", run_fullname)
             if not path.exists(data_path):
+                # Try checking if there is another run that already does the same thing.
+                # If so, copy the results.
+                similar_run = get_similar_agent_run(main_args)
+                if similar_run is not None:
+                    similar_data_path = path.join("runs", similar_run)
+                    shutil.copytree(similar_data_path, data_path)
+                    continue
+
                 missing.setdefault(run_name, []).append((run_fullname, seed))
 
     if missing:

@@ -210,7 +210,8 @@ class ProbabilityDistribution(nn.Module):
         self.dim = dim
 
     def forward(self, x: T.Tensor):
-        return x / T.sum(x, dim=self.dim)
+        x = x.abs()
+        return x / x.sum(dim=self.dim, keepdim=True)
 
 
 class LogProbabilityDistribution(nn.Module):
@@ -220,7 +221,8 @@ class LogProbabilityDistribution(nn.Module):
         self.dim = dim
 
     def forward(self, x: T.Tensor):
-        return T.log(x / T.sum(x, dim=self.dim))
+        x = x.abs()
+        return T.log(x / x.sum(dim=self.dim, keepdim=True))
 
 
 class DebugStoreRecent(nn.Module):
