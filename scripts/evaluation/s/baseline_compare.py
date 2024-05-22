@@ -34,7 +34,10 @@ def create_the_one_default(env: Env) -> TheOneAgent:
     return agent
 
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+    if seeds is None:
+        seeds = 3
+    
     result_path = path.splitext(__file__)[0]
 
     runs_raw: dict[str, Callable[[Env], FootsiesAgentBase | BaseAlgorithm]] = {

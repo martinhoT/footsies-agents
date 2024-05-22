@@ -16,7 +16,10 @@ BOT = "bot_PT"
 BOT_GREEDY = "bot_greedy_PT"
 OPPONENT = "curriculum_PT"
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+    if seeds is None:
+        seeds = 2
+    
     result_path = path.splitext(__file__)[0]
 
     dummy_env, _ = create_eval_env()

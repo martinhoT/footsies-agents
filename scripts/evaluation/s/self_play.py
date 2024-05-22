@@ -6,7 +6,10 @@ from scripts.evaluation.data_collectors import get_data
 from args import SelfPlayArgs, CurriculumArgs
 from main import main as main_training
 
-def main(seeds: int = 10, timesteps: int = int(3e6), processes: int = 12, y: bool = False, just_pre_train: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 12, y: bool = False, just_pre_train: bool = False):
+    if seeds is None:
+        seeds = 6
+    
     result_path = path.splitext(__file__)[0]
 
     runs = {

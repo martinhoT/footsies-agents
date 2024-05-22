@@ -4,7 +4,10 @@ from scripts.evaluation.plotting import plot_add_curriculum_transitions, plot_da
 from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
 from args import CurriculumArgs
 
-def main(seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False, do_curriculum: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False, do_curriculum: bool = False):
+    if seeds is None:
+        seeds = 3
+    
     result_path = path.splitext(__file__)[0]
     
     runs_raw = {

@@ -7,7 +7,10 @@ from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
 from args import CurriculumArgs
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False, do_curriculum: bool = False):
+    if seeds is None:
+        seeds = 3
+    
     result_basename = path.splitext(__file__)[0] + name_suffix
 
     run_name_mapping = {
@@ -28,57 +31,6 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes:
         agent_args=quick_agent_args(k, model="to", kwargs=v),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
-
-    # Win rate on normal agent against curriculum
-    runs_curriculum = {k + "_curriculum": quick_train_args(
-        agent_args=quick_agent_args(k + "_curriculum", model="to", kwargs=v),
-        env_args=quick_env_args(
-            curriculum=CurriculumArgs(
-                enabled=True,
-                episode_threshold=1000,
-            ),
-        ),
-        timesteps=timesteps,
-    ) for k, v in runs_raw.items()}
-
-    dfs = get_data(
-        data="performancewin_rate_against_current_curriculum_opponent",
-        runs=runs_curriculum,
-        seeds=seeds,
-        processes=processes,
-        y=y,
-    )
-
-    if dfs is None:
-        return
-
-    plot_data(
-        dfs=dfs,
-        title="",
-        fig_path=None,
-        exp_factor=0.9,
-        xlabel="Time step",
-        ylabel="Win rate",
-        run_name_mapping={k + "_curriculum": v for k, v in run_name_mapping.items()},
-    )
-
-    dfs_transitions = get_data(
-        data="performancewin_rate_against_current_curriculum_opponent",
-        runs=runs_curriculum,
-        seeds=seeds,
-        processes=processes,
-        y=y,
-        data_cols=(0, 2),
-    )
-
-    if dfs_transitions is None:
-        return
-
-    plot_add_curriculum_transitions(
-        dfs_transitions=dfs_transitions,
-        seeds=seeds,
-        fig_path=result_basename + "_wr_curriculum",
-    )
 
     # Win rate on normal agent
     dfs = get_data(
@@ -158,9 +110,6 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes:
         return
 
     for player in ("p1", "p2"):
-        title_suffix = f" ({player.upper()})"
-        attr_name = f"{player}_loss"
-
         plot_data(
             dfs=dfs,
             title=f"Opponent model loss on the dataset ({player.upper()})",
@@ -170,6 +119,58 @@ def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes:
             ylabel="Loss",
             run_name_mapping={"dataset_" + k: v for k, v in run_name_mapping.items()},
             attr_name=f"{player}_loss",
+        )
+    
+    # Win rate on normal agent against curriculum
+    if do_curriculum:
+        runs_curriculum = {k + "_curriculum": quick_train_args(
+            agent_args=quick_agent_args(k + "_curriculum", model="to", kwargs=v),
+            env_args=quick_env_args(
+                curriculum=CurriculumArgs(
+                    enabled=True,
+                    episode_threshold=1000,
+                ),
+            ),
+            timesteps=timesteps,
+        ) for k, v in runs_raw.items()}
+
+        dfs = get_data(
+            data="performancewin_rate_against_current_curriculum_opponent",
+            runs=runs_curriculum,
+            seeds=seeds,
+            processes=processes,
+            y=y,
+        )
+
+        if dfs is None:
+            return
+
+        plot_data(
+            dfs=dfs,
+            title="",
+            fig_path=None,
+            exp_factor=0.9,
+            xlabel="Time step",
+            ylabel="Win rate",
+            run_name_mapping={k + "_curriculum": v for k, v in run_name_mapping.items()},
+        )
+
+        dfs_transitions = get_data(
+            data="performancewin_rate_against_current_curriculum_opponent",
+            runs=runs_curriculum,
+            seeds=seeds,
+            processes=processes,
+            y=y,
+            data_cols=(0, 2),
+        )
+
+        if dfs_transitions is None:
+            return
+
+        plot_add_curriculum_transitions(
+            dfs_transitions=dfs_transitions,
+            seeds=seeds,
+            fig_path=result_basename + "_wr_curriculum",
         )
 
 if __name__ == "__main__":

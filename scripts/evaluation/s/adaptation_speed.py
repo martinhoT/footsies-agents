@@ -97,15 +97,14 @@ def heatplot(mtx: T.Tensor, xlabels: list[str], ylabels: list[str], fig_path: st
 
 
 def main(
-    seeds: int = 10,
+    seeds: int | None = None,
     timesteps: int = int(1e6),
     processes: int = 12,
     y: bool = False,
     small: bool = False,
     wr_thresh: float = 0.7,
 ):
-    if seeds > 1:
-        print("The number of seeds will be forced to 1 to not take an eternity")
+    if seeds is None:
         seeds = 1
 
     result_path = path.splitext(__file__)[0]

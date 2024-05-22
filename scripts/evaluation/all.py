@@ -28,11 +28,14 @@ from sys import stdout
 
 
 class EvaluationScript(Protocol):
-    def __call__(self, *, seeds: int = 10, timesteps: int = int(1e6), processes: int = 12, y: bool = False) -> None:
+    def __call__(self, *, seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False) -> None:
         ...
 
 
 EVALUATIONS: dict[str, EvaluationScript] = {
+    "sparse_vs_dense_reward":               sparse_vs_dense_reward,
+    "special_moves":                        special_moves,
+    "reaction_time":                        reaction_time,
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
     "action_masking":                       action_masking,
     "actor_entropy_coef":                   actor_entropy_coef,
@@ -47,21 +50,18 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
     "opponent_model_entropy_coef":          opponent_model_entropy_coef,
     "opponent_model_recurrent":             opponent_model_recurrent,
-    "reaction_time":                        reaction_time,
     "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
-    "sparse_vs_dense_reward":               sparse_vs_dense_reward,
-    "special_moves":                        special_moves,
     "target_network":                       target_network,
     "transfer_learning":                    transfer_learning,
     "zero_sum":                             zero_sum,
     # Put self-play as the last one since it's the one that takes the longest to execute
     "self_play":                            self_play,
     # Actually put baseline comparison as the last one since it may change (if we perform more tuning)
-    # "baseline_compare":                     baseline_compare,
+    "baseline_compare":                     baseline_compare,
 }
 
 
-def main(seeds: int = 10, processes: int = 12, reverse: bool = False):
+def main(seeds: int | None = None, processes: int = 12, reverse: bool = False):
     evals = EVALUATIONS.items()
     if reverse:
         evals = reversed(evals)

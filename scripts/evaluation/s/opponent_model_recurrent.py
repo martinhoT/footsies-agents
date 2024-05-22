@@ -6,7 +6,10 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import MimicObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int = 10, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+    if seeds is None:
+        seeds = 3
+
     result_basename = path.splitext(__file__)[0] + name_suffix
 
     run_name_mapping = {
