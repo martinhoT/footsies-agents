@@ -57,7 +57,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     consider_opponent_at_all: bool = True,
     one_decision_at_hitstop: bool = True,
     use_softmax: bool = True,
-    reaction_time_temperature: float = 0.25,
+    reaction_time_temperature: float = 0.2,
 
     # Probably should be kept as-is
     ppo: bool = False,

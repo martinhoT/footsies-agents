@@ -112,7 +112,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     ) for k, v in runs_raw.items()}
 
     dfs = get_data(
-        data="win_rate",
+        data="performancewin_rate_against_current_curriculum_opponent",
         runs=runs_curriculum,
         seeds=seeds,
         processes=processes,

@@ -36,7 +36,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     if not path.exists(path.join("saved", BOT_GREEDY)):
         print("We don't have a pre-trained bot (greedy) agent yet, creating one")
         main_training(quick_train_args(
-            agent_args=quick_agent_args(BOT_GREEDY, model="to", kwargs={"critic_opponent_update": "greedy"}),
+            agent_args=quick_agent_args(BOT_GREEDY, model="to", kwargs={"critic_opponent_update": "q_learning"}),
             timesteps=int(1e6),
         ))
 

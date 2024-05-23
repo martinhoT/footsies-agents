@@ -67,6 +67,11 @@ def dataset_run_df(
     observer = dataset_run(agent, label, observer_type, seed, epochs, shuffle)
     df = observer.df(str(seed))
     df.to_csv(save_path, index=False)
+
+    # Save the agent as well
+    basename, _ = os.path.splitext(os.path.basename(save_path))
+    save_agent(agent, "eval_" + basename)
+
     return df
 
 
