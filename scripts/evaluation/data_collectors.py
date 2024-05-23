@@ -3,6 +3,8 @@ import pandas as pd
 import multiprocessing as mp
 import shutil
 import json
+import inspect
+from models import to_
 from datetime import datetime
 from typing import Sequence, Mapping, Any
 from agents.base import FootsiesAgentBase
@@ -15,7 +17,7 @@ from os import path
 from scripts.evaluation.custom_loop import Observer, custom_loop, dataset_run, AgentCustomRun
 from functools import partial, reduce
 from main import main, save_agent
-from dataclasses import replace
+from dataclasses import replace, asdict
 
 
 # Wrapper on custom_loop
@@ -199,13 +201,65 @@ def all_eval_trained() -> dict[str, dict[str, Any]]:
     return res
 
 
-def get_similar_agent_run(args: MainArgs) -> str | None:
-    for run, run_args in all_eval_trained().items():
-        agent_args = run_args["agent"]["kwargs"]
-        args.agent.kwargs
+def is_default(signature: inspect.Signature, argument: str, value: Any) -> bool:
+    return signature.parameters[argument].default == value
 
-        return None
-        return run
+
+def get_similar_agent_run(args: MainArgs) -> str | None:
+    if args.agent.model != "to":
+        raise ValueError("this method only supports the 'to' model")
+
+    tosig = inspect.signature(to_)
+    args_dict = asdict(args)
+
+    for run, run_args in all_eval_trained().items():
+        # We only want the_one runs
+        if run_args["agent"]["model"] != "to":
+            continue
+
+        agent_args: dict[str, Any] = run_args["agent"]["kwargs"]
+
+        # Check if the agent arguments are essentially the same.
+        # Basically, they either need to be equal, or the defined value needs to be the default.
+        all_keys = agent_args.keys() | args.agent.kwargs.keys()
+        all_match = True
+        for key in all_keys:
+            if key in args.agent.kwargs:
+                this_value = args.agent.kwargs[key]
+
+                if key in agent_args:
+                    other_value = agent_args[key]
+
+                    if this_value == other_value:
+                        continue
+                
+                else:
+                    if is_default(tosig, key, this_value):
+                        continue
+                        
+            else:
+                other_value = agent_args[key]
+
+                if is_default(tosig, key, other_value):
+                    continue
+
+            all_match = False
+            break
+
+        if not all_match:
+            continue
+
+        # Ignore all other arguments that don't matter
+        run_args["agent"]["kwargs"] = args_dict["agent"]["kwargs"]
+        run_args["agent"]["name_"] = args_dict["agent"]["name_"]
+        run_args["env"]["kwargs"].pop("game_port")
+        run_args["env"]["kwargs"].pop("opponent_port")
+        run_args["env"]["kwargs"].pop("remote_control_port")
+        run_args["progress_bar_kwargs"] = args_dict["progress_bar_kwargs"]
+
+        # Now, check if all arguments are the same
+        if run_args == args_dict:
+            return run
 
     return None
 
@@ -224,6 +278,7 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                 # If so, copy the results.
                 similar_run = get_similar_agent_run(main_args)
                 if similar_run is not None:
+                    print(f"Found a similar run for '{run_fullname}': '{similar_run}', will copy its results")
                     similar_data_path = path.join("runs", similar_run)
                     shutil.copytree(similar_data_path, data_path)
                     continue

@@ -106,7 +106,10 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             curriculum=CurriculumArgs(
                 enabled=True,
                 episode_threshold=1000,
-            )
+            ),
+            kwargs={
+                "dense_reward": True,
+            }
         ),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}

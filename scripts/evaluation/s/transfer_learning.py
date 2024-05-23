@@ -3,7 +3,7 @@ from agents.ql.ql import QFunctionNetwork
 from models import to_
 from copy import deepcopy
 from os import path
-from scripts.evaluation.utils import create_eval_env, quick_train_args, quick_agent_args
+from scripts.evaluation.utils import create_eval_env, quick_env_args, quick_train_args, quick_agent_args
 from scripts.evaluation.custom_loop import WinRateObserver, AgentCustomRun
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.data_collectors import get_data_custom_loop
@@ -18,7 +18,7 @@ OPPONENT = "curriculum_PT"
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 2
+        seeds = 3
     
     result_path = path.splitext(__file__)[0]
 
@@ -76,10 +76,11 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     opponent_agent, _ = import_agent("to", dummy_env, opponent_agent_parameters)
     opponent = opponent_agent.extract_opponent(dummy_env)
 
+    env_args = quick_env_args(kwargs={"dense_reward": True})
     runs = {
-        "control": AgentCustomRun(agent_control, opponent.act),
-        "initted (expected)": AgentCustomRun(agent_initted_expected, opponent.act),
-        "initted (greedy)": AgentCustomRun(agent_initted_greedy, opponent.act),
+        "control": AgentCustomRun(agent_control, opponent.act, env_args=env_args),
+        "initted (expected)": AgentCustomRun(agent_initted_expected, opponent.act, env_args=env_args),
+        "initted (greedy)": AgentCustomRun(agent_initted_greedy, opponent.act, env_args=env_args),
     }
 
     dfs = get_data_custom_loop(result_path, runs, WinRateObserver, 

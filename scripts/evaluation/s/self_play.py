@@ -26,6 +26,9 @@ def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 1
                     evaluate_every=100,
                 ),
                 wrapper_time_limit=1000,
+                kwargs={
+                    "dense_reward": True,
+                }
             ),
             timesteps=timesteps,
         )
@@ -80,6 +83,7 @@ def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 1
         seeds=seeds,
         processes=processes,
         y=y,
+        pre_trained="curriculum_PT",
     )
 
     if dfs is None:
@@ -103,6 +107,7 @@ def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 1
         seeds=seeds,
         processes=processes,
         y=y,
+        pre_trained="curriculum_PT",
     )
 
     if dfs is None:

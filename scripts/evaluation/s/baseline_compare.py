@@ -2,6 +2,7 @@ from os import path
 from scripts.evaluation.data_collectors import get_data_custom_loop
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.custom_loop import WinRateObserver, AgentCustomRun
+from scripts.evaluation.utils import quick_env_args
 from typing import Any, Callable
 from scripts.tuning.sb3_a2c import create_model_from_parameters as create_a2c_with_parameters
 from scripts.tuning.sb3_dqn import create_model_from_parameters as create_dqn_with_parameters
@@ -48,9 +49,11 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         "dqn": partial(create_dqn_with_parameters, **get_best_params("sb3_dqn")),
     }
 
+    env_args = quick_env_args(kwargs={"dense_reward": True})
     runs = {k: AgentCustomRun(
         agent=agent_initializer,
         opponent=None,
+        env_args=env_args,
     ) for k, agent_initializer in runs_raw.items()}
 
     dfs = get_data_custom_loop(
