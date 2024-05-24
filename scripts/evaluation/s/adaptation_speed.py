@@ -102,10 +102,10 @@ def main(
     processes: int = 12,
     y: bool = False,
     small: bool = False,
-    wr_thresh: float = 0.7,
+    wr_thresh: float = 0.8,
 ):
     if seeds is None:
-        seeds = 3
+        seeds = 1
 
     result_path = path.splitext(__file__)[0]
 
@@ -206,7 +206,43 @@ def main(
     # Plot the heatmap
     heatplot(
         mtx=mtx,
-        fig_path=result_path + "_wr",
+        fig_path=result_path + "_wr_final",
+        xlabels=opponent_labels[1:],
+        ylabels=opponent_labels,
+    )
+
+    # Maximum win rate
+
+    mtx = T.zeros((len(opponent_labels), len(opponent_labels) - 1))
+    for name, df in dfs.items():
+        training_opponent_label, evaluation_opponent_label = name.split("_to_")
+        row = opponent_labels.index(training_opponent_label)
+        col = opponent_labels.index(evaluation_opponent_label) - 1
+
+        mtx[row, col] = df["win_rateMean"].max()
+
+    # Plot the heatmap
+    heatplot(
+        mtx=mtx,
+        fig_path=result_path + "_wr_max",
+        xlabels=opponent_labels[1:],
+        ylabels=opponent_labels,
+    )
+
+    # Average win rate
+
+    mtx = T.zeros((len(opponent_labels), len(opponent_labels) - 1))
+    for name, df in dfs.items():
+        training_opponent_label, evaluation_opponent_label = name.split("_to_")
+        row = opponent_labels.index(training_opponent_label)
+        col = opponent_labels.index(evaluation_opponent_label) - 1
+
+        mtx[row, col] = df["win_rateMean"].mean()
+
+    # Plot the heatmap
+    heatplot(
+        mtx=mtx,
+        fig_path=result_path + "_wr_avg",
         xlabels=opponent_labels[1:],
         ylabels=opponent_labels,
     )

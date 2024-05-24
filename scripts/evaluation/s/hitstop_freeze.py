@@ -5,7 +5,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 10
+        seeds = 3
     
     result_path = path.splitext(__file__)[0]
     
@@ -72,6 +72,32 @@ def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 1
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Loss",
+        run_name_mapping={
+            "hitstop_keep":     "Hitstop/blockstop kept",
+            "hitstop_ignore":   "Hitstop/blockstop skipped",
+        }
+    )
+
+    # Prediction score of player model
+
+    dfs = get_data(
+        data="learningprediction_score_of_p2s_model",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="",
+        fig_path=result_path + "_score_opp",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Score",
         run_name_mapping={
             "hitstop_keep":     "Hitstop/blockstop kept",
             "hitstop_ignore":   "Hitstop/blockstop skipped",

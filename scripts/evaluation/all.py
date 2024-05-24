@@ -34,32 +34,32 @@ class EvaluationScript(Protocol):
 
 
 EVALUATIONS: dict[str, EvaluationScript] = {
+    # Priority
+    "transfer_learning":                    transfer_learning,
     "special_moves":                        special_moves,
+    "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
+    "self_play":                            self_play,
     "game_model_method":                    game_model_method,
-    "sparse_vs_dense_reward":               sparse_vs_dense_reward,
-    "softmax":                              softmax,
     "reaction_time":                        reaction_time,
+    "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
+    "opponent_model_entropy_coef":          opponent_model_entropy_coef,
+    "opponent_model_recurrent":             opponent_model_recurrent,
+
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
     "action_masking":                       action_masking,
     "actor_entropy_coef":                   actor_entropy_coef,
     "adaptation_speed":                     adaptation_speed,
     "advantage_formula":                    advantage_formula,
     "assumed_opponent_action_on_frameskip": assumed_opponent_action_on_frameskip,
+    "baseline_compare":                     baseline_compare,
     "consider_opponent_actions":            consider_opponent_actions,
     "critic_opponent_update_style":         critic_opponent_update_style,
     "discount_factor":                      discount_factor,
     "hitstop_freeze":                       hitstop_freeze,
-    "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
-    "opponent_model_entropy_coef":          opponent_model_entropy_coef,
-    "opponent_model_recurrent":             opponent_model_recurrent,
-    "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
+    "softmax":                              softmax,
+    "sparse_vs_dense_reward":               sparse_vs_dense_reward,
     "target_network":                       target_network,
     "zero_sum":                             zero_sum,
-    # Put self-play as the last one since it's the one that takes the longest to execute
-    "self_play":                            self_play,
-    "transfer_learning":                    transfer_learning,
-    # Actually put baseline comparison as the last one since it may change (if we perform more tuning)
-    "baseline_compare":                     baseline_compare,
 }
 
 

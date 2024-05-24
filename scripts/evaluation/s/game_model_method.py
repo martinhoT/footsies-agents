@@ -8,7 +8,7 @@ from gymnasium.spaces import Discrete
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     if seeds is None:
-        seeds = 6
+        seeds = 2
     
     runs_raw = {
         "gm_residual": {"learn": "all", "game_model_method": "residual", "game_model_skippers": True, "use_reaction_time": True},

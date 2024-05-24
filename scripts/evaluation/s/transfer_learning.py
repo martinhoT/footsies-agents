@@ -14,7 +14,7 @@ from main import import_agent
 
 BOT = "bot_PT"
 BOT_GREEDY = "bot_greedy_PT"
-OPPONENT = "self_play_PT"
+OPPONENT = "bot_PT"
 
 def label_dict_keys(d: dict[str, Any], opponent: str) -> dict[str, Any]:
     return {f"{k}_{opponent}": v for k, v in d.items()}

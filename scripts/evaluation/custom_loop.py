@@ -139,6 +139,11 @@ class GameModelObserver(Observer):
     def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: GameModelAgent):
         if step % self._log_frequency == 0:
             self._idxs.append(step)
+            loss_guard_val = 0
+            loss_move_val = 0
+            loss_move_progress_val = 0
+            loss_position_val = 0
+            loss_val = 0
             if self._validation_set is not None:
                 guard_loss, move_loss, move_progress_loss, position_loss = 0, 0, 0, 0
 
@@ -158,22 +163,24 @@ class GameModelObserver(Observer):
                     move_progress_loss += mpl
                     position_loss += pl
 
-                self._values.append((
-                    guard_loss,
-                    move_loss,
-                    move_progress_loss,
-                    position_loss,
-                    guard_loss + move_loss + move_progress_loss + position_loss,
-                ))
+                loss_guard_val = guard_loss
+                loss_move_val = move_loss
+                loss_move_progress_val = move_progress_loss
+                loss_position_val = position_loss
+                loss_val = guard_loss + move_loss + move_progress_loss + position_loss
 
-            else:
-                self._values.append((
-                    agent.evaluate_average_loss_guard(),
-                    agent.evaluate_average_loss_move(),
-                    agent.evaluate_average_loss_move_progress(),
-                    agent.evaluate_average_loss_position(),
-                    agent.evaluate_average_loss_and_clear(),
-                ))
+            self._values.append((
+                agent.evaluate_average_loss_guard(),
+                agent.evaluate_average_loss_move(),
+                agent.evaluate_average_loss_move_progress(),
+                agent.evaluate_average_loss_position(),
+                agent.evaluate_average_loss_and_clear(),
+                loss_guard_val,
+                loss_move_val,
+                loss_move_progress_val,
+                loss_position_val,
+                loss_val,
+            ))
 
     @property
     def data(self) -> tuple[list[int], tuple[list[float], ...]]:
@@ -181,7 +188,7 @@ class GameModelObserver(Observer):
 
     @staticmethod
     def attributes() -> tuple[str, ...]:
-        return ("loss_guard", "loss_move", "loss_move_progress", "loss_position", "loss")
+        return ("loss_guard", "loss_move", "loss_move_progress", "loss_position", "loss", "loss_guard_val", "loss_move_val", "loss_move_progress_val", "loss_position_val", "loss_val")
 
 
 class MimicObserver(Observer):
@@ -233,6 +240,8 @@ class MimicObserver(Observer):
     def update(self, step: int, obs: T.Tensor, next_obs: T.Tensor, reward: float, terminated: bool, truncated: bool, info: dict, next_info: dict, agent: MimicAgent):
         if step % self._log_frequency == 0:
             self._idxs.append(step)
+            p1_loss_val = 0
+            p2_loss_val = 0
             if self._validation_set is not None:
                 loss_p1 = None
                 loss_p2 = None
@@ -256,25 +265,28 @@ class MimicObserver(Observer):
                 p2_action_split = T.split(p2_action, self._p2_should_reset_context_at)
 
                 loss_p1 = 0
+                loss_p1_n = 0
                 loss_p2 = 0
+                loss_p2_n = 0
 
                 for o, p1 in zip(obs_split_p1, p1_action_split):
                     if agent.p1_model is not None:
                         loss_p1 += agent.p1_model.compute_loss(o, p1)
+                        loss_p1_n += 1
                 for o, p2 in zip(obs_split_p2, p2_action_split):
                     if agent.p2_model is not None:
                         loss_p2 += agent.p2_model.compute_loss(o, p2)
+                        loss_p2_n += 1
 
-                self._values.append((
-                    loss_p1,
-                    loss_p2,
-                ))
+                p1_loss_val = loss_p1 / loss_p1_n
+                p2_loss_val = loss_p2 / loss_p2_n
                 
-            else:
-                self._values.append((
-                    agent.evaluate_p1_average_loss_and_clear(),
-                    agent.evaluate_p2_average_loss_and_clear(),
-                ))
+            self._values.append((
+                agent.evaluate_p1_average_loss_and_clear(),
+                agent.evaluate_p2_average_loss_and_clear(),
+                p1_loss_val,
+                p2_loss_val,
+            ))
 
     @property
     def data(self) -> tuple[list[int], tuple[list[float], ...]]:
@@ -282,7 +294,7 @@ class MimicObserver(Observer):
 
     @staticmethod
     def attributes() -> tuple[str, ...]:
-        return ("p1_loss", "p2_loss")
+        return ("p1_loss", "p2_loss", "p1_loss_val", "p2_loss_val")
 
 
 class PreCustomLoop(Protocol):

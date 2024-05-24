@@ -73,7 +73,7 @@ def create_agent(env: Env) -> TheOneAgent:
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 6
+        seeds = 3
     
     result_path = path.splitext(__file__)[0]
     
@@ -124,7 +124,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     ) for k, env_args in runs_raw.items()}
 
     dfs = get_data_custom_loop(
-        result_path=result_path,
+        result_path=result_path + "_pretrain",
         runs=runs_custom,
         observer_type=WinRateObserver,
         seeds=seeds,

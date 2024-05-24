@@ -57,6 +57,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     game_model_single_skipper: int = 1,
     consider_opponent_at_all: bool = True,
     one_decision_at_hitstop: bool = True,
+    will_act_anyway: bool = False,
     use_softmax: bool = True,
     reaction_time_temperature: float = 0.2,
 
@@ -79,7 +80,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     actor_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
     opponent_model_arch_hs: conf.Suppress[list[int]] = [64, 64],
     opponent_model_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
-    game_model_arch_hs: conf.Suppress[list[int]] = [128, 128],
+    game_model_arch_hs: conf.Suppress[list[int]] = [64, 64],
     game_model_arch_activation: conf.Suppress[type[nn.Module]] = nn.LeakyReLU,
 ) -> tuple[TheOneAgent, dict[str, list]]:
 
@@ -161,6 +162,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         consider_explicit_opponent_policy=consider_explicit_opponent_policy,
         act_with_qvalues=act_with_qvalues,
         one_decision_at_hitstop=one_decision_at_hitstop,
+        will_act_anyway=will_act_anyway,
     )
 
     if use_opponent_model:

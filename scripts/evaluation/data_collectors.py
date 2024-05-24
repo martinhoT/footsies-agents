@@ -351,7 +351,8 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                 path.join("runs", f"eval_{run_name}_S{seed}", f"{data}.csv"),
                 names=["Idx", f"Val{seed}"],
                 usecols=data_cols # type: ignore
-            ) for seed in range(seeds)
+            ).sort_values("Idx", ascending=True) # just make sure, some runs get quirky for some reason
+            for seed in range(seeds)
         ]
 
         merge_method = partial(pd.merge, how="outer", on="Idx")

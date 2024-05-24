@@ -24,6 +24,7 @@ class A2CAgent(FootsiesAgentBase):
         consider_explicit_opponent_policy: bool = False,
         act_with_qvalues: bool = False,
         one_decision_at_hitstop: bool = True,
+        will_act_anyway: bool = False,
     ):
         """
         Footsies agent using the A2C algorithm, potentially with some modifications.
@@ -42,6 +43,7 @@ class A2CAgent(FootsiesAgentBase):
         self.consider_explicit_opponent_policy = consider_explicit_opponent_policy
         self._act_with_qvalues = act_with_qvalues
         self._one_decision_at_hitstop = one_decision_at_hitstop
+        self._will_act_anyway = will_act_anyway
 
         self._learner = learner
         self._actor = learner.actor
@@ -155,6 +157,9 @@ class A2CAgent(FootsiesAgentBase):
         """Whether the agent will attempt to perform any action at the current state."""
         if not completed_previous_action:
             return True
+
+        if self._will_act_anyway:
+            return False
 
         is_at_neutral_actionable = ActionMap.is_at_neutral_actionable_torch(obs)
         if (self._one_decision_at_hitstop and has_acted_in_hitstop and not is_at_neutral_actionable):

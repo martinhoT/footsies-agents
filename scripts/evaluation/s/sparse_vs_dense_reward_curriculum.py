@@ -6,7 +6,7 @@ from args import CurriculumArgs
 
 def main(seeds: int | None = None, timesteps: int | None = None, processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 6
+        seeds = 3
     
     result_path = path.splitext(__file__)[0]
     
