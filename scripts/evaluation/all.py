@@ -34,8 +34,9 @@ class EvaluationScript(Protocol):
 
 
 EVALUATIONS: dict[str, EvaluationScript] = {
-    "sparse_vs_dense_reward":               sparse_vs_dense_reward,
     "special_moves":                        special_moves,
+    "game_model_method":                    game_model_method,
+    "sparse_vs_dense_reward":               sparse_vs_dense_reward,
     "softmax":                              softmax,
     "reaction_time":                        reaction_time,
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
@@ -47,17 +48,16 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "consider_opponent_actions":            consider_opponent_actions,
     "critic_opponent_update_style":         critic_opponent_update_style,
     "discount_factor":                      discount_factor,
-    "game_model_method":                    game_model_method,
     "hitstop_freeze":                       hitstop_freeze,
     "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
     "opponent_model_entropy_coef":          opponent_model_entropy_coef,
     "opponent_model_recurrent":             opponent_model_recurrent,
     "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
     "target_network":                       target_network,
-    "transfer_learning":                    transfer_learning,
     "zero_sum":                             zero_sum,
     # Put self-play as the last one since it's the one that takes the longest to execute
     "self_play":                            self_play,
+    "transfer_learning":                    transfer_learning,
     # Actually put baseline comparison as the last one since it may change (if we perform more tuning)
     "baseline_compare":                     baseline_compare,
 }

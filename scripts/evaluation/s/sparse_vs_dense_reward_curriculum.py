@@ -1,12 +1,12 @@
 from os import path
 from scripts.evaluation.data_collectors import get_data
-from scripts.evaluation.plotting import plot_data, plot_add_curriculum_transitions
+from scripts.evaluation.plotting import plot_curriculum, plot_data, plot_add_curriculum_transitions
 from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
 from args import CurriculumArgs
 
-def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 12, y: bool = False):
+def main(seeds: int | None = None, timesteps: int | None = None, processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 6
     
     result_path = path.splitext(__file__)[0]
     
@@ -20,7 +20,7 @@ def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 1
         env_args=quick_env_args(
             curriculum=CurriculumArgs(
                 enabled=True,
-                episode_threshold=1000,
+                episode_threshold=10000,
             ),
             kwargs=v,
         ),
@@ -37,22 +37,7 @@ def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 1
 
     if dfs is None:
         return
-
-    plot_data(
-        dfs=dfs,
-        title="",
-        fig_path=None,
-        exp_factor=0.9,
-        xlabel="Time step",
-        ylabel="Win rate",
-        run_name_mapping={
-            "sparse_reward_curriculum":    "Sparse reward",
-            "dense_reward_curriculum":     "Dense reward",
-        }
-    )
-
-    # Plot vertical lines where opponent transitions occurred
-
+    
     dfs_transitions = get_data(
         data="performancewin_rate_against_current_curriculum_opponent",
         runs=runs,
@@ -65,10 +50,18 @@ def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 1
     if dfs_transitions is None:
         return
 
-    plot_add_curriculum_transitions(
+    plot_curriculum(
+        dfs=dfs,
         dfs_transitions=dfs_transitions,
         seeds=seeds,
-        fig_path=result_path + "_wr",
+        title="",
+        fig_path=result_path,
+        exp_factor=0.9,
+        ylabel="Win rate",
+        run_name_mapping={
+            "sparse_reward_curriculum":    "Sparse reward",
+            "dense_reward_curriculum":     "Dense reward",
+        }
     )
 
 if __name__ == "__main__":

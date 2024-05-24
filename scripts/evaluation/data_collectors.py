@@ -249,12 +249,12 @@ def get_similar_agent_run(args: MainArgs) -> str | None:
         if not all_match:
             continue
 
-        # Ignore all other arguments that don't matter
+        # Ignore all other arguments that don't matter if they are different
         run_args["agent"]["kwargs"] = args_dict["agent"]["kwargs"]
         run_args["agent"]["name_"] = args_dict["agent"]["name_"]
-        run_args["env"]["kwargs"].pop("game_port")
-        run_args["env"]["kwargs"].pop("opponent_port")
-        run_args["env"]["kwargs"].pop("remote_control_port")
+        run_args["env"]["kwargs"]["game_port"] = args_dict["env"]["kwargs"]["game_port"]
+        run_args["env"]["kwargs"]["opponent_port"] = args_dict["env"]["kwargs"]["opponent_port"]
+        run_args["env"]["kwargs"]["remote_control_port"] = args_dict["env"]["kwargs"]["remote_control_port"]
         run_args["progress_bar_kwargs"] = args_dict["progress_bar_kwargs"]
 
         # Now, check if all arguments are the same
@@ -269,20 +269,11 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
     processes //= 2
     
     missing: dict[str, list[tuple[str, int]]] = {}
-    for run_name, main_args in runs.items():
+    for run_name in runs:
         for seed in range(seeds):
             run_fullname = f"eval_{run_name}_S{seed}"
             data_path = path.join("runs", run_fullname)
             if not path.exists(data_path):
-                # Try checking if there is another run that already does the same thing.
-                # If so, copy the results.
-                similar_run = get_similar_agent_run(main_args)
-                if similar_run is not None:
-                    print(f"Found a similar run for '{run_fullname}': '{similar_run}', will copy its results")
-                    similar_data_path = path.join("runs", similar_run)
-                    shutil.copytree(similar_data_path, data_path)
-                    continue
-
                 missing.setdefault(run_name, []).append((run_fullname, seed))
 
     if missing:
@@ -338,6 +329,16 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
                         seed=seed,
                         raise_game_closed=True,
                     )
+
+                    # Try checking if there is another run that already does the same thing.
+                    # If so, copy the results.
+                    similar_run = get_similar_agent_run(run_args_modified)
+                    if similar_run is not None:
+                        print(f"Found a similar run for '{run_fullname}': '{similar_run}', will copy its results")
+                        similar_data_path = path.join("runs", similar_run)
+                        data_path = path.join("runs", run_fullname)
+                        shutil.copytree(similar_data_path, data_path)
+                        continue
                     
                     args.append(run_args_modified)
 

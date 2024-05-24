@@ -73,7 +73,7 @@ def create_agent(env: Env) -> TheOneAgent:
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 6
     
     result_path = path.splitext(__file__)[0]
     
@@ -116,41 +116,39 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
 
     # Win rate against in-game bot after training against WhiffPunisher
 
-    # NOTE: do not know if this would be needed now
+    runs_custom = {k + "_pretrain": AgentCustomRun(
+        agent=create_agent,
+        opponent=None,
+        env_args=env_args,
+        pre_loop=cast(PreCustomLoop, partial(train_against_whiff_punisher, timesteps=timesteps, label=k)),
+    ) for k, env_args in runs_raw.items()}
 
-    # runs_custom = {k: AgentCustomRun(
-    #     agent=create_agent,
-    #     opponent=None,
-    #     env_args=env_args,
-    #     pre_loop=cast(PreCustomLoop, partial(train_against_whiff_punisher, timesteps=timesteps, label=k)),
-    # ) for k, env_args in runs_raw.items()}
+    dfs = get_data_custom_loop(
+        result_path=result_path,
+        runs=runs_custom,
+        observer_type=WinRateObserver,
+        seeds=seeds,
+        timesteps=timesteps,
+        processes=processes,
+        y=y,
+    )
 
-    # dfs = get_data_custom_loop(
-    #     result_path=result_path,
-    #     runs=runs_custom,
-    #     observer_type=WinRateObserver,
-    #     seeds=seeds,
-    #     timesteps=timesteps,
-    #     processes=processes,
-    #     y=y,
-    # )
-
-    # if dfs is None:
-    #     return
+    if dfs is None:
+        return
     
-    # plot_data(
-    #     dfs=dfs,
-    #     title="",
-    #     fig_path=result_path + "_pretrain_wr",
-    #     exp_factor=0.9,
-    #     xlabel="Time step",
-    #     ylabel="Win rate",
-    #     run_name_mapping={
-    #         "no_specials":  "Without special moves",
-    #         "yes_specials": "With special moves",
-    #     },
-    #     attr_name="win_rate",
-    # )
+    plot_data(
+        dfs=dfs,
+        title="",
+        fig_path=result_path + "_pretrain_wr",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Win rate",
+        run_name_mapping={
+            "no_specials_pretrain":  "Without special moves",
+            "yes_specials_pretrain": "With special moves",
+        },
+        attr_name="win_rate",
+    )
 
 if __name__ == "__main__":
     import tyro

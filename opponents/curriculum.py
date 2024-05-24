@@ -144,6 +144,11 @@ class CurriculumManager(OpponentManager):
     def episode_threshold(self) -> int | None:
         return self._episode_threshold
 
+    @property
+    def remaining(self) -> int:
+        """The number of opponents left to beat the curriculum."""
+        return len(self._opponents) - self._current_opponent_idx
+
     def episodes_taken_for_opponent(self, opponent_idx: int) -> int:
         """The number of episodes that was required to surpass (or skip) the opponent with ID `opponent_idx`."""
         return self._episodes_taken_for[opponent_idx]

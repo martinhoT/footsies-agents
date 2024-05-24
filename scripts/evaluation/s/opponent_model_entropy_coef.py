@@ -9,7 +9,7 @@ from args import CurriculumArgs
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False, do_curriculum: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 6
     
     result_basename = path.splitext(__file__)[0] + name_suffix
 

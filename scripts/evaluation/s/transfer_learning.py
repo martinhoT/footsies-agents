@@ -8,19 +8,22 @@ from scripts.evaluation.custom_loop import WinRateObserver, AgentCustomRun
 from scripts.evaluation.plotting import plot_data
 from scripts.evaluation.data_collectors import get_data_custom_loop
 from gymnasium.spaces import Discrete
-from typing import cast
+from typing import cast, Any
 from main import main as main_training
 from main import import_agent
 
 BOT = "bot_PT"
 BOT_GREEDY = "bot_greedy_PT"
-OPPONENT = "curriculum_PT"
+OPPONENT = "self_play_PT"
+
+def label_dict_keys(d: dict[str, Any], opponent: str) -> dict[str, Any]:
+    return {f"{k}_{opponent}": v for k, v in d.items()}
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
         seeds = 3
     
-    result_path = path.splitext(__file__)[0]
+    result_path = f"{path.splitext(__file__)[0]}_{OPPONENT}"
 
     dummy_env, _ = create_eval_env()
     assert dummy_env.observation_space.shape
@@ -77,11 +80,11 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     opponent = opponent_agent.extract_opponent(dummy_env)
 
     env_args = quick_env_args(kwargs={"dense_reward": True})
-    runs = {
+    runs = label_dict_keys({
         "control": AgentCustomRun(agent_control, opponent.act, env_args=env_args),
         "initted (expected)": AgentCustomRun(agent_initted_expected, opponent.act, env_args=env_args),
         "initted (greedy)": AgentCustomRun(agent_initted_greedy, opponent.act, env_args=env_args),
-    }
+    }, OPPONENT)
 
     dfs = get_data_custom_loop(result_path, runs, WinRateObserver, 
         seeds=seeds,
@@ -99,11 +102,11 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Win rate",
-        run_name_mapping={
+        run_name_mapping=label_dict_keys({
             "control": "No learned Q-function",
             "initted (expected)": "With learned Q-function (expected)",
             "initted (greedy)": "With learned Q-function (greedy)",
-        },
+        }, OPPONENT),
         attr_name="win_rate",
     )
 

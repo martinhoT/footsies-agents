@@ -8,7 +8,7 @@ from main import main as main_training
 
 def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 12, y: bool = False, just_pre_train: bool = False):
     if seeds is None:
-        seeds = 6
+        seeds = 10
     
     result_path = path.splitext(__file__)[0]
 

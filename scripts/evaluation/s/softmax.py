@@ -5,8 +5,10 @@ from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_tra
 from args import CurriculumArgs
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+    raise RuntimeError("deprecated test, only do later maybe")
+
     if seeds is None:
-        seeds = 3
+        seeds = 6
     
     result_path = path.splitext(__file__)[0]
 
@@ -19,6 +21,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
 
     runs = {k: quick_train_args(
         agent_args=quick_agent_args(k, kwargs=v),
+        env_args=quick_env_args(kwargs={"dense_reward": True}),
         timesteps=timesteps,
     ) for k, v in runs_raw.items()}
 

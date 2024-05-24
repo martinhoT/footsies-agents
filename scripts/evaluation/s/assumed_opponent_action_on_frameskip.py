@@ -7,7 +7,7 @@ from typing import Literal
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 2
+        seeds = 4
     
     runs_raw: dict[str, Literal["last", "none", "stand"]] = {
         "assumed_opponent_action_on_frameskip_none": "none",
