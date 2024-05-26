@@ -118,7 +118,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
             runs=runs_dataset,
             observer_type=MimicObserver,
             seeds=seeds,
-            processes=min(10, processes), # the PC gets way too hot if all CPUs are constantly running
+            processes=min(6, processes), # the PC gets way too hot if all CPUs are constantly running
             epochs=epochs,
             shuffle=shuffle,
             y=y,

@@ -97,6 +97,27 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
         run_name_mapping=run_name_mapping
     )
 
+    # Opponent model entropy
+    dfs = get_data(
+        data="learningentropy_of_p2s_model",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="",
+        fig_path=result_basename + "_ent",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Entropy",
+        run_name_mapping=run_name_mapping
+    )
+
     # Losses on dataset
     if do_dataset:
         runs_dataset_raw = {
@@ -123,7 +144,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
             runs=runs_dataset,
             observer_type=MimicObserver,
             seeds=seeds,
-            processes=min(10, processes), # the PC gets way too hot if all CPUs are constantly running
+            processes=min(6, processes), # the PC gets way too hot if all CPUs are constantly running
             epochs=epochs,
             shuffle=shuffle,
             y=y,

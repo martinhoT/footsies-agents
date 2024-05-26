@@ -3,8 +3,9 @@ import gzip
 import os
 import struct
 import random
+import torch as T
 from torch.utils.data import Dataset
-from typing import Any, Callable, Generator, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable, Iterator, Literal
 from dataclasses import dataclass, field, astuple
 from itertools import pairwise
 from gymnasium import Env
@@ -15,18 +16,19 @@ from footsies_gym.wrappers.normalization import FootsiesNormalized
 from footsies_gym.utils import get_dict_obs_from_vector_obs
 from agents.action import ActionMap
 from io import BufferedIOBase
+from tqdm import tqdm
 
 
 UNFLATTENED_OBSERVATION_SPACE = FootsiesNormalized(FootsiesEnv()).observation_space
 
 
-@dataclass
+@dataclass(slots=True)
 class FootsiesTransition:
     obs:            np.ndarray
     next_obs:       np.ndarray
-    reward:         float
-    p1_action:      np.ndarray
-    p2_action:      np.ndarray
+    reward:         np.float32
+    p1_action:      np.int8
+    p2_action:      np.int8
     terminated:     bool
 
     @property
@@ -36,6 +38,22 @@ class FootsiesTransition:
     @property
     def next_info(self) -> dict:
         return get_dict_obs_from_vector_obs(self.next_obs, unflattenend_observation_space=UNFLATTENED_OBSERVATION_SPACE)
+    
+    def actions_to_simple(self, assumed_p1: int, assumed_p2: int) -> tuple[int, int]:
+        """Convert the actions to simple actions in-place. Return those simple actions."""
+        obs_t = T.as_tensor(self.obs).unsqueeze(0)
+        next_obs_t = T.as_tensor(self.next_obs).unsqueeze(0)
+        
+        p1_action, p2_action = ActionMap.simples_from_transition_torch(obs_t, next_obs_t)
+        if p1_action is None:
+            p1_action = assumed_p1
+        if p2_action is None:
+            p2_action = assumed_p2
+
+        self.p1_action = np.int8(p1_action)
+        self.p2_action = np.int8(p2_action)
+
+        return p1_action, p2_action
 
 
 # repr is False to avoid printing the entire episode, which is especially important when debugging
@@ -242,6 +260,18 @@ class FootsiesDataset:
         episodes_0 = self.episodes[:split_point]
         episodes_1 = self.episodes[split_point:]
         return FootsiesDataset(episodes_0), FootsiesDataset(episodes_1)
+
+    def convert_to_simple_actions(self, assumed: Literal["last", "stand"] = "last"):
+        """Convert the actions to simple actions."""
+        assumed_p1, assumed_p2 = 0, 0
+        for transition in tqdm(self.transitions, leave=False):
+            p1_action, p2_action = transition.actions_to_simple(assumed_p1, assumed_p2)
+
+            if assumed == "last":
+                if transition.terminated:
+                    assumed_p1, assumed_p2 = 0, 0
+                else:
+                    assumed_p1, assumed_p2 = p1_action, p2_action
 
     def visualize(self, episode: int = 758):
         """Visualize an episode from the dataset."""

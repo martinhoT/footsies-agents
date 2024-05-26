@@ -177,11 +177,15 @@ def get_data_custom_loop(result_path: str, runs: dict[str, AgentCustomRun], obse
     return dfs
 
 
-def all_eval_trained() -> dict[str, dict[str, Any]]:
+def all_eval_trained(with_data: bool = True) -> dict[str, dict[str, Any]]:
     res: dict[str, dict[str, Any]] = {}
 
     for eval_run in os.listdir("saved"):
         if not eval_run.startswith("eval_"):
+            continue
+
+        data_path = os.path.join("runs", eval_run)
+        if with_data and not os.path.exists(data_path):
             continue
 
         eval_path = os.path.join("saved", eval_run)
@@ -212,7 +216,7 @@ def get_similar_agent_run(args: MainArgs) -> str | None:
     tosig = inspect.signature(to_)
     args_dict = asdict(args)
 
-    for run, run_args in all_eval_trained().items():
+    for run, run_args in all_eval_trained(with_data=True).items():
         # We only want the_one runs
         if run_args["agent"]["model"] != "to":
             continue
@@ -264,7 +268,7 @@ def get_similar_agent_run(args: MainArgs) -> str | None:
     return None
 
 
-def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False, data_cols: Sequence[int] = (0, 1), pre_trained: str | None = None) -> dict[str, pd.DataFrame] | None:
+def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: int = 4, y: bool = False, data_cols: Sequence[int] = (0, 1), pre_trained: str | None = None, recycle: bool = True) -> dict[str, pd.DataFrame] | None:
     # Halve the number of processes since there are technically going to be two processes per run: the agent and the game
     processes //= 2
     
@@ -332,13 +336,14 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
 
                     # Try checking if there is another run that already does the same thing.
                     # If so, copy the results.
-                    similar_run = get_similar_agent_run(run_args_modified)
-                    if similar_run is not None:
-                        print(f"Found a similar run for '{run_fullname}': '{similar_run}', will copy its results")
-                        similar_data_path = path.join("runs", similar_run)
-                        data_path = path.join("runs", run_fullname)
-                        shutil.copytree(similar_data_path, data_path)
-                        continue
+                    if recycle:
+                        similar_run = get_similar_agent_run(run_args_modified)
+                        if similar_run is not None:
+                            print(f"Found a similar run for '{run_fullname}': '{similar_run}', will copy its results")
+                            similar_data_path = path.join("runs", similar_run)
+                            data_path = path.join("runs", run_fullname)
+                            shutil.copytree(similar_data_path, data_path)
+                            continue
                     
                     args.append(run_args_modified)
 
@@ -444,6 +449,9 @@ def get_data_dataset(result_path: str, runs: Mapping[str, MimicAgent | GameModel
     # Calculate aggregations according to the seeds
 
     for _, df in dfs.items():
+        # The residual game model had the need of doing this, don't know why it stopped sooner
+        all_columns_except_idx = [c for c in df.columns if c != "Idx"]
+        df.dropna(how="all", axis="index", inplace=True, subset=all_columns_except_idx)
         for attribute in observer_type.attributes():
             attribute_seed_columns = [f"{attribute}{seed}" for seed in range(seeds)]
             df[f"{attribute}Mean"] = df[attribute_seed_columns].mean(axis=1)

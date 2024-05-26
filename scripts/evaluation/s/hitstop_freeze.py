@@ -5,7 +5,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 6
     
     result_path = path.splitext(__file__)[0]
     

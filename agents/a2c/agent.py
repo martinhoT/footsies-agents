@@ -10,7 +10,6 @@ from agents.a2c.a2c import A2CQLearner, ValueNetwork
 from agents.logger import TestState
 from agents.ql.ql import QFunction, QFunctionTable, QFunctionNetwork
 from agents.torch_utils import AggregateModule
-from typing import Any
 
 LOGGER = logging.getLogger("main.a2c.agent")
 
@@ -78,7 +77,12 @@ class A2CAgent(FootsiesAgentBase):
     # NOTE: reminder, we should use `info` carefully here, since when using reaction time it won't be delayed
     def act(self, obs: T.Tensor, info: dict, predicted_opponent_action: int | None = None, deterministic: bool = False) -> int:
         # If we can't perform an action, don't even attempt one.
-        if self.wont_act(info["agent_simple_completed"], obs, self._has_acted_in_hitstop_act):
+        # Unless we just don't care and act anyway.
+        agent_simple_completed = info["agent_simple_completed"]
+        if self._will_act_anyway:
+            if not agent_simple_completed:
+                return 0
+        elif self.wont_act(agent_simple_completed, obs, self._has_acted_in_hitstop_act):
             return 0
         
         # If we have passed the above condition, then it is because we are free to act, so we haven't acted yet.
@@ -107,7 +111,7 @@ class A2CAgent(FootsiesAgentBase):
         self._current_action = action
 
         # Update the respective variable.
-        # This basically tells update() that we do not want to act further until we are back in a neutral state.
+        # This basically means we do not want to act further until we are back in a neutral state.
         is_in_hitstop = ActionMap.is_in_hitstop_torch(obs)
         if is_in_hitstop:
             self._has_acted_in_hitstop_act = True
@@ -157,9 +161,6 @@ class A2CAgent(FootsiesAgentBase):
         """Whether the agent will attempt to perform any action at the current state."""
         if not completed_previous_action:
             return True
-
-        if self._will_act_anyway:
-            return False
 
         is_at_neutral_actionable = ActionMap.is_at_neutral_actionable_torch(obs)
         if (self._one_decision_at_hitstop and has_acted_in_hitstop and not is_at_neutral_actionable):

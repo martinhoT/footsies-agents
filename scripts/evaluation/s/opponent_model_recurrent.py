@@ -124,7 +124,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
             runs=runs_dataset,
             observer_type=MimicObserver,
             seeds=seeds,
-            processes=min(processes, 10), # the PC gets way too hot if all CPUs are constantly running
+            processes=min(processes, 6), # the PC gets way too hot if all CPUs are constantly running
             epochs=epochs,
             shuffle=shuffle,
             y=y,
@@ -136,13 +136,24 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
         for player in ("p1", "p2"):
             plot_data(
                 dfs=dfs,
-                title=f"Opponent model loss on the dataset ({player.upper()})",
+                title="",
                 fig_path=f"{result_basename}_loss_dataset_{player}",
                 exp_factor=0.9,
                 xlabel="Iteration",
                 ylabel="Loss",
                 run_name_mapping={"dataset_" + k: v for k, v in run_name_mapping.items()},
                 attr_name=f"{player}_loss",
+            )
+
+            plot_data(
+                dfs=dfs,
+                title="",
+                fig_path=f"{result_basename}_loss_dataset_{player}_val",
+                exp_factor=0.9,
+                xlabel="Iteration",
+                ylabel="Loss",
+                run_name_mapping={"dataset_" + k: v for k, v in run_name_mapping.items()},
+                attr_name=f"{player}_loss_val",
             )
 
 if __name__ == "__main__":

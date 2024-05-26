@@ -6,14 +6,14 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import GameModelObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     if seeds is None:
         seeds = 2
     
     runs_raw = {
-        "gm_residual": {"learn": "all", "game_model_method": "residual", "game_model_skippers": True, "use_reaction_time": True},
-        "gm_normal": {"learn": "all", "game_model_method": "normal", "game_model_skippers": True, "use_reaction_time": True},
-        "gm_differences": {"learn": "all", "game_model_method": "differences", "game_model_skippers": True, "use_reaction_time": True},
+        "gm_residual": {"learn": "gm", "game_model_method": "residual", "game_model_skippers": True, "use_reaction_time": True, "will_act_anyway": True},
+        "gm_normal": {"learn": "gm", "game_model_method": "normal", "game_model_skippers": True, "use_reaction_time": True, "will_act_anyway": True},
+        "gm_differences": {"learn": "gm", "game_model_method": "differences", "game_model_skippers": True, "use_reaction_time": True, "will_act_anyway": True},
     }
 
     runs = {k: quick_train_args(
@@ -30,6 +30,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, 
         seeds=seeds,
         processes=processes,
         y=y,
+        pre_trained="bot_PT",
     )
 
     if dfs is None:
@@ -52,7 +53,6 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, 
     # Losses on normal agent
     for label in ["", "guard", "move", "move_progress", "position"]:
         data_label = ("_" + label) if label else label
-        title_label = f" ({label})" if label else label
 
         dfs = get_data(
             data=f"learninggame_model_loss{data_label}",
@@ -66,7 +66,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, 
 
         plot_data(
             dfs=dfs,
-            title=f"Game model loss against the in-game AI{title_label}, with reaction time",
+            title="",
             fig_path=f"{result_basename}_gm{data_label}",
             exp_factor=0.9,
             xlabel="Time step",
@@ -91,7 +91,6 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, 
 
     for label in ["", "guard", "move", "move_progress", "position"]:
         data_label = ("_" + label) if label else label
-        title_label = f" ({label})" if label else label
 
         runs_dataset = {
             k: game_model_(
@@ -107,7 +106,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, 
             runs=runs_dataset,
             observer_type=GameModelObserver,
             seeds=seeds,
-            processes=min(processes, 10), # the PC gets way too hot if all CPUs are constantly running
+            processes=min(processes, 6), # the PC gets way too hot if all CPUs are constantly running
             epochs=epochs,
             shuffle=shuffle,
             y=y,
@@ -115,20 +114,41 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 20, 
 
         if dfs is None:
             return
+
+        # The residual model stopped sooner for some reason, so we cut the other runs at the same point as well
+        max_idx = min(df["Idx"].max() for df in dfs.values())
+        for name, df in dfs.items():
+            dfs[name] = df[df["Idx"] <= max_idx].copy(deep=True)
         
         plot_data(
             dfs=dfs,
-            title=f"Game model loss on the dataset{title_label}",
+            title="",
             fig_path=f"{result_basename}_gm_dataset{data_label}",
             exp_factor=0.9,
-            xlabel="Time step",
+            xlabel="Iteration",
             ylabel="Loss",
             run_name_mapping={
                 "dataset_gm_residual":     "Residual",
                 "dataset_gm_normal":       "Normal",
                 "dataset_gm_differences":  "Differences",
             },
-            attr_name="loss" + data_label,
+            attr_name=f"loss{data_label}",
+            # yscale="log",
+        )
+
+        plot_data(
+            dfs=dfs,
+            title="",
+            fig_path=f"{result_basename}_gm_dataset{data_label}_val",
+            exp_factor=0.9,
+            xlabel="Iteration",
+            ylabel="Loss",
+            run_name_mapping={
+                "dataset_gm_residual":     "Residual",
+                "dataset_gm_normal":       "Normal",
+                "dataset_gm_differences":  "Differences",
+            },
+            attr_name=f"loss{data_label}_val",
             # yscale="log",
         )
 

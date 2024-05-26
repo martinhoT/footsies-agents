@@ -109,6 +109,8 @@ class FootsiesAgentOpponent(Opponent):
         
         action = self._agent.act(obs, info)
 
+        # NOTE: this does not match how the executer is handled by the simple actions wrapper,
+        #       since action is None in case the player cannot act.
         if self._simple_action_executor is not None:
             action = self._simple_action_executor.act(action)
         

@@ -5,6 +5,8 @@ from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_tra
 from args import CurriculumArgs
 
 def main(seeds: int | None = None, timesteps: int | None = None, processes: int = 12, y: bool = False):
+    raise RuntimeError("deprecated test")
+    
     if seeds is None:
         seeds = 3
     

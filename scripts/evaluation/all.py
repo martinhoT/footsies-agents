@@ -35,15 +35,11 @@ class EvaluationScript(Protocol):
 
 EVALUATIONS: dict[str, EvaluationScript] = {
     # Priority
-    "transfer_learning":                    transfer_learning,
-    "special_moves":                        special_moves,
-    "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
-    "self_play":                            self_play,
     "game_model_method":                    game_model_method,
     "reaction_time":                        reaction_time,
-    "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
-    "opponent_model_entropy_coef":          opponent_model_entropy_coef,
+    "transfer_learning":                    transfer_learning,
     "opponent_model_recurrent":             opponent_model_recurrent,
+    "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
 
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
     "action_masking":                       action_masking,
@@ -56,8 +52,12 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "critic_opponent_update_style":         critic_opponent_update_style,
     "discount_factor":                      discount_factor,
     "hitstop_freeze":                       hitstop_freeze,
+    "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
+    "opponent_model_entropy_coef":          opponent_model_entropy_coef,
     "softmax":                              softmax,
+    "self_play":                            self_play,
     "sparse_vs_dense_reward":               sparse_vs_dense_reward,
+    "special_moves":                        special_moves,
     "target_network":                       target_network,
     "zero_sum":                             zero_sum,
 }

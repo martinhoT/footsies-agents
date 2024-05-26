@@ -45,6 +45,7 @@ class TheOneAnalyserManager:
         self.r = 0
     
     agent_name = cast(str, editable_dpg_value("agent_name"))
+    reaction_time = cast(str, editable_dpg_value("reaction_time"))
 
     def _save_agent(self, s, a, u):
         folder_path = path.join("runs", "analysis_" + self.agent_name)
@@ -54,6 +55,12 @@ class TheOneAnalyserManager:
         with dpg.group(horizontal=True):
             dpg.add_text("Predicted opponent action:")
             dpg.add_text("X", tag="predicted_opponent_action")
+
+        react = self.the_one.reaction_time_emulator
+        if react is not None:
+            with dpg.group(horizontal=True):
+                dpg.add_text("Reaction time:")
+                dpg.add_slider_int(min_value=react.min_time, max_value=react.max_time, width=200, tag="reaction_time", enabled=False)
 
         dpg.add_checkbox(label="Online learning", default_value=False, tag="the_one_online_learning")
 
@@ -83,6 +90,10 @@ class TheOneAnalyserManager:
         if self.game_model_manager is not None:
             self.game_model_manager.on_state_update(analyser)
 
+        react = self.the_one.reaction_time_emulator
+        if react is not None and react.previous_reaction_time is not None:
+            self.reaction_time = react.previous_reaction_time
+
         if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
             obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition.as_tuple()
             self.r += reward
@@ -94,6 +105,12 @@ class TheOneAnalyserManager:
                     next_info["next_opponent_policy"] = self.custom_opponent.peek(next_info)
                 self.agent.update(obs, next_obs, self.r, terminated, truncated, info, next_info)
                 self.r = 0
+    
+    @property
+    def the_one(self) -> TheOneAgent:
+        if isinstance(self.agent, TrainingLoggerWrapper):
+            return self.agent.agent
+        return self.agent
 
 
 def main(

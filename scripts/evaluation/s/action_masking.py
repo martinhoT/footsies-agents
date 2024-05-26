@@ -25,6 +25,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         seeds=seeds,
         processes=processes,
         y=y,
+        recycle=False,
     )
 
     if dfs is None:

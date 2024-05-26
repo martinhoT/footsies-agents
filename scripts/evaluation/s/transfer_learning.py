@@ -14,7 +14,7 @@ from main import import_agent
 
 BOT = "bot_PT"
 BOT_GREEDY = "bot_greedy_PT"
-OPPONENT = "bot_PT"
+OPPONENT = "self_play_PT"
 
 def label_dict_keys(d: dict[str, Any], opponent: str) -> dict[str, Any]:
     return {f"{k}_{opponent}": v for k, v in d.items()}
@@ -103,9 +103,9 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         xlabel="Time step",
         ylabel="Win rate",
         run_name_mapping=label_dict_keys({
-            "control": "No learned Q-function",
-            "initted (expected)": "With learned Q-function (expected)",
-            "initted (greedy)": "With learned Q-function (greedy)",
+            "control": "No learned critic",
+            "initted (expected)": "With learned critic (expected)",
+            "initted (greedy)": "With learned critic (greedy)",
         }, OPPONENT),
         attr_name="win_rate",
     )

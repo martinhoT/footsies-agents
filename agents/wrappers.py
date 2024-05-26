@@ -171,12 +171,13 @@ class FootsiesSimpleActionExecutor:
     def __init__(self, allow_special_moves: bool):
         self._allow_special_moves = allow_special_moves
         self._simple_action = None
-        self._simple_action_queue = deque([])
+        self._simple_action_queue: deque[tuple[bool, bool, bool]] = deque([])
 
-    def act(self, simple_action: int):
+    def act(self, simple_action: int | None) -> tuple[bool, bool, bool]:
         """
         Request the simple action to be executed and return the primitive action that should be performed now on FOOTSIES.
         If another simple action is still being performed, then this one will be ignored.
+        If the simple action is `None`, then it is ignored, but the primitive actions are still returned from any action that was still being performed.
         """
         if not self._allow_special_moves:
             # Convert the detected special move input to a simple action.
@@ -186,6 +187,9 @@ class FootsiesSimpleActionExecutor:
 
         if self._simple_action_queue:
             primitive_action = self._simple_action_queue.popleft()
+
+        elif simple_action is None:
+            return (False, False, False)
 
         else:
             self._simple_action = simple_action

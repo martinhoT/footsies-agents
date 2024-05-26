@@ -155,8 +155,6 @@ class GameModelObserver(Observer):
                         p2_action = p2_action[:-(offset - 1), :]
                         next_obs = next_obs[(offset - 1):, :]
                     
-                    p1_action = p1_action.squeeze(1)
-                    p2_action = p2_action.squeeze(1)
                     gl, ml, mpl, pl = game_model.update(obs, p1_action, p2_action, next_obs, actually_update=False)
                     guard_loss += gl
                     move_loss += ml
@@ -168,6 +166,8 @@ class GameModelObserver(Observer):
                 loss_move_progress_val = move_progress_loss
                 loss_position_val = position_loss
                 loss_val = guard_loss + move_loss + move_progress_loss + position_loss
+
+            print(step, loss_guard_val, loss_move_val, loss_move_progress_val, loss_position_val, loss_val)
 
             self._values.append((
                 agent.evaluate_average_loss_guard(),
@@ -247,8 +247,6 @@ class MimicObserver(Observer):
                 loss_p2 = None
 
                 obs, _, _, p1_action, p2_action, _ = self._validation_set
-                p1_action = p1_action.squeeze(1)
-                p2_action = p2_action.squeeze(1)
 
                 # Determine the points at which to reset the context.
                 # We assume it only needs to be done once since the agent should be the same.
@@ -458,6 +456,9 @@ def dataset_run(
     base_dataset = FootsiesDataset.load("footsies-dataset")
     base_dataset.shuffle() # this will internally use the seed set in random
     train_base_dataset, validation_base_dataset = base_dataset.generate_split(0.9)
+    # Stupid: we need to convert after the split; if it's done before, the conversion will be lost
+    train_base_dataset.convert_to_simple_actions("last")
+    validation_base_dataset.convert_to_simple_actions("last")
     train_dataset = FootsiesTorchDataset(train_base_dataset)
     validation_dataset = FootsiesTorchDataset(validation_base_dataset)
     dataloader = DataLoader(train_dataset, batch_size=1, shuffle=False)
@@ -472,12 +473,12 @@ def dataset_run(
         for obs, next_obs, reward, p1_action, p2_action, terminated in tqdm(dataloader, desc=f"{label} ({epoch + 1}/{epochs})", unit="it", position=process_id, dynamic_ncols=True, colour="#42f593"):
             obs = obs.float()
             next_obs = next_obs.float()
+            p1_action = p1_action.long()
+            p2_action = p2_action.long()
 
             # Discard hitstop/freeze
             if (ActionMap.is_in_hitstop_torch(obs, True) or ActionMap.is_in_hitstop_torch(obs, False)) and obs.isclose(next_obs).all():
                 continue
-
-            p1_action, p2_action = ActionMap.simples_from_transition_torch(obs, next_obs)
             
             if isinstance(agent, GameModelAgent):
                 agent.update_with_simple_actions(obs, p1_action, p2_action, next_obs)

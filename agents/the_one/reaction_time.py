@@ -204,6 +204,15 @@ class ReactionTimeEmulator:
     def predictor(self, value: Union["MultiStepPredictor", None]):
         self._predictor = value
     
+    @property
+    def max_time(self) -> int:
+        maximum_decision_entropy = self.maximum_decision_entropy(self._actor._action_dim)
+        return int(np.ceil(self._multiplier * maximum_decision_entropy + self._additive))
+    
+    @property
+    def min_time(self) -> int:
+        return int(np.ceil(self._additive))
+    
 
 class MultiStepPredictor:
     def __init__(self,
