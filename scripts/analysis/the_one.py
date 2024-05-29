@@ -174,7 +174,6 @@ def main(
         agent, loggables = to_(
             env.observation_space.shape[0],
             int(env.action_space.n),
-            # opponent_model_recurrent=False,
         )
     
     else:

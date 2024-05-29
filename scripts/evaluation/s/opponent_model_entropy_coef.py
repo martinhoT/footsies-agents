@@ -9,7 +9,7 @@ from args import CurriculumArgs
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False, do_curriculum: bool = False, do_dataset: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 10
     
     result_basename = path.splitext(__file__)[0] + name_suffix
 
@@ -53,6 +53,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
         xlabel="Time step",
         ylabel="Win rate",
         run_name_mapping=run_name_mapping,
+        ylim=(0, 1),
     )
 
     # Losses on normal agent
@@ -94,7 +95,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Score",
-        run_name_mapping=run_name_mapping
+        run_name_mapping=run_name_mapping,
+        ylim=(0, 1),
     )
 
     # Opponent model entropy
@@ -115,7 +117,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Entropy",
-        run_name_mapping=run_name_mapping
+        run_name_mapping=run_name_mapping,
+        ylim=(0, None),
     )
 
     # Losses on dataset
@@ -198,6 +201,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
             xlabel="Time step",
             ylabel="Win rate",
             run_name_mapping={k + "_curriculum": v for k, v in run_name_mapping.items()},
+            ylim=(0, 1),
         )
 
         dfs_transitions = get_data(

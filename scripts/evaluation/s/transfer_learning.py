@@ -21,7 +21,7 @@ def label_dict_keys(d: dict[str, Any], opponent: str) -> dict[str, Any]:
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 10
     
     result_path = f"{path.splitext(__file__)[0]}_{OPPONENT}"
 
@@ -108,6 +108,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "initted (greedy)": "With learned critic (greedy)",
         }, OPPONENT),
         attr_name="win_rate",
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":

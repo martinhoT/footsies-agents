@@ -8,7 +8,7 @@ from gymnasium.spaces import Discrete
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
     if seeds is None:
-        seeds = 2
+        seeds = 10
     
     runs_raw = {
         "gm_residual": {"learn": "gm", "game_model_method": "residual", "game_model_skippers": True, "use_reaction_time": True, "will_act_anyway": True},
@@ -47,7 +47,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 10, 
             "gm_residual":     "Residual",
             "gm_normal":       "Normal",
             "gm_differences":  "Differences",
-        }
+        },
+        ylim=(0, 1),
     )
 
     # Losses on normal agent

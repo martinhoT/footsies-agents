@@ -105,7 +105,7 @@ def main(
     wr_thresh: float = 0.8,
 ):
     if seeds is None:
-        seeds = 1
+        seeds = 3
 
     result_path = path.splitext(__file__)[0]
 

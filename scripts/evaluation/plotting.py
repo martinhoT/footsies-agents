@@ -5,7 +5,20 @@ from math import isnan
 from opponents.curriculum import CurriculumManager
 
 
-def plot_data(dfs: dict[str, pd.DataFrame], *, title: str = "", fig_path: str | None = None, exp_factor: float = 0.9, xlabel: str | None = None, ylabel: str | None = None, yscale: str = "linear", run_name_mapping: dict[str, str] | None = None, attr_name: str = "Val"):
+def plot_data(
+    dfs: dict[str, pd.DataFrame],
+    *,
+    title: str = "",
+    fig_path: str | None = None,
+    exp_factor: float = 0.9,
+    xlabel: str | None = None,
+    ylabel: str | None = None,
+    yscale: str = "linear",
+    ylim: tuple[float | None, float | None] | None = None,
+    ylim_truncate: bool = True, # only set ylim if the graph, by default, goes beyond those limits
+    run_name_mapping: dict[str, str] | None = None,
+    attr_name: str = "Val"
+):
     # Compact columns names (mean, std, mean exp, std exp)
     c_m = f"{attr_name}Mean"
     c_s = f"{attr_name}Std"
@@ -28,10 +41,21 @@ def plot_data(dfs: dict[str, pd.DataFrame], *, title: str = "", fig_path: str | 
     if run_name_mapping is not None:
         plt.legend([run_name_mapping[name] for name in dfs.keys()])
     plt.title(title)
+
     if xlabel is not None:
         plt.xlabel(xlabel)
     if ylabel is not None:
         plt.ylabel(ylabel)
+
+    if ylim is not None:
+        bottom, top = plt.ylim()
+        new_bottom, new_top = ylim
+        if new_bottom is not None and not (ylim_truncate and bottom >= new_bottom):
+            bottom = new_bottom
+        if new_top is not None and not (ylim_truncate and top <= new_top):
+            top = new_top
+        plt.ylim(bottom, top)
+
     plt.yscale(yscale)
     plt.tight_layout()
 

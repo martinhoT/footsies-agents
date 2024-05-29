@@ -37,7 +37,7 @@ def create_the_one_default(env: Env) -> TheOneAgent:
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 10
     
     result_path = path.splitext(__file__)[0]
 
@@ -82,7 +82,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "a2c": "A2C",
             "dqn": "DQN",
         },
-        attr_name="win_rate"
+        attr_name="win_rate",
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":

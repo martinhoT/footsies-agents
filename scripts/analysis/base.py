@@ -170,7 +170,7 @@ class Analyser:
         current_saved_battle_state_list = self.saved_battle_states_labels
         dpg.configure_item(self.dpg_saved_battle_state_list, items=current_saved_battle_state_list + [self.battle_state_label(battle_state)])
 
-    def load_battle_state(self, battle_state: FootsiesBattleState, require_update: bool = True):
+    def load_battle_state(self, battle_state: FootsiesBattleState, require_update: bool = True, battle_state_prev: FootsiesBattleState | None = None):
         if self.advancing:
             print("WARNING: you are attempting to load a custom battle state while the environment is advancing, you should stop it or multithreading shenanigans happen! We change stuff that is used in advance such as the previous_observation variable. To avoid problems, automatic advancing has been halted")
             self.stop_advancing()
@@ -190,8 +190,12 @@ class Analyser:
         
         # TODO: guarantee that p1MostRecentAction is the same as would be normally obtained (it's obtained differently in the game code)
         footsies_state = FootsiesState.from_battle_state(battle_state)
-        self.previous_observation = None
         self.current_observation = transformed_observation_from_root(self.env, self.footsies_env._extract_obs(footsies_state))
+        if battle_state_prev is not None:
+            footsies_state_prev = FootsiesState.from_battle_state(battle_state_prev)
+            self.previous_observation = transformed_observation_from_root(self.env, self.footsies_env._extract_obs(footsies_state_prev))
+        else:
+            self.previous_observation = None
         self.custom_state_update_callback(self)
 
     def load_battle_state_from_selected(self):

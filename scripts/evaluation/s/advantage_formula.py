@@ -5,7 +5,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 10
     
     result_path = path.splitext(__file__)[0]
     
@@ -41,6 +41,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "advantage_original":       "Original advantage",
             "advantage_alternative":    "Alternative advantage",
         },
+        ylim=(0, 1),
     )
 
     dfs = get_data(
@@ -64,6 +65,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "advantage_original":       "Original advantage",
             "advantage_alternative":    "Alternative advantage",
         },
+        ylim=(0, None),
     )
 
     dfs = get_data(

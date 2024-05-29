@@ -39,7 +39,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     raise RuntimeError("deprecated test")
     
     if seeds is None:
-        seeds = 2
+        seeds = 10
 
     env, _ = create_eval_env()
     assert env.observation_space.shape

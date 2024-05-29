@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 2
+        seeds = 10
 
     result_path = path.splitext(__file__)[0]
     
@@ -69,7 +69,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "reaction_correction_every_5":      "5-step model",
             "reaction_correction_every_15":     "15-step model",
             "reaction_correction_skippers":     "Multiple models"
-        }
+        },
+        ylim=(0, 1),
     )
 
     # Reaction time
@@ -168,6 +169,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     ax = sns.violinplot()
     ax.set_xlabel("Model")
     ax.set_ylabel("Time (ms)")
+    ax.set_ylim(bottom=0)
     # ax.hlines(16, -0.5, len(runs_raw) - 0.5, colors="red", linestyles="dashed", label="Reaction hard limit")
     
     plt.xticks(rotation=30)

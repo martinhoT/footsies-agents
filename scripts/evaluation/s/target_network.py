@@ -7,7 +7,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     raise RuntimeError("deprecated test")
     
     if seeds is None:
-        seeds = 3
+        seeds = 10
 
     runs_raw = {
         "target_network_0": 0,
@@ -49,6 +49,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "target_network_1000":  "Every 1000 updates",
             "target_network_10000": "Every 10000 updates",
         },
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ def model_init(observation_space_size: int, action_space_size: int, *,
     game_model_method: Literal["residual", "differences", "normal"] = "differences",
     
     # Learn what?
-    learn: Literal["gm", "no-gm", "none", "all"] = "no-gm",
+    learn: Literal["gm", "no-gm", "no-a2c", "none", "all"] = "no-gm",
 
     # Opponent modifiers
     rollback: bool = False,
@@ -264,6 +264,8 @@ def model_init(observation_space_size: int, action_space_size: int, *,
         learn_a2c, learn_game_model, learn_opponent_model = False, True, False
     elif learn == "no-gm":
         learn_a2c, learn_game_model, learn_opponent_model = True, False, True
+    elif learn == "no-a2c":
+        learn_a2c, learn_game_model, learn_opponent_model = False, True, True
     else:
         raise ValueError(f"wrong value for 'learn' ('{learn}'), should be one of ('all', 'none', 'gm', 'no-gm')")
 

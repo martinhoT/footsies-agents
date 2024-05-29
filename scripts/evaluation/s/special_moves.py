@@ -71,9 +71,9 @@ def create_agent(env: Env) -> TheOneAgent:
     return agent
 
 
-def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 10
     
     result_path = path.splitext(__file__)[0]
     
@@ -111,7 +111,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         run_name_mapping={
             "no_specials":  "Without special moves",
             "yes_specials": "With special moves",
-        }
+        },
+        ylim=(0, 1),
     )
 
     # Win rate against in-game bot after training against WhiffPunisher
@@ -148,6 +149,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "yes_specials_pretrain": "With special moves",
         },
         attr_name="win_rate",
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":

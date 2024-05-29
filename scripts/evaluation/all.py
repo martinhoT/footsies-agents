@@ -1,4 +1,5 @@
 import tyro
+import matplotlib
 from scripts.evaluation.s.accumulate_on_agent_frameskip import main as accumulate_on_agent_frameskip
 from scripts.evaluation.s.action_masking import main as action_masking
 from scripts.evaluation.s.actor_entropy_coef import main as actor_entropy_coef
@@ -16,9 +17,9 @@ from scripts.evaluation.s.opponent_model_entropy_coef import main as opponent_mo
 from scripts.evaluation.s.opponent_model_recurrent import main as opponent_model_recurrent
 from scripts.evaluation.s.reaction_time import main as reaction_time
 from scripts.evaluation.s.self_play import main as self_play
-from scripts.evaluation.s.sparse_vs_dense_reward_curriculum import main as sparse_vs_dense_reward_curriculum
-from scripts.evaluation.s.sparse_vs_dense_reward import main as sparse_vs_dense_reward
 from scripts.evaluation.s.softmax import main as softmax
+from scripts.evaluation.s.sparse_vs_dense_reward import main as sparse_vs_dense_reward
+from scripts.evaluation.s.sparse_vs_dense_reward_curriculum import main as sparse_vs_dense_reward_curriculum
 from scripts.evaluation.s.special_moves import main as special_moves
 from scripts.evaluation.s.target_network import main as target_network
 from scripts.evaluation.s.transfer_learning import main as transfer_learning
@@ -37,9 +38,6 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     # Priority
     "game_model_method":                    game_model_method,
     "reaction_time":                        reaction_time,
-    "transfer_learning":                    transfer_learning,
-    "opponent_model_recurrent":             opponent_model_recurrent,
-    "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
 
     "accumulate_on_agent_frameskip":        accumulate_on_agent_frameskip,
     "action_masking":                       action_masking,
@@ -54,16 +52,22 @@ EVALUATIONS: dict[str, EvaluationScript] = {
     "hitstop_freeze":                       hitstop_freeze,
     "opponent_model_dynamic_loss":          opponent_model_dynamic_loss,
     "opponent_model_entropy_coef":          opponent_model_entropy_coef,
-    "softmax":                              softmax,
+    "opponent_model_recurrent":             opponent_model_recurrent,
     "self_play":                            self_play,
+    "softmax":                              softmax,
     "sparse_vs_dense_reward":               sparse_vs_dense_reward,
+    "sparse_vs_dense_reward_curriculum":    sparse_vs_dense_reward_curriculum,
     "special_moves":                        special_moves,
     "target_network":                       target_network,
+    "transfer_learning":                    transfer_learning,
     "zero_sum":                             zero_sum,
 }
 
 
 def main(seeds: int | None = None, processes: int = 12, reverse: bool = False):
+    # Change matplotlib figure parameters
+    matplotlib.rcParams["savefig.format"] = "pdf"
+
     evals = EVALUATIONS.items()
     if reverse:
         evals = reversed(evals)

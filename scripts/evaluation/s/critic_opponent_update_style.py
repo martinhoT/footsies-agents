@@ -5,7 +5,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 6
+        seeds = 10
     
     runs_raw = {
         "critic_opponent_style_sarsa": {"critic_opponent_update": "sarsa"},
@@ -43,6 +43,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "critic_opponent_style_q_learning":     "Greedy",
             "critic_opponent_style_uniform":        "Uniform",
         },
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":

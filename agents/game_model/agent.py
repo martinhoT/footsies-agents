@@ -109,8 +109,14 @@ class GameModelAgent(FootsiesAgentBase):
         - `next_obs`: the predicted next observation
         - `steps`: how many timesteps in the future `next_obs` is from `obs`
         """
-        # Get the game model that fulfills the `n` request the greatest without overflowing
-        step_n, game_model = max(((step_n, g) for step_n, g in self._game_models if step_n <= n), key=lambda t: t[0])
+        # Get the models that can fulfill the request without overflowing
+        available_models = [(step_n, g) for step_n, g in self._game_models if step_n <= n]
+
+        if not available_models:
+            raise ValueError("there is no model capable of predicting at or under `n` timesteps ahead")
+
+        # Get the game model that fulfills the `n` request the best
+        step_n, game_model = max(available_models, key=lambda t: t[0])
 
         return game_model.predict(obs, p1_action, p2_action), step_n
 

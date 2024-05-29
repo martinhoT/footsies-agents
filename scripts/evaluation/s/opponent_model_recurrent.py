@@ -9,7 +9,7 @@ from gymnasium.spaces import Discrete
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False, do_dataset: bool = True):
     if seeds is None:
-        seeds = 3
+        seeds = 10
 
     result_basename = path.splitext(__file__)[0] + name_suffix
 
@@ -54,6 +54,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
         xlabel="Time step",
         ylabel="Win rate",
         run_name_mapping=run_name_mapping,
+        ylim=(0, 1),
     )
 
     # Losses on normal agent
@@ -95,7 +96,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 5, p
         exp_factor=0.9,
         xlabel="Time step",
         ylabel="Score",
-        run_name_mapping=run_name_mapping
+        run_name_mapping=run_name_mapping,
+        ylim=(0, 1),
     )
 
     # Losses on dataset

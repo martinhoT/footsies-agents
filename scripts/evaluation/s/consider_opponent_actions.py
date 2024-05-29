@@ -6,7 +6,7 @@ from args import CurriculumArgs
 
 def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 12, y: bool = False, do_curriculum: bool = False):
     if seeds is None:
-        seeds = 6
+        seeds = 10
 
     # Against in-game AI
 
@@ -42,6 +42,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
             "no_consider_opponent_actions":     "Do not consider opponent",
             "yes_consider_opponent_actions":    "Consider opponent",
         },
+        ylim=(0, 1),
     )
 
     # Against curriculum
@@ -87,6 +88,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
                 "yes_consider_opponent_actions_curriculum_opp":         "Consider opponent (model)",
                 "yes_consider_opponent_actions_curriculum_perfect":     "Consider opponent (oracle)",
             },
+            ylim=(0, 1),
         )
 
 if __name__ == "__main__":

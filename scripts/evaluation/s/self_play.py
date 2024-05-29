@@ -85,6 +85,7 @@ def perform_run(
         xlabel="Episode",
         ylabel="Time steps",
         run_name_mapping=None,
+        ylim=(0, None),
     )
 
     # Episode truncations
@@ -111,9 +112,9 @@ def perform_run(
         run_name_mapping=None,
     )
 
-def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 12, y: bool = False, just_pre_train: bool = False):
+def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 12, y: bool = False, just_pre_train: bool = False, do_sparse: bool = False):
     if seeds is None:
-        seeds = 6
+        seeds = 10
     
     result_path = path.splitext(__file__)[0]
 
@@ -123,7 +124,8 @@ def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 1
         main_training(quick_train_args(
             agent_args=quick_agent_args("curriculum_PT", model="to"),
             env_args=quick_env_args(
-                curriculum=CurriculumArgs(True)
+                curriculum=CurriculumArgs(True),
+                kwargs={"dense_reward": True},
             ),
             timesteps=None,
         ))
@@ -143,14 +145,15 @@ def main(seeds: int | None = None, timesteps: int = int(3e6), processes: int = 1
         result_path=result_path,
     )
 
-    perform_run(
-        dense_reward=False,
-        timesteps=timesteps,
-        seeds=seeds,
-        processes=processes,
-        y=y,
-        result_path=result_path,
-    )  
+    if do_sparse:
+        perform_run(
+            dense_reward=False,
+            timesteps=timesteps,
+            seeds=seeds,
+            processes=processes,
+            y=y,
+            result_path=result_path,
+        )  
 
 if __name__ == "__main__":
     import tyro

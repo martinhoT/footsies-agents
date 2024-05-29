@@ -8,7 +8,7 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     raise RuntimeError("deprecated test")
 
     if seeds is None:
-        seeds = 6
+        seeds = 10
     
     result_path = path.splitext(__file__)[0]
 
@@ -46,7 +46,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         run_name_mapping={
             "softmax_yes":    "Softmax",
             "softmax_no":     "No softmax",
-        }
+        },
+        ylim=(0, 1),
     )
 
     # Policy entropy
@@ -72,7 +73,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         run_name_mapping={
             "softmax_yes":    "Softmax",
             "softmax_no":     "No softmax",
-        }
+        },
+        ylim=(0, None),
     )
 
     # Opp model score
@@ -98,7 +100,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         run_name_mapping={
             "softmax_yes":    "Softmax",
             "softmax_no":     "No softmax",
-        }
+        },
+        ylim=(0, 1),
     )
 
     # Win rate against curriculum
@@ -138,7 +141,8 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
         run_name_mapping={
             "softmax_yes_curriculum":    "Softmax",
             "softmax_no_curriculum":     "No softmax",
-        }
+        },
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":

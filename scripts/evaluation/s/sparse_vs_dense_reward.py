@@ -5,7 +5,7 @@ from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_tra
 
 def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 12, y: bool = False):
     if seeds is None:
-        seeds = 3
+        seeds = 10
     
     runs_raw = {
         "sparse_reward": {"dense_reward": False},
@@ -39,7 +39,8 @@ def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 1
         run_name_mapping={
             "sparse_reward":    "Sparse reward",
             "dense_reward":     "Dense reward",
-        }
+        },
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":

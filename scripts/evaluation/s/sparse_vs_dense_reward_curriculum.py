@@ -8,7 +8,7 @@ def main(seeds: int | None = None, timesteps: int | None = None, processes: int 
     raise RuntimeError("deprecated test")
     
     if seeds is None:
-        seeds = 3
+        seeds = 10
     
     result_path = path.splitext(__file__)[0]
     
@@ -63,7 +63,8 @@ def main(seeds: int | None = None, timesteps: int | None = None, processes: int 
         run_name_mapping={
             "sparse_reward_curriculum":    "Sparse reward",
             "dense_reward_curriculum":     "Dense reward",
-        }
+        },
+        ylim=(0, 1),
     )
 
 if __name__ == "__main__":
