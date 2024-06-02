@@ -3,7 +3,7 @@ import random
 from os import path
 from scripts.evaluation.data_collectors import get_data, get_data_custom_loop
 from scripts.evaluation.plotting import plot_data
-from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args
+from scripts.evaluation.utils import quick_agent_args, quick_env_args, quick_train_args, create_agent_the_one
 from scripts.evaluation.custom_loop import WinRateObserver, AgentCustomRun, PreCustomLoop
 from args import FootsiesSimpleActionsArgs, EnvArgs
 from agents.the_one.agent import TheOneAgent
@@ -14,8 +14,6 @@ from tqdm import trange
 from agents.action import ActionMap
 from functools import partial
 from typing import cast
-from models import to_
-from gymnasium.spaces import Discrete
 
 
 def env_with_specials(specials: bool = False) -> EnvArgs:
@@ -58,17 +56,6 @@ def train_against_whiff_punisher(agent: TheOneAgent, env: Env, footsies_env: Foo
         agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
         obs, info = next_obs, next_info
-
-def create_agent(env: Env) -> TheOneAgent:
-    assert env.observation_space.shape
-    assert isinstance(env.action_space, Discrete)
-
-    agent, _ = to_(
-        observation_space_size=env.observation_space.shape[0],
-        action_space_size=int(env.action_space.n),
-    )
-
-    return agent
 
 
 def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 12, y: bool = False):
@@ -118,7 +105,7 @@ def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 1
     # Win rate against in-game bot after training against WhiffPunisher
 
     runs_custom = {k + "_pretrain": AgentCustomRun(
-        agent=create_agent,
+        agent=create_agent_the_one,
         opponent=None,
         env_args=env_args,
         pre_loop=cast(PreCustomLoop, partial(train_against_whiff_punisher, timesteps=timesteps, label=k)),

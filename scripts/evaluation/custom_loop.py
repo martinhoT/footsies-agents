@@ -22,6 +22,7 @@ from footsies_gym.envs.footsies import FootsiesEnv
 from dataclasses import dataclass
 from args import EnvArgs
 from copy import deepcopy
+from warnings import warn
 import logging
 
 
@@ -307,6 +308,7 @@ class AgentCustomRun:
     opponent:       Callable[[dict, dict], tuple[bool, bool, bool]] | None
     env_args:       EnvArgs | None = None
     pre_loop:       PreCustomLoop | None = None
+    skip_freeze:    bool = True
     """This is a loop that is run before the main one, but on which data won't be collected"""
 
 
@@ -331,6 +333,9 @@ def custom_loop(
         # The 'run.agent' will be shared between instances of the same run with different seeds!
         # We need to make a distinct copy here.
         agent = deepcopy(run.agent)
+
+    if run.skip_freeze and isinstance(agent, BaseAlgorithm):
+        warn(f"Requested to run '{label}' with an SB3 algorithm, but while skipping hitstop/blockstop freeze. Note that skipping freeze has no effect on SB3 algorithms")
 
     if run.pre_loop is not None:
         run.pre_loop(agent, env, footsies_env, seed)
@@ -369,6 +374,7 @@ def custom_loop_footsies(
     observer: O,
     initial_seed: int | None = 0,
     timesteps: int = int(1e6),
+    skip_freeze: bool = True,
 ) -> O:
 
     process_id: int = mp.current_process()._identity[0] - 1
@@ -390,11 +396,12 @@ def custom_loop_footsies(
         reward = float(reward)
 
         # Skip hitstop freeze
-        while next_info["p1_hitstun"] and next_info["p2_hitstun"] and obs.isclose(next_obs).all().item():
-            action = agent.act(next_obs, next_info)
-            next_obs, r, terminated, truncated, next_info = env.step(action)
-            r = float(r)
-            reward += r
+        if skip_freeze:
+            while next_info["p1_hitstun"] and next_info["p2_hitstun"] and obs.isclose(next_obs).all().item():
+                action = agent.act(next_obs, next_info)
+                next_obs, r, terminated, truncated, next_info = env.step(action)
+                r = float(r)
+                reward += r
 
         agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
         observer.update(step, obs, next_obs, reward, terminated, truncated, info, next_info, agent)

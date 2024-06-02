@@ -22,6 +22,7 @@ from scripts.analysis.base import editable_dpg_value
 from os import path
 from opponents import curriculum
 from opponents.base import Opponent
+from footsies_gym.moves import FOOTSIES_MOVE_INDEX_TO_MOVE, FootsiesMove
 import tyro
 import logging
 import warnings
@@ -47,6 +48,36 @@ class TheOneAnalyserManager:
     agent_name = cast(str, editable_dpg_value("agent_name"))
     reaction_time = cast(str, editable_dpg_value("reaction_time"))
 
+    react_p1_guard_perceived = editable_dpg_value("react_p1_guard_perceived")
+    react_p2_guard_perceived = editable_dpg_value("react_p2_guard_perceived")
+    react_p1_position_perceived = editable_dpg_value("react_p1_position_perceived")
+    react_p2_position_perceived = editable_dpg_value("react_p2_position_perceived")
+    react_p1_move_perceived = property(
+        fget=lambda self: FootsiesMove[dpg.get_value("react_p1_move_perceived")],
+        fset=lambda self, value: dpg.set_value("react_p1_move_perceived", value.name)
+    )
+    react_p2_move_perceived = property(
+        fget=lambda self: FootsiesMove[dpg.get_value("react_p2_move_perceived")],
+        fset=lambda self, value: dpg.set_value("react_p2_move_perceived", value.name)
+    )
+    react_p1_move_progress_perceived = editable_dpg_value("react_p1_move_progress_perceived")
+    react_p2_move_progress_perceived = editable_dpg_value("react_p2_move_progress_perceived")
+
+    react_p1_guard_predicted = editable_dpg_value("react_p1_guard_predicted")
+    react_p2_guard_predicted = editable_dpg_value("react_p2_guard_predicted")
+    react_p1_position_predicted = editable_dpg_value("react_p1_position_predicted")
+    react_p2_position_predicted = editable_dpg_value("react_p2_position_predicted")
+    react_p1_move_predicted = property(
+        fget=lambda self: FootsiesMove[dpg.get_value("react_p1_move_predicted")],
+        fset=lambda self, value: dpg.set_value("react_p1_move_predicted", value.name)
+    )
+    react_p2_move_predicted = property(
+        fget=lambda self: FootsiesMove[dpg.get_value("react_p2_move_predicted")],
+        fset=lambda self, value: dpg.set_value("react_p2_move_predicted", value.name)
+    )
+    react_p1_move_progress_predicted = editable_dpg_value("react_p1_move_progress_predicted")
+    react_p2_move_progress_predicted = editable_dpg_value("react_p2_move_progress_predicted")
+    
     def _save_agent(self, s, a, u):
         folder_path = path.join("runs", "analysis_" + self.agent_name)
         self.agent.save(folder_path)
@@ -56,12 +87,6 @@ class TheOneAnalyserManager:
             dpg.add_text("Predicted opponent action:")
             dpg.add_text("X", tag="predicted_opponent_action")
 
-        react = self.the_one.reaction_time_emulator
-        if react is not None:
-            with dpg.group(horizontal=True):
-                dpg.add_text("Reaction time:")
-                dpg.add_slider_int(min_value=react.min_time, max_value=react.max_time, width=200, tag="reaction_time", enabled=False)
-
         dpg.add_checkbox(label="Online learning", default_value=False, tag="the_one_online_learning")
 
         with dpg.group(horizontal=True):
@@ -70,6 +95,68 @@ class TheOneAnalyserManager:
             dpg.add_button(label="Save", callback=self._save_agent)
 
         dpg.add_separator()
+
+        react = self.the_one.reaction_time_emulator
+        if react is not None:
+            with dpg.group(horizontal=True):
+                dpg.add_text("Reaction time:")
+                dpg.add_slider_int(min_value=react.min_time, max_value=react.max_time, width=200, tag="reaction_time", enabled=False)
+
+            # Perceived state
+            dpg.add_text("Perceived state:")
+            with dpg.table():
+                dpg.add_table_column(label="Property")
+                dpg.add_table_column(label="P1")
+                dpg.add_table_column(label="P2")
+
+                with dpg.table_row():
+                    dpg.add_text("Guard")
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="react_p1_guard_perceived", enabled=False)
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="react_p2_guard_perceived", enabled=False)
+                
+                with dpg.table_row():
+                    dpg.add_text("Position")
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="react_p1_position_perceived", enabled=False)
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="react_p2_position_perceived", enabled=False)
+
+                with dpg.table_row():
+                    dpg.add_text("Move")
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="react_p1_move_perceived", enabled=False)
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="react_p2_move_perceived", enabled=False)
+
+                with dpg.table_row():
+                    dpg.add_text("Move progress")
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="react_p1_move_progress_perceived", enabled=False)
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="react_p2_move_progress_perceived", enabled=False)
+
+            # Predicted current state
+            dpg.add_text("Predicted current state:")
+            with dpg.table():
+                dpg.add_table_column(label="Property")
+                dpg.add_table_column(label="P1")
+                dpg.add_table_column(label="P2")
+
+                with dpg.table_row():
+                    dpg.add_text("Guard")
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="react_p1_guard_predicted", enabled=False)
+                    dpg.add_slider_int(min_value=0, max_value=3, tag="react_p2_guard_predicted", enabled=False)
+                
+                with dpg.table_row():
+                    dpg.add_text("Position")
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="react_p1_position_predicted", enabled=False)
+                    dpg.add_slider_float(min_value=-4.6, max_value=4.6, tag="react_p2_position_predicted", enabled=False)
+
+                with dpg.table_row():
+                    dpg.add_text("Move")
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="react_p1_move_predicted", enabled=False)
+                    dpg.add_combo([m.name for m in FOOTSIES_MOVE_INDEX_TO_MOVE], tag="react_p2_move_predicted", enabled=False)
+
+                with dpg.table_row():
+                    dpg.add_text("Move progress")
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="react_p1_move_progress_predicted", enabled=False)
+                    dpg.add_slider_float(min_value=0, max_value=1, tag="react_p2_move_progress_predicted", enabled=False)
+
+            dpg.add_separator()    
 
         self.qlearner_manager.add_custom_elements(analyser)
 
@@ -90,10 +177,6 @@ class TheOneAnalyserManager:
         if self.game_model_manager is not None:
             self.game_model_manager.on_state_update(analyser)
 
-        react = self.the_one.reaction_time_emulator
-        if react is not None and react.previous_reaction_time is not None:
-            self.reaction_time = react.previous_reaction_time
-
         if dpg.get_value("the_one_online_learning") and analyser.most_recent_transition is not None and not analyser.use_custom_action:
             obs, next_obs, reward, terminated, truncated, info, next_info = analyser.most_recent_transition.as_tuple()
             self.r += reward
@@ -105,6 +188,45 @@ class TheOneAnalyserManager:
                     next_info["next_opponent_policy"] = self.custom_opponent.peek(next_info)
                 self.agent.update(obs, next_obs, self.r, terminated, truncated, info, next_info)
                 self.r = 0
+        
+        react = self.the_one.reaction_time_emulator
+        if react is not None and react.previous_reaction_time is not None:
+            prev_reaction_time = react.previous_reaction_time
+            pred, reaction_time, _, perc = react.react
+
+            # Just making sure "react" as a cached_property is working as intended
+            assert reaction_time == prev_reaction_time
+            self.reaction_time = reaction_time
+
+            perc = perc.squeeze(0)
+            p1_move_index_perceived = int(perc[2:17].argmax().item())
+            p2_move_index_perceived = int(perc[17:32].argmax().item())
+            p1_move_perceived = ActionMap.move_from_move_index(p1_move_index_perceived)
+            p2_move_perceived = ActionMap.move_from_move_index(p2_move_index_perceived)
+
+            self.react_p1_guard_perceived = round(perc[0].item() * 3)
+            self.react_p2_guard_perceived = round(perc[1].item() * 3)
+            self.react_p1_move_perceived = p1_move_perceived
+            self.react_p2_move_perceived = p2_move_perceived
+            self.react_p1_move_progress_perceived = perc[32].item()
+            self.react_p2_move_progress_perceived = perc[33].item()
+            self.react_p1_position_perceived = perc[34].item() * 4.6
+            self.react_p2_position_perceived = perc[35].item() * 4.6
+
+            pred = pred.squeeze(0)
+            p1_move_index_predicted = int(pred[2:17].argmax().item())
+            p2_move_index_predicted = int(pred[17:32].argmax().item())
+            p1_move_predicted = ActionMap.move_from_move_index(p1_move_index_predicted)
+            p2_move_predicted = ActionMap.move_from_move_index(p2_move_index_predicted)
+
+            self.react_p1_guard_predicted = round(pred[0].item() * 3)
+            self.react_p2_guard_predicted = round(pred[1].item() * 3)
+            self.react_p1_move_predicted = p1_move_predicted
+            self.react_p2_move_predicted = p2_move_predicted
+            self.react_p1_move_progress_predicted = pred[32].item()
+            self.react_p2_move_progress_predicted = pred[33].item()
+            self.react_p1_position_predicted = pred[34].item() * 4.6
+            self.react_p2_position_predicted = pred[35].item() * 4.6
     
     @property
     def the_one(self) -> TheOneAgent:

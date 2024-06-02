@@ -4,6 +4,9 @@ from gymnasium import Env
 from footsies_gym.envs.footsies import FootsiesEnv
 from args import AgentArgs, CurriculumArgs, DIAYNArgs, EnvArgs, FootsiesSimpleActionsArgs, MainArgs, MiscArgs, SelfPlayArgs
 from main import create_env
+from models import to_
+from gymnasium.spaces import Discrete
+from agents.the_one.agent import TheOneAgent
 
 
 def obs_to_torch(o) -> torch.Tensor:
@@ -28,6 +31,22 @@ def create_eval_env(
     footsies_env = cast(FootsiesEnv, env.unwrapped)
 
     return env, footsies_env
+
+
+def create_agent_the_one(env: Env, parameters: dict | None = None) -> TheOneAgent:
+    if parameters is None:
+        parameters = {}
+
+    assert env.observation_space.shape
+    assert isinstance(env.action_space, Discrete)
+
+    agent, _ = to_(
+        observation_space_size=env.observation_space.shape[0],
+        action_space_size=int(env.action_space.n),
+        **parameters,
+    )
+
+    return agent
 
 
 def quick_agent_args(name: str, model: str = "to", kwargs: dict[str, Any] | None = None) -> AgentArgs:

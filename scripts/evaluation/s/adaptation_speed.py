@@ -175,13 +175,13 @@ def main(
         row = opponent_labels.index(training_opponent_label)
         col = opponent_labels.index(evaluation_opponent_label) - 1
         
-        time_taken = timesteps
-        # TODO: is this the same as taking the mean of the indices at the individual seeds?
-        for _, r in df.iterrows():
-            if r["win_rateMean"] > wr_thresh:
-                time_taken = r["Idx"]
-                break
-        
+        time_taken = 0
+        for seed in range(seeds):
+            d = df[df[f"win_rate{seed}"] > wr_thresh]
+            l = d.iloc[0, :]["Idx"] if len(d) > 0 else timesteps
+            time_taken += l
+        time_taken /= seeds
+
         mtx[row, col] = time_taken / timesteps
 
     # Plot the heatmap
