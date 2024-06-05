@@ -79,8 +79,12 @@ class GameModelAnalyserManager:
         
         analyser.load_battle_state(analyser.custom_battle_state, require_update=False)
 
+    def apply_and_advance(self, analyser: Analyser):
+        self.load_predicted_battle_state(analyser)
+        analyser.advance()
+
     def add_custom_elements(self, analyser: Analyser):
-        dpg.add_text("Prediced current state based on the previous observation")
+        dpg.add_text("Predicted current state based on the previous observation")
         # Predicted state
         with dpg.table():
             dpg.add_table_column(label="Property")
@@ -134,6 +138,7 @@ class GameModelAnalyserManager:
 
         with dpg.group(horizontal=True):
             dpg.add_button(label="Apply", callback=lambda: self.load_predicted_battle_state(analyser=analyser))
+            dpg.add_button(label="Apply and advance", callback=lambda: self.apply_and_advance(analyser=analyser))
 
     def _toggle_prediction_method(self):
         if self.complete_prediction_method:

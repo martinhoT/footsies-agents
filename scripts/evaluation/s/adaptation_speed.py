@@ -1,7 +1,7 @@
 import random
 import torch as T
+import matplotlib.pyplot as plt
 from os import path
-from agents.base import FootsiesAgentBase
 from scripts.evaluation.utils import create_eval_env
 from scripts.evaluation.data_collectors import get_data_custom_loop
 from scripts.evaluation.custom_loop import WinRateObserver, PreCustomLoop, AgentCustomRun
@@ -90,10 +90,12 @@ def heatplot(mtx: T.Tensor, xlabels: list[str], ylabels: list[str], fig_path: st
     
     fig = ax.get_figure()
     assert fig is not None
+    fig.set_size_inches(5.5, 5.5)
     fig.tight_layout()
     if fig_path is not None:
         fig.savefig(fig_path)
     fig.clear()
+    plt.close(fig)
 
 
 def main(
@@ -105,7 +107,7 @@ def main(
     wr_thresh: float = 0.8,
 ):
     if seeds is None:
-        seeds = 3
+        seeds = 6
 
     result_path = path.splitext(__file__)[0]
 
@@ -122,6 +124,9 @@ def main(
         opponent_labels = ["Blank", "NSpammer", "BSpammer"]
     else:
         opponent_labels = ["Blank", "NSpammer", "BSpammer", "NSpecialSpammer", "BSpecialSpammer", "WhiffPunisher", "Bot"]
+
+    # The same as the opponent labels list but the "Bot" label is substituted with "In-game AI" for consistency with the thesis doc
+    opponent_labels_consistent = (opponent_labels[:-1] + ["In-game AI"]) if not small else opponent_labels
 
     agent_regimes: list[AgentTrainingRegime] = []
     for training_opponent_label in opponent_labels:
@@ -177,7 +182,7 @@ def main(
         
         time_taken = 0
         for seed in range(seeds):
-            d = df[df[f"win_rate{seed}"] > wr_thresh]
+            d = df[(df[f"win_rate{seed}"] > wr_thresh) & (df["Idx"] >= int(1e5))]
             l = d.iloc[0, :]["Idx"] if len(d) > 0 else timesteps
             time_taken += l
         time_taken /= seeds
@@ -188,8 +193,8 @@ def main(
     heatplot(
         mtx=mtx,
         fig_path=result_path + "_time",
-        xlabels=opponent_labels[1:],
-        ylabels=opponent_labels,
+        xlabels=opponent_labels_consistent[1:],
+        ylabels=opponent_labels_consistent,
         color_reverse=True,
     )
 
@@ -207,8 +212,8 @@ def main(
     heatplot(
         mtx=mtx,
         fig_path=result_path + "_wr_final",
-        xlabels=opponent_labels[1:],
-        ylabels=opponent_labels,
+        xlabels=opponent_labels_consistent[1:],
+        ylabels=opponent_labels_consistent,
     )
 
     # Maximum win rate
@@ -225,8 +230,8 @@ def main(
     heatplot(
         mtx=mtx,
         fig_path=result_path + "_wr_max",
-        xlabels=opponent_labels[1:],
-        ylabels=opponent_labels,
+        xlabels=opponent_labels_consistent[1:],
+        ylabels=opponent_labels_consistent,
     )
 
     # Average win rate
@@ -243,8 +248,8 @@ def main(
     heatplot(
         mtx=mtx,
         fig_path=result_path + "_wr_avg",
-        xlabels=opponent_labels[1:],
-        ylabels=opponent_labels,
+        xlabels=opponent_labels_consistent[1:],
+        ylabels=opponent_labels_consistent,
     )
 
 if __name__ == "__main__":

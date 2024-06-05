@@ -1,4 +1,6 @@
 import torch
+import numpy as np
+import random
 import dearpygui.dearpygui as dpg
 from gymnasium.wrappers.flatten_observation import FlattenObservation
 from footsies_gym.envs.footsies import FootsiesEnv
@@ -245,7 +247,15 @@ def main(
     include_gm: bool = False,
     dense_reward: bool = False,
     blank: bool = False,
+    load_gm: str | None = None,
+    allow_specials: bool = False,
+    seed: int | None = None,
 ):
+    if seed:
+        torch.manual_seed(seed)
+        random.seed(seed)
+        np.random.seed(seed)
+
     if not custom and not load:
         raise ValueError("should either use a custom agent or load one")
     
@@ -285,7 +295,7 @@ def main(
                     footsies_env,
                 )
             ),
-            agent_allow_special_moves=False,
+            agent_allow_special_moves=allow_specials,
         ),
         lambda o: torch.from_numpy(o).float().unsqueeze(0),
     )
@@ -296,6 +306,10 @@ def main(
         agent, loggables = to_(
             env.observation_space.shape[0],
             int(env.action_space.n),
+            use_game_model=True,
+            game_model_skippers=False,
+            game_model_single_skipper=1,
+            game_model_method="residual",
         )
     
     else:
@@ -327,6 +341,10 @@ def main(
 
     if load and not blank:
         load_agent(agent, agent_name)
+
+    if load_gm and not blank:
+        assert agent.gm is not None, "The agent does not even have a game model, cannot load one"
+        agent.gm.load(load_gm)
 
     if opponent == "self":
         custom_opponent = agent.extract_opponent(env)

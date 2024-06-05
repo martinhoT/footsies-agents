@@ -1,3 +1,4 @@
+import pandas as pd
 from os import path
 from models import game_model_
 from scripts.evaluation.data_collectors import get_data, get_data_dataset
@@ -6,7 +7,10 @@ from scripts.evaluation.utils import quick_agent_args, quick_train_args, create_
 from scripts.evaluation.custom_loop import GameModelObserver
 from gymnasium.spaces import Discrete
 
-def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False):
+def sliced_df(df: pd.DataFrame, start: int | None = int(5e4)) -> pd.DataFrame:
+    return df[df["Idx"] >= start].copy()
+
+def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 10, processes: int = 12, shuffle: bool = True, name_suffix: str = "", y: bool = False, slice_loss: int | None = None):
     if seeds is None:
         seeds = 10
     
@@ -65,6 +69,10 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 10, 
         if dfs is None:
             return
 
+        if slice_loss is not None:
+            for name, df in dfs.items():
+                dfs[name] = sliced_df(df, start=slice_loss)
+
         plot_data(
             dfs=dfs,
             title="",
@@ -115,6 +123,10 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), epochs: int = 10, 
 
         if dfs is None:
             return
+
+        if slice_loss is not None:
+            for name, df in dfs.items():
+                dfs[name] = sliced_df(df, start=slice_loss)
 
         # The residual model stopped sooner for some reason, so we cut the other runs at the same point as well
         max_idx = min(df["Idx"].max() for df in dfs.values())

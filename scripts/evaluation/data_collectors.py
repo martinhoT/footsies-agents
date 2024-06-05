@@ -367,6 +367,8 @@ def get_data(data: str, runs: dict[str, MainArgs], seeds: int = 10, processes: i
         merged_df["ValMean"] = merged_df[seed_columns].mean(axis=1)
         merged_df["ValStd"] = merged_df[seed_columns].std(axis=1)
 
+        merged_df.sort_values(by="Idx", ascending=True, inplace=True)
+
         dfs[run_name] = merged_df
     
     return dfs

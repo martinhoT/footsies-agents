@@ -136,7 +136,7 @@ class TheOneAgent(FootsiesAgentTorch):
         # Correct the observation if needed.
         # Note that we need to have the up-to-date opponent model hidden state.
         if self.reaction_time_emulator is not None:
-            predicted_obs, reaction_time, opponent_model_hidden_state = self.reaction_time_emulator.react
+            predicted_obs, reaction_time, opponent_model_hidden_state, _ = self.reaction_time_emulator.react
             self._cumulative_reaction_time += reaction_time
             self._cumulative_reaction_time_n += 1
             

@@ -42,7 +42,6 @@ def main(seeds: int | None = None, timesteps: int = int(1e6), processes: int = 1
     result_path = path.splitext(__file__)[0]
 
     runs_raw: dict[str, Callable[[Env], FootsiesAgentBase | BaseAlgorithm]] = {
-        # "agent": partial(create_agent_with_parameters, **get_best_params("to")),
         "agent": create_the_one_default,
         "ppo": partial(create_ppo_with_parameters, **get_best_params("sb3_ppo")),
         "a2c": partial(create_a2c_with_parameters, **get_best_params("sb3_a2c")),

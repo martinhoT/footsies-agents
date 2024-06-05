@@ -117,7 +117,7 @@ class ReactionTimeEmulator:
     # Having this "cache" stuff allows the "_prev" variables to not be updated everytime react is called, and only after new registrations.
     @cached_property
     @T.no_grad
-    def react(self) -> tuple[T.Tensor, int, T.Tensor | None | Literal["auto"]]:
+    def react(self) -> tuple[T.Tensor, int, T.Tensor | None | Literal["auto"], T.Tensor]:
         """
         Perform a reaction, receiving a delayed observation (or a corrected one if a multi-step predictor is used) according to the current reaction time.
         
@@ -144,6 +144,7 @@ class ReactionTimeEmulator:
 
         # Query a delayed observation with the computed reaction time.
         obs, skipped_obs, info, skipped_info = self.perceive(reaction_time, self._prev_reaction_time)
+        perceived_obs = obs
 
         prev_obs_delayed = self._prev_obs_delayed
         self._prev_obs_delayed = obs
@@ -159,7 +160,7 @@ class ReactionTimeEmulator:
         self._prev_reaction_time = reaction_time
         self._prev_obs = obs
 
-        return obs, reaction_time, opp_hs
+        return obs, reaction_time, opp_hs, perceived_obs
 
     def reset(self, state: T.Tensor, info: dict):
         """Reset the internal state of the reaction time emulator, which should be done at the start of every episode."""

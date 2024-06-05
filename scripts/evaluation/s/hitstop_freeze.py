@@ -142,6 +142,32 @@ def main(seeds: int | None = None, timesteps: int = int(2e6), processes: int = 1
         }
     )
 
+    # Policy entropy
+
+    dfs = get_data(
+        data="learningpolicy_entropy",
+        runs=runs,
+        seeds=seeds,
+        processes=processes,
+        y=y,
+    )
+
+    if dfs is None:
+        return
+
+    plot_data(
+        dfs=dfs,
+        title="",
+        fig_path=result_path + "_ent",
+        exp_factor=0.9,
+        xlabel="Time step",
+        ylabel="Entropy",
+        run_name_mapping={
+            "hitstop_keep":     "Hitstop/blockstop kept",
+            "hitstop_ignore":   "Hitstop/blockstop skipped",
+        }
+    )
+
     # Against WhiffPunisher
 
     runs_whiff_raw = {
