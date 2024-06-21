@@ -127,9 +127,10 @@ class ReactionTimeEmulator:
 
         Returns
         -------
-        - `observation`: the observation that was perceived, `reaction_time` time steps late
+        - `observation`: the observation that was perceived, `reaction_time` time steps late, and perhaps corrected
         - `reaction_time`: the computed reaction time
         - `opponent_hidden_state`: the hidden state of the opponent model at `observation`, useful for further inference with the opponent model
+        - `perceived_observation`: the observation that was perceived, `reaction_time` time steps late (no correction)
         """
         # Calculate the decision distribution.
         opp_probs, hs = self._opponent.network.probabilities(self._prev_obs, self._opp_hs, temperature=self._temperature)

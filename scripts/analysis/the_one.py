@@ -79,10 +79,28 @@ class TheOneAnalyserManager:
     )
     react_p1_move_progress_predicted = editable_dpg_value("react_p1_move_progress_predicted")
     react_p2_move_progress_predicted = editable_dpg_value("react_p2_move_progress_predicted")
+    react_actor_critic_state: Literal["Current", "Delayed", "Corrected"] = editable_dpg_value("react_actor_critic_state") # type: ignore
     
     def _save_agent(self, s, a, u):
         folder_path = path.join("runs", "analysis_" + self.agent_name)
         self.agent.save(folder_path)
+
+    def _update_actor_critic_tables(self):
+        emulator = self.the_one.reaction_time_emulator
+        if emulator is None:
+            return
+
+        if self.react_actor_critic_state == "Current":
+            obs = emulator._states[-1]
+        elif self.react_actor_critic_state == "Delayed":
+            _, _, _, obs = emulator.react
+        elif self.react_actor_critic_state == "Corrected":    
+            obs, _, _, _ = emulator.react
+
+        self.qlearner_manager.update_policy_distribution(obs)
+        self.qlearner_manager.update_q_table_plot(obs)
+
+        self.qlearner_manager.freeze_tables = self.react_actor_critic_state != "Corrected"
 
     def add_custom_elements(self, analyser: Analyser):
         with dpg.group(horizontal=True):
@@ -158,6 +176,10 @@ class TheOneAnalyserManager:
                     dpg.add_slider_float(min_value=0, max_value=1, tag="react_p1_move_progress_predicted", enabled=False)
                     dpg.add_slider_float(min_value=0, max_value=1, tag="react_p2_move_progress_predicted", enabled=False)
 
+            with dpg.group(horizontal=True):
+                dpg.add_text("Actor-critic state:")
+                dpg.add_combo(["Current", "Delayed", "Corrected"], default_value="Corrected", tag="react_actor_critic_state", callback=lambda s, a, u: self._update_actor_critic_tables())
+
             dpg.add_separator()    
 
         self.qlearner_manager.add_custom_elements(analyser)
@@ -174,6 +196,8 @@ class TheOneAnalyserManager:
 
     def on_state_update(self, analyser: Analyser):
         self.qlearner_manager.on_state_update(analyser)
+        if self.qlearner_manager.freeze_tables:
+            self._update_actor_critic_tables()
         if self.mimic_manager is not None:
             self.mimic_manager.on_state_update(analyser)
         if self.game_model_manager is not None:

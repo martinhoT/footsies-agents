@@ -123,6 +123,7 @@ class QLearnerAnalyserManager:
         self.policy_plot = PlayerActionMatrix(action_dim, opponent_action_dim, auto_scale=False)
         
         self.current_observation = None
+        self._freeze_tables = False
 
         # DPG items
         self.attribute_modifier_window: int | str = ""
@@ -177,6 +178,17 @@ class QLearnerAnalyserManager:
         policy_distribution = self.agent._actor.probabilities(obs, None).numpy(force=True).flatten()
         self.policy_plot.update(policy_distribution)
 
+    def update_q_table_plot(self, obs: torch.Tensor):
+        if isinstance(self.learner.critic, QFunctionNetwork):
+            q_values = self.learner.critic.q(obs, use_target_network=self.show_target_network)
+        else:
+            q_values = self.learner.critic.q(obs)
+        self.q_table_plot.update(q_values.numpy(force=True))
+
+        if self.q_table_update_frequency_plot is not None and isinstance(self.agent.learner.critic, QFunctionTable):
+            update_frequency = self.agent.learner.critic.update_frequency(obs)
+            self.q_table_update_frequency_plot.update(update_frequency.numpy(force=True))
+
     def on_state_update(self, analyser: Analyser):
         obs = cast(torch.Tensor, analyser.current_observation)
 
@@ -194,14 +206,7 @@ class QLearnerAnalyserManager:
 
             self.agent.update(obs, next_obs, reward, terminated, truncated, info, next_info)
 
-        if isinstance(self.learner.critic, QFunctionNetwork):
-            q_values = self.learner.critic.q(obs, use_target_network=self.show_target_network)
-        else:
-            q_values = self.learner.critic.q(obs)
-        self.q_table_plot.update(q_values.numpy(force=True))
-        if self.q_table_update_frequency_plot is not None and isinstance(self.agent.learner.critic, QFunctionTable):
-            update_frequency = self.agent.learner.critic.update_frequency(obs)
-            self.q_table_update_frequency_plot.update(update_frequency.numpy(force=True))
+        self.update_q_table_plot(obs)
 
         if isinstance(self.learner.critic, QFunctionTable) and self.current_observation_index is not None:
             dpg.set_value(self.current_observation_index, str(self.learner.critic._obs_idx(obs)))
@@ -210,6 +215,15 @@ class QLearnerAnalyserManager:
         
         if self.agent.current_action is not None:
             dpg.set_value(self.current_action, ActionMap.simple_as_move(self.agent.current_action).name)
+    
+    @property
+    def freeze_tables(self) -> bool:
+        """Whether the Q-value and policy table updates are frozen."""
+        return self._freeze_tables
+
+    @freeze_tables.setter
+    def freeze_tables(self, value: bool):
+        self._freeze_tables = value
 
 
 if __name__ == "__main__":
