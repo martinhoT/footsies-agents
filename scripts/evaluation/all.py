@@ -64,9 +64,9 @@ EVALUATIONS: dict[str, EvaluationScript] = {
 }
 
 
-def main(seeds: int | None = None, processes: int = 12, reverse: bool = False):
+def main(seeds: int | None = None, processes: int = 12, reverse: bool = False, fmt: str = "pdf"):
     # Change matplotlib figure parameters
-    matplotlib.rcParams["savefig.format"] = "pdf"
+    matplotlib.rcParams["savefig.format"] = fmt
 
     evals = EVALUATIONS.items()
     if reverse:
